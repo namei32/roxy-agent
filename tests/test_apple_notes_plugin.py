@@ -116,7 +116,7 @@ def test_renderer_rejects_oversize_and_unknown_template() -> None:
 
 def test_recovery_marker_cannot_be_disabled() -> None:
     with pytest.raises(ValueError):
-        AppleNotesConfig(include_provenance_footer=False)
+        AppleNotesConfig.model_validate({"include_provenance_footer": False})
 
 
 @pytest.mark.asyncio
