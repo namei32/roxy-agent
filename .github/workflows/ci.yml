@@ -71,6 +71,9 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
+      - name: Install test system dependencies
+        run: sudo apt-get update && sudo apt-get install --yes ripgrep
+
       - name: Install dependencies
         run: |
           python -m venv .venv
@@ -99,6 +102,7 @@ jobs:
         timeout-minutes: 10
         env:
           PYTHONWARNINGS: "ignore:.*AbstractEventLoopPolicy.*:DeprecationWarning"
+          TZ: "Asia/Shanghai"
         run: |
           .venv/bin/pytest -q -W error tests/
 
