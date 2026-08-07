@@ -107,6 +107,11 @@
     "plugin/install": {
       "additionalProperties": false,
       "properties": {
+        "activateExclusive": {
+          "default": false,
+          "title": "Activateexclusive",
+          "type": "boolean"
+        },
         "marketplace": {
           "default": "local",
           "maxLength": 128,
