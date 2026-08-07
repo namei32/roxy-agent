@@ -35,7 +35,7 @@ default_memory:audit-dirty-memories
 ## 固定脚本
 
 ```bash
-python3 skills/default_memory:audit-dirty-memories/scripts/sample_memory_for_audit.py sample --drift-dir .
+python3 skills/audit-dirty-memories/scripts/sample_memory_for_audit.py sample --drift-dir .
 ```
 
 脚本只做抽样：读取 `skill_journal` 里 `entry_type=memory_audited` 的 key，
@@ -64,7 +64,7 @@ run
 
 ```json
 {
-  "command": "python3 skills/default_memory:audit-dirty-memories/scripts/sample_memory_for_audit.py sample --drift-dir .",
+  "command": "python3 skills/audit-dirty-memories/scripts/sample_memory_for_audit.py sample --drift-dir .",
   "cwd": ".",
   "description": "抽样一条待审计记忆",
   "timeout": 60,
