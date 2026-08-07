@@ -31,6 +31,7 @@
 | [0023](0023-akashic-tokens-own-material-3-semantics.md) | accepted | Akashic Token 拥有 Material 3 设计语义 | WEBUI-001～WEBUI-007 |
 | [0024](0024-plugin-self-validation-uses-stable-and-latest.md) | accepted | 插件自验证使用 stable/latest 与 session 级并发 | RUN-007、OUT-004、PLG-013、CTRL-003、TST-001～TST-006 |
 | [0025](0025-codex-style-same-turn-input.md) | accepted | 中断后的新 Attempt 续接同一 Logical Interaction | SES-007～SES-008、MEM-010～MEM-011、RUN-008、OUT-005 |
+| [0026](0026-scoped-interview-images-may-auto-export-to-notes.md) | accepted | 面经图片只在持久窄域授权内自动导出到 Notes | CAP-002～CAP-003、PLG-001～PLG-010、SES-005～SES-006 |
 
 ## 新增规则
 

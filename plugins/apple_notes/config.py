@@ -18,9 +18,12 @@ class AppleNotesConfig(BaseModel):
     max_markdown_characters: int = Field(default=50_000, ge=200, le=200_000)
     max_html_bytes: int = Field(default=200_000, ge=1_000, le=1_000_000)
     script_timeout_seconds: float = Field(default=15.0, ge=1.0, le=60.0)
-    default_template: Literal["knowledge_card", "flow_chain", "plain"] = (
-        "knowledge_card"
-    )
+    default_template: Literal[
+        "knowledge_card",
+        "flow_chain",
+        "interview_review",
+        "plain",
+    ] = "knowledge_card"
     # The footer carries the durable operation marker used to reconcile an
     # uncertain external write.  Allowing it to be disabled would make safe
     # recovery impossible, so API v0.1 deliberately requires it.

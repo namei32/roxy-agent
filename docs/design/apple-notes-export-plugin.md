@@ -16,7 +16,9 @@
 全文读取、正文替换、移动、共享、删除或自动导出。
 
 Consolidation、TurnCommitted、Scheduler、Proactive 和后台任务不会自动触发 Notes 写入。内容
-“重要”不能代替当前用户消息中的明确保存要求。
+“重要”不能代替明确授权。默认入口仍要求当前用户消息明确保存；[0026](../decisions/0026-scoped-interview-images-may-auto-export-to-notes.md)
+另行允许 Interview Coach 在默认关闭、固定 Telegram 私聊 chat、高置信度面经分类和可撤销配置
+同时成立时复用同一 Notes 提交协议。该授权不得被其他插件或运行模式继承。
 
 ## 2. 当前调用链与 owner
 

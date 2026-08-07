@@ -378,7 +378,9 @@ async def test_telegram_channel_paths(monkeypatch: pytest.MonkeyPatch, tmp_path:
     monkeypatch.setattr(mod, "send_thinking_block", AsyncMock())
     await channel.start()
     assert len(channel._app.handlers) == 5
-    assert [cmd.command for cmd in channel._app.bot.set_my_commands.await_args.args[0]] == [
+    assert [
+        cmd.command for cmd in channel._app.bot.set_my_commands.await_args.args[0]
+    ] == [
         "memorystatus",
         "kvcache",
         "stop",
@@ -393,7 +395,13 @@ async def test_telegram_channel_paths(monkeypatch: pytest.MonkeyPatch, tmp_path:
             Path(path).write_text("x", encoding="utf-8")
 
     channel._app.bot.get_file = AsyncMock(
-        side_effect=[_File(".jpg"), _File(".txt"), _File(".jpg"), _File(".txt"), _File(".md")]
+        side_effect=[
+            _File(".jpg"),
+            _File(".txt"),
+            _File(".jpg"),
+            _File(".txt"),
+            _File(".md"),
+        ]
     )
     context = SimpleNamespace(bot=channel._app.bot)
     reply_photo = [SimpleNamespace(file_id="p1")]
@@ -476,7 +484,9 @@ async def test_telegram_channel_paths(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
     doc_update = SimpleNamespace(
         effective_message=SimpleNamespace(
-            document=SimpleNamespace(file_id="doc1", file_name="a.md", mime_type="text/plain"),
+            document=SimpleNamespace(
+                file_id="doc1", file_name="a.md", mime_type="text/plain"
+            ),
             caption="",
             reply_to_message=None,
         ),
@@ -500,14 +510,18 @@ async def test_telegram_channel_paths(monkeypatch: pytest.MonkeyPatch, tmp_path:
     await channel.send_file("123", str(sample), name="doc.txt", caption="cap")
     await channel.send_image("123", "https://example.com/img.jpg")
     await channel.send_image("123", str(sample))
-    await channel._on_response(OutboundMessage(channel="telegram", chat_id="123", content="pong"))
+    await channel._on_response(
+        OutboundMessage(channel="telegram", chat_id="123", content="pong")
+    )
     assert mod.send_markdown.await_count == 3
     assert mod.send_stream_markdown.await_count == 1
     sender = channel.create_stream_sender("123")
     assert sender is not None
     await sender({"thinking_delta": "先想一点"})
     await sender("流式片段")
-    await sender("继续补充一大段内容继续补充一大段内容继续补充一大段内容继续补充一大段内容")
+    await sender(
+        "继续补充一大段内容继续补充一大段内容继续补充一大段内容继续补充一大段内容"
+    )
     assert channel._app.bot.send_message.await_count >= 1
     before_send = channel._app.bot.send_message.await_count
     before_edit = channel._app.bot.edit_message_text.await_count
@@ -552,7 +566,10 @@ async def test_telegram_channel_paths(monkeypatch: pytest.MonkeyPatch, tmp_path:
         )
     ]
     assert any(
-        "临时回复" in text and "事件片段" in text and "思考过程" in text and "事件思考" in text
+        "临时回复" in text
+        and "事件片段" in text
+        and "思考过程" in text
+        and "事件思考" in text
         for text in live_texts
     )
     assert any(
@@ -687,7 +704,9 @@ async def test_telegram_channel_paths(monkeypatch: pytest.MonkeyPatch, tmp_path:
     last_edit = channel._app.bot.edit_message_text.await_args_list[-1].kwargs["text"]
     assert last_edit == "final"
 
-    channel._app.bot.send_chat_action = AsyncMock(side_effect=[mod.TimedOut("x"), mod.NetworkError("x"), None])
+    channel._app.bot.send_chat_action = AsyncMock(
+        side_effect=[mod.TimedOut("x"), mod.NetworkError("x"), None]
+    )
     monkeypatch.setattr(mod.asyncio, "sleep", AsyncMock(return_value=None))
     await channel._safe_send_typing(context, 123)
     channel._app.bot.send_chat_action = AsyncMock(side_effect=RuntimeError("boom"))
@@ -707,6 +726,179 @@ async def test_telegram_channel_paths(monkeypatch: pytest.MonkeyPatch, tmp_path:
         await asyncio.gather(*created)
     channel._on_polling_error(mod.TelegramError("warn"))
     await channel.stop()
+
+
+@pytest.mark.asyncio
+async def test_telegram_photo_album_is_one_ordered_inbound_batch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    mod = _import_telegram_channel(monkeypatch)
+    monkeypatch.setattr(mod, "_MEDIA_GROUP_SETTLE_SECONDS", 0.01)
+    bus = _Bus()
+    channel = mod.TelegramChannel(
+        "token",
+        bus,
+        _SessionManager(tmp_path),
+        allow_from=["1"],
+    )
+    channel._telegram_outbound_limiter = mod.TelegramOutboundLimiter(
+        send_interval_s=0.0,
+        edit_interval_s=0.0,
+        typing_interval_s=0.0,
+        global_interval_s=0.0,
+        retry_padding_s=0.0,
+    )
+
+    class _File:
+        def __init__(self, payload: str) -> None:
+            self.payload = payload
+
+        async def download_to_drive(self, path: str) -> None:
+            Path(path).write_text(self.payload, encoding="utf-8")
+
+    async def _get_file(file_id: str) -> _File:
+        return _File(file_id)
+
+    channel._app.bot.get_file = AsyncMock(side_effect=_get_file)
+    context = SimpleNamespace(bot=channel._app.bot)
+
+    def _photo_update(message_id: int, file_id: str, caption: str):
+        return SimpleNamespace(
+            effective_message=SimpleNamespace(
+                photo=[SimpleNamespace(file_id=file_id)],
+                message_id=message_id,
+                media_group_id="album-7",
+                caption=caption,
+                reply_to_message=None,
+            ),
+            effective_chat=SimpleNamespace(id=123),
+            effective_user=SimpleNamespace(id=1, username="Alice"),
+        )
+
+    await channel._on_photo(_photo_update(11, "eleven", ""), context)
+    await channel._on_photo(_photo_update(10, "ten", "一批面经"), context)
+
+    assert bus.inbound == []
+    await asyncio.sleep(0.03)
+
+    assert len(bus.inbound) == 1
+    inbound = bus.inbound[0]
+    assert inbound.content == "一批面经"
+    assert [Path(path).read_text(encoding="utf-8") for path in inbound.media] == [
+        "ten",
+        "eleven",
+    ]
+    assert inbound.metadata["telegram_media_group_id"] == "album-7"
+    assert inbound.metadata["telegram_media_group_size"] == 2
+    assert inbound.metadata["telegram_message_ids"] == [10, 11]
+    assert inbound.metadata["client_message_id"] == ("telegram-media-group:123:album-7")
+
+
+@pytest.mark.asyncio
+async def test_telegram_stop_flushes_unsettled_photo_album(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    mod = _import_telegram_channel(monkeypatch)
+    monkeypatch.setattr(mod, "_MEDIA_GROUP_SETTLE_SECONDS", 60.0)
+    bus = _Bus()
+    channel = mod.TelegramChannel(
+        "token",
+        bus,
+        _SessionManager(tmp_path),
+        allow_from=["1"],
+    )
+    channel._telegram_outbound_limiter = mod.TelegramOutboundLimiter(
+        send_interval_s=0.0,
+        edit_interval_s=0.0,
+        typing_interval_s=0.0,
+        global_interval_s=0.0,
+        retry_padding_s=0.0,
+    )
+
+    class _File:
+        async def download_to_drive(self, path: str) -> None:
+            Path(path).write_text("photo", encoding="utf-8")
+
+    channel._app.bot.get_file = AsyncMock(return_value=_File())
+    update = SimpleNamespace(
+        effective_message=SimpleNamespace(
+            photo=[SimpleNamespace(file_id="one")],
+            message_id=20,
+            media_group_id="album-stop",
+            caption="",
+            reply_to_message=None,
+        ),
+        effective_chat=SimpleNamespace(id=123),
+        effective_user=SimpleNamespace(id=1, username="Alice"),
+    )
+
+    await channel.start()
+    await channel._on_photo(update, SimpleNamespace(bot=channel._app.bot))
+    await channel.stop()
+
+    assert len(bus.inbound) == 1
+    assert bus.inbound[0].metadata["telegram_media_group_size"] == 1
+
+
+@pytest.mark.asyncio
+async def test_telegram_text_after_album_keeps_channel_order(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    mod = _import_telegram_channel(monkeypatch)
+    monkeypatch.setattr(mod, "_MEDIA_GROUP_SETTLE_SECONDS", 60.0)
+    bus = _Bus()
+    channel = mod.TelegramChannel(
+        "token",
+        bus,
+        _SessionManager(tmp_path),
+        allow_from=["1"],
+    )
+    channel._telegram_outbound_limiter = mod.TelegramOutboundLimiter(
+        send_interval_s=0.0,
+        edit_interval_s=0.0,
+        typing_interval_s=0.0,
+        global_interval_s=0.0,
+        retry_padding_s=0.0,
+    )
+
+    class _File:
+        async def download_to_drive(self, path: str) -> None:
+            Path(path).write_text("photo", encoding="utf-8")
+
+    channel._app.bot.get_file = AsyncMock(return_value=_File())
+    context = SimpleNamespace(bot=channel._app.bot)
+    photo = SimpleNamespace(
+        effective_message=SimpleNamespace(
+            photo=[SimpleNamespace(file_id="one")],
+            message_id=30,
+            media_group_id="album-order",
+            caption="面经",
+            reply_to_message=None,
+        ),
+        effective_chat=SimpleNamespace(id=123),
+        effective_user=SimpleNamespace(id=1, username="Alice"),
+    )
+    text = SimpleNamespace(
+        effective_message=SimpleNamespace(
+            text="这是补充说明",
+            message_id=31,
+            reply_to_message=None,
+        ),
+        effective_chat=SimpleNamespace(id=123),
+        effective_user=SimpleNamespace(id=1, username="Alice"),
+    )
+
+    await channel._on_photo(photo, context)
+    await channel._on_message(text, context)
+
+    assert [item.content for item in bus.inbound] == ["面经", "这是补充说明"]
+
+
+def test_telegram_reply_text_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    mod = _import_telegram_channel(monkeypatch)
 
     merged, meta = mod._build_inbound_text_with_reply("hi", None)
     assert (merged, meta) == ("hi", {})
@@ -868,7 +1060,9 @@ async def test_telegram_conflict_log_throttled(
 
 
 @pytest.mark.asyncio
-async def test_telegram_live_task_index_releases_finished_session(monkeypatch: pytest.MonkeyPatch):
+async def test_telegram_live_task_index_releases_finished_session(
+    monkeypatch: pytest.MonkeyPatch,
+):
     mod = _import_telegram_channel(monkeypatch)
     channel = object.__new__(mod.TelegramChannel)
     channel._live_tasks = set()
@@ -902,6 +1096,7 @@ async def test_qq_channel_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     mod = _import_qq_channel(monkeypatch)
     bus = _Bus()
     session_manager = _SessionManager(tmp_path)
+
     class _Response:
         status_code = 200
         headers = {"content-type": "image/png"}
@@ -946,7 +1141,10 @@ async def test_qq_channel_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     assert sys.modules["ncatbot.utils"].ncatbot_config.root == "1"
     assert channel._is_allowed("1") is True
     assert channel._is_allowed("2") is False
-    assert mod._extract_cq_images("hello [CQ:image,url=http://x/a.jpg]") == ("hello", ["http://x/a.jpg"])
+    assert mod._extract_cq_images("hello [CQ:image,url=http://x/a.jpg]") == (
+        "hello",
+        ["http://x/a.jpg"],
+    )
 
     scheduled = []
     real_create_task = asyncio.create_task
@@ -955,7 +1153,9 @@ async def test_qq_channel_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
         scheduled.append(real_create_task(coro))
         return SimpleNamespace(result=lambda timeout=None: True)
 
-    monkeypatch.setattr(mod.asyncio, "run_coroutine_threadsafe", _run_coroutine_threadsafe)
+    monkeypatch.setattr(
+        mod.asyncio, "run_coroutine_threadsafe", _run_coroutine_threadsafe
+    )
     await channel.start()
     assert bus.outbound[0][0] == "qq"
 
@@ -965,10 +1165,18 @@ async def test_qq_channel_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     channel._run_on_bot_loop = AsyncMock(side_effect=_drain)
 
     await channel._bot.startup_handler(SimpleNamespace())
-    await channel._bot.private_handler(SimpleNamespace(user_id="1", raw_message="hi [CQ:image,url=http://x/a.jpg]"))
-    await channel._bot.group_handler(SimpleNamespace(group_id="100", user_id="1", raw_message="hello"))
-    await channel._bot.private_handler(SimpleNamespace(user_id="1", raw_message="/stop"))
-    await channel._bot.group_handler(SimpleNamespace(group_id="100", user_id="1", raw_message="/stop"))
+    await channel._bot.private_handler(
+        SimpleNamespace(user_id="1", raw_message="hi [CQ:image,url=http://x/a.jpg]")
+    )
+    await channel._bot.group_handler(
+        SimpleNamespace(group_id="100", user_id="1", raw_message="hello")
+    )
+    await channel._bot.private_handler(
+        SimpleNamespace(user_id="1", raw_message="/stop")
+    )
+    await channel._bot.group_handler(
+        SimpleNamespace(group_id="100", user_id="1", raw_message="/stop")
+    )
     if scheduled:
         await asyncio.gather(*scheduled)
     assert len(bus.inbound) == 2
@@ -983,7 +1191,9 @@ async def test_qq_channel_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     await channel.send("gqq:100", "group pong")
     await channel.send_file("1", str(sample), name="x.bin")
     await channel.send_image("1", str(sample))
-    await channel._on_response(OutboundMessage(channel="qq", chat_id="gqq:100", content="reply"))
+    await channel._on_response(
+        OutboundMessage(channel="qq", chat_id="gqq:100", content="reply")
+    )
     assert channel._api.calls
     assert mod._is_local(str(sample)) is True
     assert mod._is_local("https://example.com/x.jpg") is False

@@ -10,8 +10,7 @@ import html
 import json
 import time
 from collections.abc import Coroutine
-from dataclasses import dataclass
-from pathlib import Path
+from dataclasses import dataclass, field
 from typing import Any
 
 from telegram import BotCommand, Update
@@ -70,6 +69,7 @@ _LIVE_STREAM_MIN_CHARS = 200
 # 原生会持续退避重试 TelegramError（含 Conflict，上限 30s），callback 无需干预 polling，
 # 这里只做日志节流，避免持续冲突时刷屏。
 _CONFLICT_LOG_INTERVAL_SECONDS = 60
+_MEDIA_GROUP_SETTLE_SECONDS = 0.8
 
 
 @dataclass
@@ -79,6 +79,12 @@ class _ToolLiveLine:
     intent: str
     target: str
     status: str = "running"
+
+
+@dataclass
+class _PendingMediaGroup:
+    parts: dict[int, InboundMessage] = field(default_factory=dict)
+    flush_task: asyncio.Task[None] | None = None
 
 
 class TelegramChannel:
@@ -111,9 +117,7 @@ class TelegramChannel:
         self._app = Application.builder().token(token).build()
         self._bot_commands = bot_commands or []
         self._app.add_handler(CommandHandler("stop", self._on_stop_command))
-        self._app.add_handler(
-            MessageHandler(filters.COMMAND, self._on_command)
-        )
+        self._app.add_handler(MessageHandler(filters.COMMAND, self._on_command))
         self._app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_message)
         )
@@ -131,7 +135,9 @@ class TelegramChannel:
         self._last_conflict_log_at: float | None = None
         self._telegram_outbound_limiter = TelegramOutboundLimiter()
         self._active_streams: dict[str, TelegramStreamMessage] = {}
-        self._live_edit_queue = TelegramLiveEditQueue(limiter=self._telegram_outbound_limiter)
+        self._live_edit_queue = TelegramLiveEditQueue(
+            limiter=self._telegram_outbound_limiter
+        )
         self._live_messages: dict[str, TelegramLiveTextMessage] = {}
         self._reply_buffers: dict[str, str] = {}
         self._thinking_buffers: dict[str, str] = {}
@@ -140,6 +146,9 @@ class TelegramChannel:
         self._tool_lines: dict[str, list[_ToolLiveLine]] = {}
         self._live_tasks: set[asyncio.Task[None]] = set()
         self._live_tasks_by_session: dict[str, set[asyncio.Task[None]]] = {}
+        self._pending_media_groups: dict[tuple[str, str], _PendingMediaGroup] = {}
+        self._media_group_lock = asyncio.Lock()
+        self._media_group_tasks: set[asyncio.Task[None]] = set()
 
     @property
     def bot(self):
@@ -171,7 +180,11 @@ class TelegramChannel:
         task.add_done_callback(_done)
 
     async def _cancel_live_tasks(self, session_key: str) -> None:
-        tasks = [task for task in self._live_tasks_by_session.get(session_key, set()) if not task.done()]
+        tasks = [
+            task
+            for task in self._live_tasks_by_session.get(session_key, set())
+            if not task.done()
+        ]
         if not tasks:
             return
         for task in tasks:
@@ -220,6 +233,7 @@ class TelegramChannel:
         updater = self._app.updater
         if updater and updater.running:
             await updater.stop()
+        await self._flush_all_media_groups()
         await self._app.stop()
         await self._app.shutdown()
         logger.info("TelegramChannel 已停止")
@@ -277,6 +291,8 @@ class TelegramChannel:
                 f"[telegram] 重复消息已忽略  chat_id={chat.id}  message_id={msg.message_id}"
             )
             return
+
+        await self._flush_media_groups_for_chat(str(chat.id))
 
         preview = msg.text[:60] + "..." if len(msg.text) > 60 else msg.text
         logger.info(
@@ -391,6 +407,8 @@ class TelegramChannel:
             )
             return
 
+        await self._flush_media_groups_for_chat(str(chat.id))
+
         await self._bus.publish_inbound(
             InboundMessage(
                 channel=self._channel,
@@ -423,6 +441,13 @@ class TelegramChannel:
                 f"[telegram] 重复图片消息已忽略  chat_id={chat.id}  message_id={msg.message_id}"
             )
             return
+
+        media_group_id = str(getattr(msg, "media_group_id", "") or "").strip()
+        current_group = (str(chat.id), media_group_id) if media_group_id else None
+        await self._flush_media_groups_for_chat(
+            str(chat.id),
+            except_key=current_group,
+        )
 
         chat_id_str = str(chat.id)
         await self._remember_username(chat_id_str, user.username)
@@ -457,18 +482,192 @@ class TelegramChannel:
                 logger.warning(
                     f"[telegram] 被回复图片下载失败  chat_id={chat.id}  err={e}"
                 )
+        message_id = int(msg.message_id)
+        inbound = InboundMessage(
+            channel=self._channel,
+            sender=str(user.id),
+            chat_id=str(chat.id),
+            content=inbound_text,
+            media=media,
+            metadata={
+                "username": user.username or "",
+                "telegram_message_id": message_id,
+                **reply_meta,
+            },
+        )
+        if media_group_id:
+            inbound.metadata["telegram_media_group_id"] = media_group_id
+            await self._queue_media_group(
+                media_group_id=media_group_id,
+                message_id=message_id,
+                inbound=inbound,
+            )
+            return
+        inbound.metadata["client_message_id"] = f"telegram-photo:{chat.id}:{message_id}"
+        await self._bus.publish_inbound(inbound)
+
+    async def _queue_media_group(
+        self,
+        *,
+        media_group_id: str,
+        message_id: int,
+        inbound: InboundMessage,
+    ) -> None:
+        key = (inbound.chat_id, media_group_id)
+        async with self._media_group_lock:
+            pending = self._pending_media_groups.setdefault(
+                key,
+                _PendingMediaGroup(),
+            )
+            if pending.flush_task is not None:
+                pending.flush_task.cancel()
+            pending.parts[message_id] = inbound
+            pending.flush_task = asyncio.create_task(
+                self._flush_media_group_after_settle(key),
+                name=f"telegram-media-group:{inbound.chat_id}:{media_group_id}",
+            )
+            self._track_media_group_task(pending.flush_task)
+
+    def _track_media_group_task(self, task: asyncio.Task[None]) -> None:
+        self._media_group_tasks.add(task)
+
+        def _done(done_task: asyncio.Task[None]) -> None:
+            self._media_group_tasks.discard(done_task)
+            try:
+                _ = done_task.result()
+            except asyncio.CancelledError:
+                return
+            except Exception as error:
+                logger.warning("[telegram] 相册聚合任务失败: %s", error)
+
+        task.add_done_callback(_done)
+
+    async def _flush_media_group_after_settle(
+        self,
+        key: tuple[str, str],
+    ) -> None:
+        try:
+            await asyncio.sleep(_MEDIA_GROUP_SETTLE_SECONDS)
+        except asyncio.CancelledError:
+            return
+        current = asyncio.current_task()
+        async with self._media_group_lock:
+            pending = self._pending_media_groups.get(key)
+            if pending is None or pending.flush_task is not current:
+                return
+            _ = self._pending_media_groups.pop(key)
+        await self._publish_media_group(key, pending)
+
+    async def _flush_all_media_groups(self) -> None:
+        async with self._media_group_lock:
+            groups = list(self._pending_media_groups.items())
+            self._pending_media_groups.clear()
+        tasks = [
+            pending.flush_task
+            for _, pending in groups
+            if pending.flush_task is not None
+        ]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        in_flight = [task for task in self._media_group_tasks if not task.done()]
+        if in_flight:
+            await asyncio.gather(*in_flight, return_exceptions=True)
+        for key, pending in groups:
+            await self._publish_media_group(key, pending)
+
+    async def _flush_media_groups_for_chat(
+        self,
+        chat_id: str,
+        *,
+        except_key: tuple[str, str] | None = None,
+    ) -> None:
+        async with self._media_group_lock:
+            except_pending = (
+                self._pending_media_groups.get(except_key)
+                if except_key is not None
+                else None
+            )
+            except_task = (
+                except_pending.flush_task if except_pending is not None else None
+            )
+            groups = [
+                (key, pending)
+                for key, pending in self._pending_media_groups.items()
+                if key[0] == chat_id and key != except_key
+            ]
+            for key, _ in groups:
+                _ = self._pending_media_groups.pop(key)
+        cancelled = [
+            pending.flush_task
+            for _, pending in groups
+            if pending.flush_task is not None
+        ]
+        for task in cancelled:
+            task.cancel()
+        if cancelled:
+            await asyncio.gather(*cancelled, return_exceptions=True)
+        prefix = f"telegram-media-group:{chat_id}:"
+        in_flight = [
+            task
+            for task in self._media_group_tasks
+            if not task.done()
+            and task not in cancelled
+            and task is not except_task
+            and task.get_name().startswith(prefix)
+        ]
+        if in_flight:
+            await asyncio.gather(*in_flight, return_exceptions=True)
+        for key, pending in groups:
+            await self._publish_media_group(key, pending)
+
+    async def _publish_media_group(
+        self,
+        key: tuple[str, str],
+        pending: _PendingMediaGroup,
+    ) -> None:
+        parts = [pending.parts[item] for item in sorted(pending.parts)]
+        if not parts:
+            return
+        first = parts[0]
+        metadata: dict[str, Any] = {}
+        for part in parts:
+            for name, value in part.metadata.items():
+                if (
+                    name not in metadata
+                    or metadata[name] == ""
+                    or metadata[name] is None
+                ):
+                    metadata[name] = value
+        message_ids = sorted(pending.parts)
+        metadata.update(
+            {
+                "telegram_media_group_id": key[1],
+                "telegram_media_group_size": len(parts),
+                "telegram_message_ids": message_ids,
+                "client_message_id": f"telegram-media-group:{key[0]}:{key[1]}",
+            }
+        )
+        content = next((part.content for part in parts if part.content), "")
+        media = [item for part in parts for item in part.media]
         await self._bus.publish_inbound(
             InboundMessage(
-                channel=self._channel,
-                sender=str(user.id),
-                chat_id=str(chat.id),
-                content=inbound_text,
+                channel=first.channel,
+                sender=first.sender,
+                chat_id=first.chat_id,
+                content=content,
+                timestamp=min(part.timestamp for part in parts),
                 media=media,
-                metadata={
-                    "username": user.username or "",
-                    **reply_meta,
-                },
+                metadata=metadata,
             )
+        )
+        logger.info(
+            "[telegram] 相册已聚合  chat_id=%s  media_group_id=%s  messages=%d  media=%d",
+            key[0],
+            key[1],
+            len(parts),
+            len(media),
         )
 
     async def _on_document(
@@ -486,6 +685,8 @@ class TelegramChannel:
                 f"[telegram] 拒绝未授权用户  id={user.id}  username=@{user.username}"
             )
             return
+
+        await self._flush_media_groups_for_chat(str(chat.id))
 
         chat_id_str = str(chat.id)
         await self._remember_username(chat_id_str, user.username)
@@ -560,7 +761,9 @@ class TelegramChannel:
         if cid <= 0:
             return None
         key = str(cid)
-        stream = TelegramStreamMessage(self._app.bot, cid, self._telegram_outbound_limiter)
+        stream = TelegramStreamMessage(
+            self._app.bot, cid, self._telegram_outbound_limiter
+        )
         self._active_streams[key] = stream
 
         async def _push(delta: dict[str, str] | str) -> None:
@@ -602,7 +805,9 @@ class TelegramChannel:
         next_at = self._thinking_live_next_at.get(event.session_key, 0.0)
         if now < next_at and live_len - last_len < _LIVE_STREAM_MIN_CHARS:
             return
-        self._thinking_live_next_at[event.session_key] = now + _LIVE_STREAM_MIN_INTERVAL_S
+        self._thinking_live_next_at[event.session_key] = (
+            now + _LIVE_STREAM_MIN_INTERVAL_S
+        )
         self._live_last_lengths[event.session_key] = live_len
         self._start_live_task(
             event.session_key,
@@ -944,7 +1149,9 @@ def _format_tool_target(arguments: dict[str, object]) -> str:
     for key in primary_keys:
         value = arguments.get(key)
         if value is not None and value != "":
-            return f"\"{_clip_inline(_stringify_tool_value(value), _TOOL_PREVIEW_LIMIT)}\""
+            return (
+                f'"{_clip_inline(_stringify_tool_value(value), _TOOL_PREVIEW_LIMIT)}"'
+            )
     return ""
 
 
@@ -969,7 +1176,7 @@ def _clip_inline(text: str, limit: int) -> str:
 def _tail_text(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
-    return "..." + text[-(limit - 3):]
+    return "..." + text[-(limit - 3) :]
 
 
 def _live_buffer_len(reply: str, thinking: str) -> int:

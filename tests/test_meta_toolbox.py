@@ -23,18 +23,32 @@ class _MemoryEngineStub:
         return MemoryToolProfile(
             recall=MemoryToolSpec(
                 description="test",
-                parameters={"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+                parameters={
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
             ),
             forget=MemoryToolSpec(
                 description="test",
-                parameters={"type": "object", "properties": {"ids": {"type": "array", "items": {"type": "string"}}}, "required": ["ids"]},
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "ids": {"type": "array", "items": {"type": "string"}}
+                    },
+                    "required": ["ids"],
+                },
                 risk="write",
             ),
             tools=(
                 MemoryToolSpec(
                     name="reinforce_memory",
                     description="test",
-                    parameters={"type": "object", "properties": {"note": {"type": "string"}}, "required": []},
+                    parameters={
+                        "type": "object",
+                        "properties": {"note": {"type": "string"}},
+                        "required": [],
+                    },
                     risk="write",
                 ),
             ),
@@ -126,6 +140,33 @@ def test_common_meta_toolset_registers_load_skill(tmp_path):
 
     assert tools.has_tool("load_skill")
     assert "load_skill" in result.always_on_names
+
+
+def test_common_meta_toolset_limits_vision_reads_to_workspace(tmp_path):
+    tools = ToolRegistry()
+    session_store = SessionStore(tmp_path / "sessions.db")
+    readonly_tools = {
+        "web_search": WebSearchTool(),
+        "web_fetch": WebFetchTool(requester=cast(Any, object())),
+        "read_file": ReadFileTool(),
+        "list_dir": ListDirTool(),
+    }
+
+    CommonMetaToolsetProvider(readonly_tools).register(
+        tools,
+        ToolsetDeps(
+            config=None,
+            workspace=tmp_path,
+            session_store=session_store,
+            vl_provider=cast(Any, object()),
+            vl_model="vision-model",
+        ),
+    )
+    session_store.close()
+
+    vision = tools.get_tool("read_image_vision")
+    assert vision is not None
+    assert getattr(vision, "_allowed_dir") == tmp_path
 
 
 def test_common_meta_toolset_rejects_missing_required_dependencies(tmp_path):
