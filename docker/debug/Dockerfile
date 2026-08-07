@@ -8,13 +8,15 @@ ENV HOME=/sandbox/home \
 
 WORKDIR /app
 
+# pacman's syscall download sandbox is unavailable under Docker Desktop's
+# linux/amd64 emulation on Apple Silicon; the build container remains isolated.
 RUN printf '%s\n' \
         'Server = https://mirrors.ustc.edu.cn/archlinux/$repo/os/$arch' \
         'Server = https://mirrors.tuna.tsinghua.edu.cn/archlinux/$repo/os/$arch' \
         > /etc/pacman.d/mirrorlist \
-    && pacman -Sy --noconfirm archlinux-keyring \
-    && pacman -Syu --noconfirm \
-    && pacman -S --noconfirm --needed \
+    && pacman -Sy --noconfirm --disable-sandbox-syscalls archlinux-keyring \
+    && pacman -Syu --noconfirm --disable-sandbox-syscalls \
+    && pacman -S --noconfirm --disable-sandbox-syscalls --needed \
         base-devel \
         ca-certificates \
         curl \
