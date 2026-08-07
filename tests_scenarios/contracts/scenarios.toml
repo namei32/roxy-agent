@@ -385,7 +385,7 @@ requirements = ["CAP-002", "CAP-004", "PLG-001", "PLG-004", "SEC-010", "TST-001"
 groups = ["mac_notes_bridge"]
 environment = "public_clean_workspace"
 timeout_seconds = 120
-command = ["python", "-m", "pytest", "-q", "tests/semantic/test_companion_contract.py::test_mac_notes_bridge_rejects_offline_queue_mutant", "tests/test_notes_bridge.py", "tests/test_apple_notes_plugin.py"]
+command = ["python", "-m", "pytest", "-q", "tests/semantic/test_companion_contract.py::test_mac_notes_bridge_rejects_offline_queue_mutant", "tests/test_plugin_runtime_control.py", "tests/test_plugin_install.py", "tests/test_plugin_owned_config.py"]
 observes = ["authenticated_connection", "heartbeat_freshness", "proposal_ack", "commit_boundary", "offline_payload_queue", "cloud_ledger_write_set", "mac_ledger_write_set", "outcome_unknown", "note_body_privacy", "request_hash", "content_hash", "connection_epoch", "operation_status", "document_mapping", "notes_marker"]
 mutants = ["mac_notes_bridge_offline_queue"]
 

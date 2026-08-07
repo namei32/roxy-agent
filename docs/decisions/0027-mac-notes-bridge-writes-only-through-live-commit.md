@@ -2,6 +2,7 @@
 
 - 状态：accepted
 - 日期：2026-08-07
+- owner 勘误：[0028](0028-apple-notes-bridge-is-plugin-owned.md) 已将 Broker 从 Core 迁到外部插件；本记录的在线提交语义继续有效
 - 关联条款：CAP-002～CAP-004、PLG-001～PLG-005、SEC-010
 
 ## 背景
@@ -33,8 +34,8 @@ Apple Events 写入。用户要求 Mac 在线时保存，Mac 离线时仍返回�
 
 ## 影响
 
-- Core 新增中立的 Bridge 认证、在线连接和提交 Broker，因为连接与提交状态需要跨插件 generation
-  保持单一 owner；Apple Notes 插件只获得窄的执行端口。
+- 单个活动 Broker 保持连接与提交状态的单一 owner；其源码与进程归外部 Apple Notes 插件所有，
+  Core 只通过通用 Managed Service generation 切换保证不会并存两个 owner。
 - Mac companion 保存本地 operation ledger 和 `document_key → note_id`，云端只保存摘要、阶段和
   签名回执，不新增正文副本。
 - 插件热重载继续由 snapshot lease 保护在途调用。候选 prepare 不获得活动 Bridge。

@@ -260,6 +260,7 @@ class ConnectionRouter:
                 values["marketplace"],
                 values["ref"],
                 values["sparse"],
+                values["activateExclusive"],
             )
         if method == "plugin/status":
             return self._service.plugin_status()

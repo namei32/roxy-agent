@@ -180,7 +180,7 @@ _HELP = """\
   app-server --stdio            在 stdio 上运行程序化控制面
   exec --new|--thread ID PROMPT 执行一个非交互 turn（支持 --runtime stable|latest）
   dashboard                     单独启动 Dashboard
-  plugin-install                安装 Git 插件
+  plugin-install                安装 Git 插件；独占端点需 --activate-exclusive
   plugin-status                 查看 stable/latest 候选状态
   plugin-promote PLUGIN_ID      将 latest 晋升为 stable
   plugin-discard PLUGIN_ID      丢弃 latest 并保留 stable
@@ -742,6 +742,7 @@ if __name__ == "__main__":
                         "marketplace": marketplace,
                         "ref": ref_value or "",
                         "sparse": _parse_csv_flag(sparse_value),
+                        "activateExclusive": "--activate-exclusive" in args,
                     },
                 )
             )

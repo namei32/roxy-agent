@@ -181,7 +181,7 @@ failure_semantics = ["operation_rejected", "degraded_continuation", "cleanup_deg
 [states.notes_bridge_cloud_operations]
 priority = "p0"
 requirements = ["CAP-002", "CAP-004", "SEC-010", "TST-001", "TST-002", "TST-005"]
-owner = "notes_bridge.broker"
+owner = "apple_notes_plugin.notes_bridge.broker"
 normal_change = "append_state_machine"
 destructive_owner = "protocol_owner"
 writers = ["mac_notes_bridge"]
@@ -189,7 +189,7 @@ consumers = ["mac_notes_bridge", "plugin"]
 protected_tables = ["bridge_operations"]
 oracles = ["mac_notes_bridge_contract"]
 retention = "metadata-only operation evidence retained; no payload queue"
-physical_reduction_owner = "notes_bridge.broker"
+physical_reduction_owner = "apple_notes_plugin.notes_bridge.broker"
 recovery_evidence = ["request_hash", "content_hash", "connection_epoch", "commit_boundary"]
 failure_semantics = ["operation_rejected", "degraded_continuation", "unit_failed", "runtime_fatal"]
 

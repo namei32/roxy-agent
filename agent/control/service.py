@@ -23,7 +23,10 @@ from agent.restart import RestartCoordinator
 from session.manager import SessionManager
 from session.memory_policy import validate_session_memory_metadata
 
-PluginInstall = Callable[[str, str, str, list[str]], Awaitable[dict[str, object]]]
+PluginInstall = Callable[
+    [str, str, str, list[str], bool],
+    Awaitable[dict[str, object]],
+]
 PluginAction = Callable[[str], Awaitable[dict[str, object]]]
 PluginStatus = Callable[[], dict[str, object]]
 RuntimeSelector = Literal["stable", "latest"]
@@ -202,11 +205,18 @@ class ControlService:
         marketplace: str,
         ref: str,
         sparse: list[str],
+        activate_exclusive: bool = False,
     ) -> dict[str, object]:
         if self._plugin_install is None:
             raise RuntimeError("当前 runtime 不支持插件安装")
         try:
-            return await self._plugin_install(source, marketplace, ref, sparse)
+            return await self._plugin_install(
+                source,
+                marketplace,
+                ref,
+                sparse,
+                activate_exclusive,
+            )
         except Exception as exc:
             logger.exception("runtime-owned plugin install failed")
             raise PluginManagementError(str(exc)) from exc

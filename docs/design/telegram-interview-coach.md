@@ -3,7 +3,7 @@
 - 状态：implemented，真实 Telegram / Notes 验收待完成
 - 日期：2026-08-07
 - 能力 owner：`plugins/interview_coach`；相册边界由 `infra/channels/telegram_channel.py` 拥有
-- 外部效果 owner：`plugins/apple_notes`
+- 外部效果 owner：外部 `namei32/apple-notes-plugin`
 - 关联条款：CAP-002～CAP-003、OUT-001～OUT-003、PLG-001～PLG-010、SES-005～SES-006
 
 ```yaml

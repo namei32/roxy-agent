@@ -1,19 +1,19 @@
 # Mac Notes Bridge 在线提交设计
 
-- 状态：implementation
+- 状态：implemented
 - 日期：2026-08-07
 - 关联：[0027](../decisions/0027-mac-notes-bridge-writes-only-through-live-commit.md)、CAP-002～CAP-004
 
 ```yaml
 change_type: feature
 semantic_delta: compatible
-capability_owner: mixed
+capability_owner: external Apple Notes plugin
 consumer_scope:
   - Apple Notes plugin
   - Interview Coach plugin
   - macOS Notes Bridge companion
 runtime_patch: required
-runtime_patch_reason: 在线连接、connection epoch 与 commit 状态必须由单一 runtime owner 持有；插件各自连接会复制在线事实并破坏热重载排空。
+runtime_patch_reason: Core 只需提供通用 Managed Service 独占切换；Notes 协议与连接 owner 位于外部插件。
 authoritative_state_owner: 云端 Bridge operation ledger + Mac operation ledger + Apple Notes
 client_only_alternative: 仅 Mac 实现无法判断云端当前 turn 是否仍获授权，也无法阻止插件 generation 重复提交。
 protected_state:
@@ -26,7 +26,7 @@ forbidden_effects:
   - 离线排队和重连补写
   - 任意 AppleScript、Shell、文件路径或用户提供 Note ID
   - outcome_unknown 自动重放
-rollback: 关闭 notes_bridge 与 Apple Notes remote 模式，撤销 Bridge；保留既有 Notes 和全部回执。
+rollback: 禁用 Apple Notes 插件或 bridge_enabled，撤销 Bridge；保留既有 Notes 和全部回执。
 ```
 
 ## 1. 用户可见目标
@@ -56,8 +56,9 @@ readiness 失败或 commit 前断线时，Agent 返回完整整理内容并明�
 └──────────────────────┘
 ```
 
-Core Broker 只向已提交插件 generation 提供窄的 `execute/status` 端口。候选 prepare 不获得连接或
-提交能力。Mac companion 不取得 Session、附件、LLM、Telegram、任意文件或 Shell 权限。
+Broker 是外部插件声明的独占 Managed Service。工具只通过认证 loopback RPC 调用同代 Broker；
+候选 prepare 不启动服务，显式激活时 Core 先排空旧 snapshot 再切换进程。Mac companion 不取得
+Session、附件、LLM、Telegram、任意文件或 Shell 权限。
 
 ## 3. 在线与提交
 
@@ -89,7 +90,8 @@ Mac 接受 propose 时先以唯一 operation ID 写入 ledger，不执行 AppleS
 - commit 后断线、超时或回执损坏：`outcome_unknown`，只通过 Mac ledger 与 Notes marker 核对。
 - 云端重启：没有 commit 的 operation 终结为未写；commit_sent 保持 unknown，不自动重放。
 - Mac 重启：accepted 但无 commit 的提议过期；commit_received/executing 先核对 marker。
-- 插件热重载：在途 tool 持有旧 snapshot lease；Broker 不属于插件 scope，不因 generation retire 断线。
+- 插件热重载：改变 Broker 的版本必须显式独占激活；Core 暂停 admission、排空旧 snapshot、切换
+  Managed Service，失败时恢复旧进程与 pointer。
 
 ## 6. 实施与验收
 
@@ -99,22 +101,22 @@ Mac ledger 的写集合观察结果，不以人类可读字符串代替提交证
 
 ## 7. 配置、配对与常驻运行
 
-云端 `config.toml`：
+插件 `<workspace>/plugin-data/apple_notes-github/config.local.toml`：
 
 ```toml
-[notes_bridge]
-enabled = true
-host = "127.0.0.1"
-port = 6330
+execution_mode = "remote"
+bridge_enabled = true
 bridge_id = "mac-primary"
-token = "${AKASHIC_NOTES_BRIDGE_TOKEN}"
+bridge_token_env = "AKASHIC_NOTES_BRIDGE_TOKEN"
+bridge_rpc_token_env = "AKASHIC_NOTES_PLUGIN_RPC_TOKEN"
 heartbeat_interval_seconds = 5
 offline_after_seconds = 15
 proposal_timeout_seconds = 5
 commit_timeout_seconds = 30
 ```
 
-`AKASHIC_NOTES_BRIDGE_TOKEN` 必须至少 32 字符，不进入仓库、workspace、Session 或插件配置。
+`AKASHIC_NOTES_BRIDGE_TOKEN` 与 `AKASHIC_NOTES_PLUGIN_RPC_TOKEN` 必须分别至少 32 字符，
+不进入仓库、workspace、Session 或插件配置。
 Broker 的 `ws://` 端口强制只能监听 loopback；跨公网使用 WSS 反向代理，或由 Mac
 建立 SSH 本地转发后连接本机 `ws://127.0.0.1`。不要直接把 6330 暴露到公网。
 
@@ -122,9 +124,9 @@ Mac 首次配对生成 token 并保存到当前登录用户的 Keychain；命令
 服务环境后不要写入 shell history：
 
 ```bash
-cd /path/to/akashic-agent
-.venv/bin/python -m companion.mac_notes_bridge pair --bridge-id mac-primary
-.venv/bin/python -m companion.mac_notes_bridge probe \
+cd /path/to/apple-notes-plugin
+python -m apple_notes_companion pair --bridge-id mac-primary
+python -m apple_notes_companion probe \
   --account default --folder Akashic
 ```
 
@@ -132,14 +134,14 @@ cd /path/to/akashic-agent
 读取，plist 不含秘密：
 
 ```bash
-.venv/bin/python -m companion.mac_notes_bridge install-launchd \
+python -m apple_notes_companion install-launchd \
   --url wss://YOUR_PRIVATE_BRIDGE_HOST/ws \
   --bridge-id mac-primary \
   --account default \
   --folder Akashic
 
-.venv/bin/python -m companion.mac_notes_bridge status
-.venv/bin/python -m companion.mac_notes_bridge reconcile \
+python -m apple_notes_companion status
+python -m apple_notes_companion reconcile \
   --operation-id OPERATION_ID --account default --folder Akashic
 ```
 
@@ -147,12 +149,12 @@ cd /path/to/akashic-agent
 隧道强制 `BatchMode`、`StrictHostKeyChecking`、连接失败立即退出和心跳重建：
 
 ```bash
-.venv/bin/python -m companion.mac_notes_bridge install-ssh-tunnel \
+python -m apple_notes_companion install-ssh-tunnel \
   --ssh-target ubuntu@101.32.194.251 \
   --identity-file ~/.ssh/id_ed25519 \
   --local-port 6330 --remote-port 6330
 
-.venv/bin/python -m companion.mac_notes_bridge install-launchd \
+python -m apple_notes_companion install-launchd \
   --url ws://127.0.0.1:6330/ws \
   --bridge-id mac-primary --account default --folder Akashic
 ```
@@ -161,16 +163,16 @@ cd /path/to/akashic-agent
 连接、心跳新鲜、Notes/权限 READY，以及本次 operation 的 `proposal_accepted`。撤销和卸载：
 
 ```bash
-.venv/bin/python -m companion.mac_notes_bridge uninstall-launchd
-.venv/bin/python -m companion.mac_notes_bridge uninstall-ssh-tunnel
-.venv/bin/python -m companion.mac_notes_bridge revoke --bridge-id mac-primary
+python -m apple_notes_companion uninstall-launchd
+python -m apple_notes_companion uninstall-ssh-tunnel
+python -m apple_notes_companion revoke --bridge-id mac-primary
 ```
 
 撤销后还必须删除云端环境中的旧 token 并重启 Gateway；若要恢复，生成全新 token，不能复用旧值。
 
 ## 8. 已完成的确定性证据
 
-`tests/test_notes_bridge.py` 覆盖认证握手、在线心跳、离线无队列、成功提交、commit 前/后断线、
-云端与 Mac 账本不保存正文、本地幂等和执行中重启不重放。`tests/test_apple_notes_plugin.py` 覆盖
-离线工具结果携带完整正文。真实 Mac、云端 WSS 和 Telegram 验收仍是发布前必需步骤，不能用
-单元测试替代。
+外部 `namei32/apple-notes-plugin` 的测试覆盖认证握手、在线心跳、离线无队列、成功提交、
+commit 前/后断线、两端账本不保存正文、本地幂等、执行中重启不重放，以及离线工具结果携带
+完整正文。Core 只验证独占 Managed Service 的安装、排空、提交与失败回滚。真实 Mac、云端 WSS
+和 Telegram 验收仍是发布前必需步骤，不能用单元测试替代。

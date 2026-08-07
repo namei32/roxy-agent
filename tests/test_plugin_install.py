@@ -524,6 +524,50 @@ def test_install_allows_internal_source_symlink(tmp_path: Path) -> None:
     assert not linked_helper.is_symlink()
 
 
+def test_install_git_plugin_prepares_declared_managed_service_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "service-plugin"
+    repo.mkdir()
+    (repo / "service.py").write_text("print('ready')\n", encoding="utf-8")
+    (repo / "requirements.txt").write_text("", encoding="utf-8")
+    (repo / "plugin.py").write_text(
+        "from agent.plugins import ManagedServiceSpec, Plugin\n"
+        "class ServicePlugin(Plugin):\n"
+        "    name = 'service_plugin'\n"
+        "    version = '1.0.0'\n"
+        "    @classmethod\n"
+        "    def managed_services(cls):\n"
+        "        return [ManagedServiceSpec(id='worker', command=('python', 'service.py'))]\n",
+        encoding="utf-8",
+    )
+    _commit(repo)
+    calls: list[tuple[str, Path]] = []
+
+    def fake_run(args: list[str], *, cwd: Path, label: str) -> None:
+        calls.append((label, cwd))
+        if label.endswith("venv"):
+            python_path = install_module._venv_python_path(cwd / ".venv")
+            python_path.parent.mkdir(parents=True, exist_ok=True)
+            python_path.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(install_module, "_run_command", fake_run)
+
+    result = install_git_plugin(
+        workspace=tmp_path / "workspace",
+        source=str(repo),
+        marketplace="lab",
+        plugins_home=tmp_path / "plugins-home",
+    )
+
+    assert [label for label, _ in calls] == [
+        "managed service worker venv",
+        "managed service worker pip install",
+    ]
+    assert all(cwd.is_relative_to(result.installed_path.parents[2]) for _, cwd in calls)
+
+
 def test_install_rejects_source_symlink_escape(tmp_path: Path) -> None:
     repo = tmp_path / "feed"
     repo.mkdir()

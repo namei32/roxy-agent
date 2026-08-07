@@ -658,8 +658,14 @@ async def test_plugin_candidate_control_methods_use_runtime_owner(
         marketplace: str,
         ref: str,
         sparse: list[str],
+        activate_exclusive: bool,
     ) -> dict[str, object]:
-        calls.append(("install", (source, marketplace, ref, sparse)))
+        calls.append(
+            (
+                "install",
+                (source, marketplace, ref, sparse, activate_exclusive),
+            )
+        )
         return {"publicationState": "latest_ready"}
 
     async def promote(plugin_id: str) -> dict[str, object]:
@@ -681,7 +687,13 @@ async def test_plugin_candidate_control_methods_use_runtime_owner(
         plugin_discard=discard,
     )
 
-    assert await service.install_plugin("repo", "lab", "main", ["plugin"]) == {
+    assert await service.install_plugin(
+        "repo",
+        "lab",
+        "main",
+        ["plugin"],
+        True,
+    ) == {
         "publicationState": "latest_ready"
     }
     assert service.plugin_status() == {"candidateState": "latest_ready"}
@@ -690,7 +702,7 @@ async def test_plugin_candidate_control_methods_use_runtime_owner(
         "publication_state": "discarded"
     }
     assert calls == [
-        ("install", ("repo", "lab", "main", ["plugin"])),
+        ("install", ("repo", "lab", "main", ["plugin"], True)),
         ("promote", "feed@lab"),
         ("discard", "feed@lab"),
     ]

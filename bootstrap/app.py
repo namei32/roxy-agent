@@ -38,9 +38,6 @@ from core.net.http import (
     configure_default_shared_http_resources,
 )
 from infra.control.socket import SocketAppServer, is_tcp_endpoint
-from infra.notes_bridge import NOTES_BRIDGE_SERVICE_ID, NotesBridgeBroker
-from infra.notes_bridge.server import build_notes_bridge_server
-from infra.notes_bridge.store import NotesBridgeAuditStore
 
 if TYPE_CHECKING:
     from proactive_v2.loop import ProactiveLoop
@@ -261,9 +258,6 @@ class AppRuntime:
         self.plugin_job_runtime: PluginJobRuntime | None = None
         self.plugin_service_host: PluginServiceHost | None = None
         self.plugin_watcher: PluginWatcher | None = None
-        self.notes_bridge_broker: NotesBridgeBroker | None = None
-        self.notes_bridge_server = None
-        self.notes_bridge_task: asyncio.Task[None] | None = None
         self.plugin_watcher_task: asyncio.Task[None] | None = None
         self.workspace_mcp_watcher_task: asyncio.Task[None] | None = None
         self.tasks: list[Awaitable[None]] = []
@@ -284,28 +278,12 @@ class AppRuntime:
             self.readiness.mark_stage("workspace.locked")
         try:
             configure_default_shared_http_resources(self.http_resources)
-            core_kwargs = (
-                {"restart_coordinator": self.restart_coordinator}
-                if self.restart_coordinator is not None
-                else {}
-            )
-            runtime_services: dict[str, object] = {}
-            notes_bridge_config = getattr(self.config, "notes_bridge", None)
-            if notes_bridge_config is not None and notes_bridge_config.enabled:
-                self.notes_bridge_broker = NotesBridgeBroker(
-                    notes_bridge_config,
-                    NotesBridgeAuditStore(
-                        self.workspace / "data" / "notes-bridge.sqlite3"
-                    ),
-                )
-                runtime_services[NOTES_BRIDGE_SERVICE_ID] = self.notes_bridge_broker
             self.core = build_core_runtime(
                 self.config,
                 self.workspace,
                 self.http_resources,
-                **core_kwargs,
+                restart_coordinator=self.restart_coordinator,
                 clear_stale_session_admissions=True,
-                runtime_services=runtime_services,
             )
             self.agent_loop = self.core.loop
             self.bus = self.core.bus
@@ -320,16 +298,6 @@ class AppRuntime:
             self.memory_runtime = self.core.memory_runtime
             self.presence = self.core.presence
             await self.core.start()
-            if self.notes_bridge_broker is not None:
-                assert notes_bridge_config is not None
-                self.notes_bridge_server = build_notes_bridge_server(
-                    notes_bridge_config,
-                    self.notes_bridge_broker,
-                )
-                self.notes_bridge_task = asyncio.create_task(
-                    self.notes_bridge_server.serve(),
-                    name="notes_bridge_server",
-                )
             if self.readiness is not None:
                 self.readiness.mark_stage("core.ready")
             self.workspace_mcp_watcher_task = self.core.workspace_mcp_watcher_task
@@ -675,7 +643,6 @@ class AppRuntime:
                     self.mobile_gateway_task,
                     self.plugin_watcher_task,
                     self.workspace_mcp_watcher_task,
-                    self.notes_bridge_task,
                 )
                 if task is not None
             }
@@ -705,12 +672,6 @@ class AppRuntime:
                 ):
                     watched_task = self.mobile_gateway_task
                     self.mobile_gateway_task = None
-                elif (
-                    self.notes_bridge_task is not None
-                    and self.notes_bridge_task in done
-                ):
-                    watched_task = self.notes_bridge_task
-                    self.notes_bridge_task = None
                 elif (
                     self.plugin_watcher_task is not None
                     and self.plugin_watcher_task in done
@@ -804,8 +765,6 @@ class AppRuntime:
             self.chat_server.should_exit = True
         if self.mobile_gateway_server is not None:
             self.mobile_gateway_server.should_exit = True
-        if self.notes_bridge_server is not None:
-            self.notes_bridge_server.should_exit = True
 
     async def shutdown(self) -> None:
         if self._shutdown:
@@ -818,14 +777,6 @@ class AppRuntime:
                 ("runtime_tasks.cancel", self._cancel_runtime_tasks),
                 ("servers.request_shutdown", self._request_server_shutdown),
                 (
-                    "notes_bridge.close",
-                    (
-                        self.notes_bridge_broker.close
-                        if self.notes_bridge_broker
-                        else _noop_async
-                    ),
-                ),
-                (
                     "dashboard_server.wait",
                     _wait_server_task(self.dashboard_task),
                 ),
@@ -836,10 +787,6 @@ class AppRuntime:
                 (
                     "mobile_gateway_server.wait",
                     _wait_server_task(self.mobile_gateway_task),
-                ),
-                (
-                    "notes_bridge_server.wait",
-                    _wait_server_task(self.notes_bridge_task),
                 ),
                 ("message_bus.aclose", _close_message_bus(self.bus)),
                 (
@@ -957,6 +904,7 @@ class AppRuntime:
         marketplace: str,
         ref: str,
         sparse: list[str],
+        activate_exclusive: bool = False,
     ) -> dict[str, object]:
         """安装 immutable artifact，并等待 runtime latest 已可租用。"""
 
@@ -970,6 +918,7 @@ class AppRuntime:
             marketplace=marketplace,
             ref_name=ref,
             sparse_paths=sparse,
+            activate_exclusive=activate_exclusive,
         )
 
         # 2. 返回 manager 在 candidate owner 锁内冻结的发布结果。

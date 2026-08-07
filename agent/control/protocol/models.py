@@ -63,6 +63,7 @@ class PluginInstallParams(StrictModel):
     marketplace: str = Field(default="local", min_length=1, max_length=128)
     ref: str = Field(default="", max_length=1024)
     sparse: list[str] = Field(default_factory=list, max_length=128)
+    activateExclusive: bool = False
 
 
 METHOD_PARAMS: dict[str, type[StrictModel]] = {

@@ -337,10 +337,14 @@ priority = "p0"
 requirements = ["CAP-002", "CAP-004", "PLG-001", "PLG-004", "SEC-010", "TST-001", "TST-002", "TST-003", "TST-005"]
 paths = [
   "companion/**",
-  "infra/notes_bridge/**",
-  "plugins/apple_notes/**",
-  "tests/test_notes_bridge.py",
-  "tests/test_apple_notes_plugin.py",
+  "infra/**",
+  "agent/plugins/install.py",
+  "agent/plugins/manager.py",
+  "agent/plugins/service_host.py",
+  "agent/config.py",
+  "tests/test_plugin_install.py",
+  "tests/test_plugin_runtime_control.py",
+  "tests/test_plugin_owned_config.py",
 ]
 depends_on = ["runtime", "plugin", "companion_external_io"]
 scenarios = ["mac_notes_bridge_contract"]

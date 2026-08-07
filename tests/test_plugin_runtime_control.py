@@ -98,6 +98,168 @@ async def test_runtime_install_waits_until_latest_is_leasable(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
+async def test_runtime_explicitly_activates_exclusive_service_as_stable(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "exclusive"
+    source.mkdir()
+    (source / "service.py").write_text("print('ready')\n", encoding="utf-8")
+    (source / "plugin.py").write_text(
+        "from agent.plugins import ManagedServiceSpec, Plugin\n"
+        "class ExclusivePlugin(Plugin):\n"
+        "    name = 'exclusive'\n"
+        "    version = '1.0.0'\n"
+        "    @classmethod\n"
+        "    def managed_services(cls):\n"
+        "        return [ManagedServiceSpec(id='worker', command=('python', 'service.py'))]\n",
+        encoding="utf-8",
+    )
+    _commit(source)
+    bus = EventBus()
+    manager = PluginManager(
+        plugin_dirs=[],
+        event_bus=bus,
+        workspace=tmp_path / "workspace",
+        installed_cache_root=tmp_path / "plugins-home" / "cache",
+    )
+    switched: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+
+    async def switch(
+        plugin_id: str,
+        old: dict[str, Any],
+        new: dict[str, Any],
+    ) -> None:
+        switched.append((plugin_id, old, new))
+
+    manager.bind_service_switcher(switch)
+    await manager.load_all()
+    app = object.__new__(AppRuntime)
+    app.workspace = tmp_path / "workspace"
+    app.core = SimpleNamespace(plugin_manager=manager)
+
+    installed = await app._install_plugin(str(source), "lab", "", [], True)
+
+    assert installed["publicationState"] == "stable"
+    assert manager.ready_candidate is None
+    assert manager.current_snapshot is manager.latest_snapshot
+    assert "exclusive@lab" in manager.current_snapshot.generations
+    assert switched and switched[-1][0] == "exclusive@lab"
+    plugin_base = Path(str(installed["installedPath"])).parents[1]
+    from agent.plugins.artifacts import read_pointers
+
+    pointers = read_pointers(plugin_base)
+    assert pointers is not None and pointers.stable == pointers.latest
+    await manager.terminate_all()
+    await bus.aclose()
+
+
+@pytest.mark.asyncio
+async def test_runtime_rejects_exclusive_service_without_explicit_activation(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "exclusive"
+    source.mkdir()
+    (source / "service.py").write_text("print('ready')\n", encoding="utf-8")
+    (source / "plugin.py").write_text(
+        "from agent.plugins import ManagedServiceSpec, Plugin\n"
+        "class ExclusivePlugin(Plugin):\n"
+        "    name = 'exclusive'\n"
+        "    version = '1.0.0'\n"
+        "    @classmethod\n"
+        "    def managed_services(cls):\n"
+        "        return [ManagedServiceSpec(id='worker', command=('python', 'service.py'))]\n",
+        encoding="utf-8",
+    )
+    _commit(source)
+    bus = EventBus()
+    manager = PluginManager(
+        plugin_dirs=[],
+        event_bus=bus,
+        workspace=tmp_path / "workspace",
+        installed_cache_root=tmp_path / "plugins-home" / "cache",
+    )
+    manager.bind_service_switcher(lambda *_args: asyncio.sleep(0))
+    await manager.load_all()
+    app = object.__new__(AppRuntime)
+    app.workspace = tmp_path / "workspace"
+    app.core = SimpleNamespace(plugin_manager=manager)
+
+    with pytest.raises(RuntimeError, match="不能在线并存验证"):
+        await app._install_plugin(str(source), "lab", "", [])
+
+    assert manager.current_snapshot is None
+    await manager.terminate_all()
+    await bus.aclose()
+
+
+@pytest.mark.asyncio
+async def test_exclusive_activation_restores_pointer_and_endpoints_on_commit_failure(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "exclusive"
+    source.mkdir()
+    (source / "service.py").write_text("print('ready')\n", encoding="utf-8")
+    (source / "plugin.py").write_text(
+        "from agent.plugins import ManagedServiceSpec, Plugin\n"
+        "class ExclusivePlugin(Plugin):\n"
+        "    name = 'exclusive'\n"
+        "    version = '1.0.0'\n"
+        "    @classmethod\n"
+        "    def managed_services(cls):\n"
+        "        return [ManagedServiceSpec(id='worker', command=('python', 'service.py'))]\n",
+        encoding="utf-8",
+    )
+    _commit(source)
+    bus = EventBus()
+    manager = PluginManager(
+        plugin_dirs=[],
+        event_bus=bus,
+        workspace=tmp_path / "workspace",
+        installed_cache_root=tmp_path / "plugins-home" / "cache",
+    )
+    switched: list[tuple[dict[str, Any], dict[str, Any]]] = []
+
+    async def switch(
+        _plugin_id: str,
+        old: dict[str, Any],
+        new: dict[str, Any],
+    ) -> None:
+        switched.append((old, new))
+
+    manager.bind_service_switcher(switch)
+    await manager.load_all()
+    stable = manager.current_snapshot
+    original_commit = manager.snapshot_store.commit
+
+    async def fail_after_open(transaction, *, before_open=None, after_open=None):
+        del after_open
+        assert before_open is not None
+        before_open()
+        raise RuntimeError("forced commit failure")
+
+    manager.snapshot_store.commit = fail_after_open  # type: ignore[method-assign]
+    app = object.__new__(AppRuntime)
+    app.workspace = tmp_path / "workspace"
+    app.core = SimpleNamespace(plugin_manager=manager)
+
+    with pytest.raises(RuntimeError, match="forced commit failure"):
+        await app._install_plugin(str(source), "lab", "", [], True)
+
+    plugin_base = manager.installed_plugins_home / "cache" / "lab" / "exclusive"
+    from agent.plugins.artifacts import read_pointers
+
+    pointers = read_pointers(plugin_base)
+    assert pointers is not None
+    assert pointers.stable.path is None and pointers.latest.path is None
+    assert manager.current_snapshot is stable
+    assert switched[0][0] == {} and switched[0][1]
+    assert switched[-1][0] and switched[-1][1] == {}
+    manager.snapshot_store.commit = original_commit  # type: ignore[method-assign]
+    await manager.terminate_all()
+    await bus.aclose()
+
+
+@pytest.mark.asyncio
 async def test_installed_mcp_update_keeps_old_artifact_until_lease_drains(
     tmp_path: Path,
 ) -> None:

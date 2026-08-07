@@ -1189,6 +1189,7 @@ class PluginManager:
         marketplace: str,
         ref_name: str,
         sparse_paths: list[str],
+        activate_exclusive: bool = False,
     ) -> tuple[PluginInstallResult, dict[str, object]]:
         """Stage one immutable artifact and publish its latest runtime atomically."""
 
@@ -1229,12 +1230,24 @@ class PluginManager:
                     stage_candidate=True,
                 )
             )
-            _, reconcile_cancelled = await _complete_critical(
-                self._reconcile_changed_locked()
-            )
             plugin_id = f"{result.plugin_name}@{result.marketplace}"
+            reconciled, reconcile_cancelled = await _complete_critical(
+                self._reconcile_changed_locked(
+                    activate_exclusive_plugin_id=(
+                        plugin_id if activate_exclusive else None
+                    )
+                )
+            )
             status = self.candidate_status()
-            if result.staged_candidate and (
+            if activate_exclusive and not any(
+                item.get("plugin_id") == plugin_id
+                and item.get("publication_state") == "committed"
+                for item in reconciled
+            ):
+                raise RuntimeError(
+                    f"独占端点插件未提交为 stable: plugin={plugin_id}"
+                )
+            if result.staged_candidate and not activate_exclusive and (
                 status["candidate_plugin_id"] != plugin_id
                 or status["candidate_state"] != "latest_ready"
             ):
@@ -1250,9 +1263,18 @@ class PluginManager:
                 )
             if install_cancelled or reconcile_cancelled:
                 raise asyncio.CancelledError
-            return result, status
+            return (
+                replace(result, staged_candidate=False)
+                if activate_exclusive
+                else result,
+                status,
+            )
 
-    async def _reconcile_changed_locked(self) -> list[dict[str, object]]:
+    async def _reconcile_changed_locked(
+        self,
+        *,
+        activate_exclusive_plugin_id: str | None = None,
+    ) -> list[dict[str, object]]:
         """Reconcile discovered latest artifacts while candidate ownership is held."""
 
         await self._snapshot_store.retry_drains()
@@ -1287,7 +1309,10 @@ class PluginManager:
             if result.get("prepared_generation") is None:
                 results.append(result)
                 continue
-            publication = await self._publish_prepared(plugin_id)
+            publication = await self._publish_prepared(
+                plugin_id,
+                activate_exclusive=plugin_id == activate_exclusive_plugin_id,
+            )
             results.append(publication)
             if publication.get("publication_state") == "latest_ready":
                 return results
@@ -1296,7 +1321,10 @@ class PluginManager:
             if generation is None:
                 _discard_installed_candidate_mod(discovered[plugin_id])
                 continue
-            publication = await self._publish_prepared(plugin_id)
+            publication = await self._publish_prepared(
+                plugin_id,
+                activate_exclusive=plugin_id == activate_exclusive_plugin_id,
+            )
             results.append(publication)
             if publication.get("publication_state") == "latest_ready":
                 return results
@@ -1698,7 +1726,12 @@ class PluginManager:
             raise RuntimeError(f"latest 属于其他插件: {ready.plugin_id}")
         return ready
 
-    async def _publish_prepared(self, plugin_id: str) -> dict[str, object]:
+    async def _publish_prepared(
+        self,
+        plugin_id: str,
+        *,
+        activate_exclusive: bool = False,
+    ) -> dict[str, object]:
         generation = self._prepared_generations.get(plugin_id)
         if generation is None:
             raise KeyError(f"插件没有待发布候选: {plugin_id}")
@@ -1776,7 +1809,15 @@ class PluginManager:
         endpoint_changed = (
             old_services != new_services or old_channels != new_channels
         )
-        stage_latest = _installed_generation_is_candidate(generation)
+        installed_candidate = _installed_generation_is_candidate(generation)
+        if activate_exclusive and (not installed_candidate or not endpoint_changed):
+            error_text = "--activate-exclusive 只允许用于改变独占端点的已安装候选"
+            await self.discard_prepared(
+                plugin_id,
+                error=f"exclusive_activation: {error_text}",
+            )
+            raise RuntimeError(error_text)
+        stage_latest = installed_candidate and not activate_exclusive
         if stage_latest and endpoint_changed:
             error_text = "候选插件改变独占 managed service/channel，不能在线并存验证"
             await self.discard_prepared(
@@ -1784,6 +1825,20 @@ class PluginManager:
                 error=f"endpoint_coexistence: {error_text}",
             )
             raise RuntimeError(error_text)
+        exclusive_pointer_base = (
+            _installed_candidate_base(generation) if activate_exclusive else None
+        )
+        exclusive_pointers = (
+            read_pointers(exclusive_pointer_base)
+            if exclusive_pointer_base is not None
+            else None
+        )
+        if activate_exclusive and exclusive_pointers is None:
+            await self.discard_prepared(
+                plugin_id,
+                error="exclusive_activation: candidate pointer missing",
+            )
+            raise RuntimeError("独占端点候选缺少 stable/latest pointer")
         self._compile_snapshot_event_handlers(snapshot)
         if self._dashboard_preparer is not None:
             try:
@@ -1914,7 +1969,10 @@ class PluginManager:
         commit_cancelled = False
         from agent.plugins.context import PreparedPluginKVStore
 
+        exclusive_pointer_promoted = False
+
         def open_candidate() -> None:
+            nonlocal exclusive_pointer_promoted
             self._advance_reload(generation, "commit_started")
             context = cast(Any, generation.instance).context
             context.data_dir = generation.data_dir
@@ -1925,6 +1983,16 @@ class PluginManager:
             generation.state = "activating"
             try:
                 cast(Any, generation.instance).activate()
+                if exclusive_pointer_base is not None:
+                    current = read_pointers(exclusive_pointer_base)
+                    if current != exclusive_pointers or current is None:
+                        raise RuntimeError("独占端点候选 pointer 已被其他发布改变")
+                    _ = write_pointers(
+                        exclusive_pointer_base,
+                        stable=current.latest,
+                        latest=current.latest,
+                    )
+                    exclusive_pointer_promoted = True
             except BaseException:
                 context.data_dir = None
                 context.runtime_services = None
@@ -1971,6 +2039,25 @@ class PluginManager:
             commit_error is not None
             and self._snapshot_store.pending_candidate is snapshot
         ):
+            if (
+                exclusive_pointer_promoted
+                and exclusive_pointer_base is not None
+                and exclusive_pointers is not None
+            ):
+                current = read_pointers(exclusive_pointer_base)
+                if (
+                    current is None
+                    or current.stable != exclusive_pointers.latest
+                    or current.latest != exclusive_pointers.latest
+                ):
+                    raise RuntimeError(
+                        "独占端点发布失败后 pointer 已被其他发布改变"
+                    ) from commit_error
+                _ = write_pointers(
+                    exclusive_pointer_base,
+                    stable=exclusive_pointers.stable,
+                    latest=exclusive_pointers.stable,
+                )
             if previous_snapshot is not None:
                 _ = self._drain_transactions.pop(
                     previous_snapshot.snapshot_id,

@@ -32,7 +32,7 @@ from agent.plugins.manifest import (
     workspace_plugin_data_dir,
 )
 from agent.plugins.registry import plugin_registry
-from agent.plugins.specs import McpServerSpec
+from agent.plugins.specs import ManagedServiceSpec, McpServerSpec
 
 
 @dataclass(frozen=True)
@@ -207,10 +207,12 @@ def install_git_plugin(
             "插件 version",
         )
         mcp_servers = _load_mcp_specs(plugin_class)
+        managed_services = _load_managed_service_specs(plugin_class)
         activation = _activate_plugin_version(
             plugin_name=plugin_name,
             plugin_version=plugin_version,
             mcp_servers=mcp_servers,
+            managed_services=managed_services,
             marketplace=marketplace,
             clone_root=clone_root,
             cache_root=cache_root,
@@ -301,6 +303,7 @@ def _activate_plugin_version(
     plugin_name: str,
     plugin_version: str,
     mcp_servers: list[McpServerSpec],
+    managed_services: list[ManagedServiceSpec],
     marketplace: str,
     clone_root: Path,
     cache_root: Path,
@@ -350,6 +353,10 @@ def _activate_plugin_version(
         # 2. 在不可发现的 staging 目录复制代码并准备依赖，旧版本保持可见
         _ = shutil.copytree(clone_root, staging_root, dirs_exist_ok=True)
         _prepare_plugin_mcp_runtimes(staging_root, mcp_servers)
+        _prepare_plugin_managed_service_runtimes(
+            staging_root,
+            managed_services,
+        )
 
         # 3. Artifact 只创建一次；一次原子写发布完整 stable/latest pair。
         if target_root.exists():
@@ -512,6 +519,38 @@ def _prepare_single_mcp_server(
     _ = _ensure_python_runtime(runtime_root, requirements, server.name)
 
 
+def _prepare_plugin_managed_service_runtimes(
+    plugin_root: Path,
+    services: list[ManagedServiceSpec],
+) -> None:
+    """Prepare declared Python service dependencies inside the artifact."""
+
+    prepared_roots: set[Path] = set()
+    for service in services:
+        command_items = list(service.command)
+        if not _is_python_command(command_items[0]):
+            continue
+        runtime_root = _resolve_mcp_runtime_root(
+            plugin_root,
+            service.cwd,
+            command_items,
+        )
+        if runtime_root is None:
+            continue
+        resolved_root = runtime_root.resolve(strict=False)
+        if resolved_root in prepared_roots:
+            continue
+        requirements = runtime_root / "requirements.txt"
+        if not requirements.exists() or requirements.is_symlink():
+            continue
+        _ = _ensure_python_runtime(
+            runtime_root,
+            requirements,
+            f"managed service {service.id}",
+        )
+        prepared_roots.add(resolved_root)
+
+
 def _resolve_mcp_runtime_root(
     plugin_root: Path,
     cwd_raw: str,
@@ -619,6 +658,40 @@ def _load_mcp_specs(plugin_class: type) -> list[McpServerSpec]:
         if item.name in names:
             raise ValueError(f"MCP server 名称重复: {item.name}")
         names.add(item.name)
+        result.append(item)
+    return result
+
+
+def _load_managed_service_specs(plugin_class: type) -> list[ManagedServiceSpec]:
+    provider = getattr(plugin_class, "managed_services", None)
+    if not callable(provider):
+        raise ValueError("插件缺少 managed_services() 声明")
+    raw = cast(Callable[[], object], provider)()
+    if not isinstance(raw, list):
+        raise ValueError("managed_services() 必须返回 list")
+    result: list[ManagedServiceSpec] = []
+    names: set[str] = set()
+    for item in cast(list[object], raw):
+        if (
+            not isinstance(item, ManagedServiceSpec)
+            or not isinstance(item.id, str)
+            or not item.id
+            or not item.command
+            or not isinstance(item.command, tuple)
+            or not isinstance(item.cwd, str)
+            or not isinstance(item.env, dict)
+            or not isinstance(item.readiness_url, str)
+            or item.startup_timeout_seconds <= 0
+            or not all(isinstance(value, str) and value for value in item.command)
+            or not all(
+                isinstance(key, str) and isinstance(value, str)
+                for key, value in item.env.items()
+            )
+        ):
+            raise ValueError(f"managed service 声明无效: {item!r}")
+        if item.id in names:
+            raise ValueError(f"managed service 名称重复: {item.id}")
+        names.add(item.id)
         result.append(item)
     return result
 

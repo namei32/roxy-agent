@@ -2,7 +2,7 @@
 
 - 状态：implemented
 - 日期：2026-08-06
-- 能力 owner：`plugins/apple_notes`
+- 能力 owner：外部私有仓库 `namei32/apple-notes-plugin`
 - 权威外部状态：Apple Notes 中由插件创建的 note body
 - 关联条款：PRM-003、CAP-002、PLG-001～PLG-010、WSP-001、SEC-001、TST-001～TST-006
 
@@ -37,7 +37,7 @@ AppleNotesService
     ├── 校验当前用户来源、配置、大小和 document_key
     ├── SQLite 预留 prepared receipt
     ├── 标记 executing
-    └── macOS 直接调用固定 AppleScript，或使用运行时 NotesBridgeBroker
+    └── macOS 直接调用固定 AppleScript，或调用插件 Managed Service 的 loopback RPC
              │ 用户内容只经 argv / 0600 临时文件传入
              ▼
        Mac companion → Apple Notes / Akashic folder
@@ -49,7 +49,9 @@ AppleNotesService
                                                    └── 隐藏导出标识核对；不重放写入
 ```
 
-Core Plugin Manager 继续拥有 generation、Skill 与工具 catalog 的原子发布。插件在
+Core Plugin Manager 继续拥有 generation、Skill、工具 catalog 与 Managed Service 的原子发布。
+插件源码、Broker、WebSocket、Mac Companion、配置、Skill、渲染、回执和固定 AppleScript 的
+canonical source 均位于外部仓库；Core 不保留 Notes 专用模块。插件在
 `prepare()` 阶段不打开 Notes、不创建数据库，也不启动进程；`activate()` 取得正式
 `data_dir` 后才构造服务。实际 Apple Note 正文由 Notes 拥有，本地 SQLite 只保存连续性回执
 和插件拥有关系，不保存正文副本。
@@ -63,7 +65,7 @@ Core Plugin Manager 继续拥有 generation、Skill 与工具 catalog 的原子�
 - Notes 会从正文第一行派生 note name。同时设置 `name` 和带标题的 `body` 会显示重复标题，
   因此创建只设置 `body`。
 - 当前桥接证明的是 Apple Event 已返回具体 note/folder 回执，不承诺 iCloud 已同步到所有设备。
-- Linux 与 Docker runtime 只有在 `[notes_bridge]` 启用且 Mac 当前认证在线时才可远程提交；未启用
+- Linux 与 Docker runtime 只有在插件 `bridge_enabled` 启用且 Mac 当前认证在线时才可远程提交；未启用
   时仍明确返回 `apple_notes_requires_macos`。远程路径遵循 [Mac Notes Bridge](mac-notes-bridge.md)，
   不把固定脚本伪装成 Linux 能力，也不建立离线正文队列。
 - 首次真实调用可能触发 macOS Automation 授权；拒绝授权属于
@@ -91,7 +93,7 @@ receipt store 找到插件创建时提交的 note ID；用户提供的任意 Not
 | `note_documents` | create committed 后登记 document key | append/reconcile 更新 folder 与最后内容 hash | 当前无 | 普通卸载不删除；永久删除需独立用户操作 | 插件 receipt store；稳定 document key 与 note ID |
 | 私有临时 HTML | 每次实际写入创建一个 0600 文件 | 无 | 无 | 子进程结束、超时或取消后立即删除 | AppleNotesBridge；最终目录应为空，正文不进入 SQLite |
 
-`<workspace>/plugin-data/apple_notes-builtin/` 随普通插件卸载保留，遵守 PLG-010。当前没有
+`<workspace>/plugin-data/apple_notes-<marketplace>/` 随普通插件卸载保留，遵守 PLG-010。当前没有
 receipt retention 或永久清理命令，因此运行时不得按年龄、数量或卸载事件自行减少这些记录。
 
 ## 6. 并发、失败、取消与恢复
@@ -119,12 +121,13 @@ receipt retention 或永久清理命令，因此运行时不得按年龄、数�
 正式配置位于：
 
 ```text
-<workspace>/plugin-data/apple_notes-builtin/config.local.toml
+<workspace>/plugin-data/apple_notes-<marketplace>/config.local.toml
 ```
 
-可配置 account、folder、`execution_mode`、是否创建 folder、create/append 开关、Markdown/HTML 上限、脚本超时和
-默认模板。`include_provenance_footer` 在 v0.1 必须为 `true`，因为其中的 operation marker 是
-不确定写入恢复的必要证据。源码中的 `config.local.toml` 只记录默认示例。
+可配置 account、folder、`execution_mode`、Bridge 环境变量名与时限、是否创建 folder、
+create/append 开关、Markdown/HTML 上限、脚本超时和默认模板。`include_provenance_footer` 必须为
+`true`，因为其中的 operation marker 是不确定写入恢复的必要证据。两个 Bridge token 只从进程
+环境读取，不进入 TOML。
 
 用户可以说：
 
@@ -137,7 +140,7 @@ Agent 应先组织忠实内容，必要时调用 preview，再用稳定 document
 
 ## 8. 验收结果
 
-确定性验收覆盖：安全渲染与上限、显式来源门禁、插件拥有关系、create/append 幂等、不同用户
+外部插件仓库的确定性验收覆盖：安全渲染与上限、显式来源门禁、插件拥有关系、create/append 幂等、不同用户
 请求允许相同追加、未知结果不重放且可核对、SQLite 不保存正文、0600 临时文件、固定脚本参数
 传递、错误分类、AppleScript 编译，以及 Plugin Manager 对四个工具和 Skill 的原子发布。
 
@@ -151,4 +154,7 @@ Agent 应先组织忠实内容，必要时调用 preview，再用稳定 document
 - 自动化测试 `16 passed`，Pyright `0 errors / 0 warnings`，AppleScript 编译通过。
 
 仓库级 change-impact Gate 仍以当前提交生成的报告为最终合并依据；本节的本机证据不能替代
-CI 或 Gate。
+CI 或 Gate。第一阶段迁移固定并验证了
+`namei32/apple-notes-plugin@5f63f7b`：Plugin API v2 静态合同通过，33 项插件/Broker/Companion
+测试通过，并在一次性 workspace 中完成 `install → latest preview → promote → uninstall`；卸载后
+plugin-data 仍存在。完整 owner 迁移的最终不可变 SHA 与验收结果以外部仓库发布记录为准。
