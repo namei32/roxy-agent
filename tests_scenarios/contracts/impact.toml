@@ -332,6 +332,19 @@ paths = ["core/net/http.py", "agent/tools/web_fetch.py", "bootstrap/chat_api.py"
 depends_on = ["runtime", "mobile_realtime"]
 scenarios = ["companion_external_io_contract"]
 
+[groups.mac_notes_bridge]
+priority = "p0"
+requirements = ["CAP-002", "CAP-004", "PLG-001", "PLG-004", "SEC-010", "TST-001", "TST-002", "TST-003", "TST-005"]
+paths = [
+  "companion/**",
+  "infra/notes_bridge/**",
+  "plugins/apple_notes/**",
+  "tests/test_notes_bridge.py",
+  "tests/test_apple_notes_plugin.py",
+]
+depends_on = ["runtime", "plugin", "companion_external_io"]
+scenarios = ["mac_notes_bridge_contract"]
+
 [groups.companion_peer_removal]
 priority = "p0"
 requirements = ["SEC-003", "ERR-001", "TST-001", "TST-003"]

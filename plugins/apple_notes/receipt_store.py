@@ -4,7 +4,23 @@ from dataclasses import dataclass
 from pathlib import Path
 import sqlite3
 import threading
+from types import TracebackType
 from typing import Literal, cast
+
+
+class _ClosingConnection(sqlite3.Connection):
+    """Give ``with connection`` transaction semantics and deterministic close."""
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool:
+        try:
+            return bool(super().__exit__(exc_type, exc_value, traceback))
+        finally:
+            self.close()
 
 OperationStatus = Literal[
     "prepared",
@@ -407,7 +423,9 @@ class AppleNotesReceiptStore:
             self._initialized = True
 
     def _connect(self, *, raw: bool = False) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self._path), timeout=10)
+        conn = sqlite3.connect(
+            str(self._path), timeout=10, factory=_ClosingConnection
+        )
         conn.row_factory = sqlite3.Row
         _ = conn.execute("PRAGMA foreign_keys=ON")
         _ = conn.execute("PRAGMA busy_timeout=5000")

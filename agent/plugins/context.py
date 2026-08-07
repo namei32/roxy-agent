@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
-from collections.abc import Callable, Coroutine, Iterator
+from collections.abc import Callable, Coroutine, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -37,6 +37,7 @@ class PluginContext:
     session_manager: Any = None
     memory_engine: Any = None
     llm: "PluginLlmService | None" = None
+    runtime_services: Mapping[str, object] | None = None
     scope: "PluginScope | None" = None
     generation_id: str = ""
     _can_start_tasks: Callable[[], bool] | None = field(
@@ -56,6 +57,17 @@ class PluginContext:
             coroutine.close()
             raise RuntimeError("prepare 阶段禁止启动后台任务")
         return self.scope.create_task(coroutine, name=name)
+
+    def require_runtime_service(self, service_id: str) -> object:
+        """Return one runtime-owned capability after generation activation."""
+
+        services = self.runtime_services
+        if services is None:
+            raise RuntimeError("prepare 阶段禁止访问运行时服务")
+        try:
+            return services[service_id]
+        except KeyError as error:
+            raise RuntimeError(f"运行时服务不可用: {service_id}") from error
 
     def defer(self, resource: str, cleanup: "Cleanup") -> None:
         if self.scope is None:

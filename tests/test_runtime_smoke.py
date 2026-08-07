@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import types
@@ -284,6 +285,9 @@ def test_default_socket_is_derived_from_workspace(tmp_path: Path) -> None:
 
     if sys.platform == "win32":
         assert endpoint.startswith("127.0.0.1:")
+    elif len(os.fsencode(str(tmp_path / "akashic.sock"))) > 96:
+        assert Path(endpoint).parent.name == "akashic-sockets"
+        assert len(os.fsencode(endpoint)) <= 96
     else:
         assert endpoint == str(tmp_path / "akashic.sock")
 

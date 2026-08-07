@@ -37,10 +37,10 @@ AppleNotesService
     ├── 校验当前用户来源、配置、大小和 document_key
     ├── SQLite 预留 prepared receipt
     ├── 标记 executing
-    └── 串行调用固定 AppleScript
+    └── macOS 直接调用固定 AppleScript，或使用运行时 NotesBridgeBroker
              │ 用户内容只经 argv / 0600 临时文件传入
              ▼
-       Apple Notes / Akashic folder
+       Mac companion → Apple Notes / Akashic folder
              │
              ├── 明确 note_id + folder_id ──▶ committed
              ├── 调用前确定失败 ─────────────▶ failed
@@ -63,8 +63,9 @@ Core Plugin Manager 继续拥有 generation、Skill 与工具 catalog 的原子�
 - Notes 会从正文第一行派生 note name。同时设置 `name` 和带标题的 `body` 会显示重复标题，
   因此创建只设置 `body`。
 - 当前桥接证明的是 Apple Event 已返回具体 note/folder 回执，不承诺 iCloud 已同步到所有设备。
-- Linux 与 Docker runtime 会明确返回 `apple_notes_requires_macos`。若未来需要服务端容器写入，
-  应设计经过认证的 Mac host bridge，不能把现有脚本伪装成跨平台实现。
+- Linux 与 Docker runtime 只有在 `[notes_bridge]` 启用且 Mac 当前认证在线时才可远程提交；未启用
+  时仍明确返回 `apple_notes_requires_macos`。远程路径遵循 [Mac Notes Bridge](mac-notes-bridge.md)，
+  不把固定脚本伪装成 Linux 能力，也不建立离线正文队列。
 - 首次真实调用可能触发 macOS Automation 授权；拒绝授权属于
   `operation_rejected/automation_permission_denied`。
 
@@ -121,7 +122,7 @@ receipt retention 或永久清理命令，因此运行时不得按年龄、数�
 <workspace>/plugin-data/apple_notes-builtin/config.local.toml
 ```
 
-可配置 account、folder、是否创建 folder、create/append 开关、Markdown/HTML 上限、脚本超时和
+可配置 account、folder、`execution_mode`、是否创建 folder、create/append 开关、Markdown/HTML 上限、脚本超时和
 默认模板。`include_provenance_footer` 在 v0.1 必须为 `true`，因为其中的 operation marker 是
 不确定写入恢复的必要证据。源码中的 `config.local.toml` 只记录默认示例。
 

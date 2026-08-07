@@ -117,6 +117,8 @@ Interview batch 只保存问题列表、题号和映射，不保存完整回答�
 - repository 未配置或证据查询失败：通用回答可以继续，项目事实不得猜测。
 - Notes create 的 `operation_rejected` / `unit_failed`：回复真实失败，不启动模拟追问；相同图片在
   后续新用户 turn 可以重新 prepare。append 的确定失败不推进题号，仍停在当前问题。
+- Mac Bridge 离线或 commit 前断线：Notes 返回 `skipped_offline` 和本轮完整整理内容，不保留
+  proposal 正文、不排队，Mac 上线后不补写；批次按确定失败收束，新的用户消息才能重新发起。
 - Notes `outcome_unknown`：批次保留不确定状态，先调用 status 核对；不自动重放。
 - ToolExecutor 拒绝、框架异常或非结构化结果不是 Notes 外部回执，不改变批次状态。
 - Telegram 最终发送失败但 Note 已 committed：外部 Note 保持已提交，不能伪装回滚；Session 和

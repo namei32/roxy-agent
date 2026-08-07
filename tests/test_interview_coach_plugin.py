@@ -410,6 +410,42 @@ async def test_failed_create_can_be_prepared_again_and_framework_error_does_not_
 
 
 @pytest.mark.asyncio
+async def test_offline_create_is_terminal_for_the_current_turn_and_not_backfilled(
+    tmp_path: Path,
+) -> None:
+    plugin = _plugin(tmp_path)
+    image = _png(tmp_path / "workspace" / "uploads" / "one.png")
+    arguments = (
+        object(),
+        [str(image)],
+        "面经复盘｜Agent｜2026-08-07",
+        "Agent",
+        ["什么是生命周期？"],
+        0.95,
+        ["明确的面试题列表"],
+        1,
+        1,
+        0,
+    )
+    with tool_execution_context_scope(_tool_context()):
+        prepared = json.loads(await plugin.prepare_batch(*arguments))
+    document_key = str(prepared["document_key"])
+
+    await plugin.record_apple_notes_result(
+        _notes_event("apple_notes_create", document_key, "skipped_offline")
+    )
+
+    # A later ordinary turn must not rediscover a pending write merely because
+    # the Mac happens to reconnect. A new attempt needs a new explicit intake.
+    assert plugin.prompt_hint(_prompt(media=None, content="Mac 现在上线了")) is None
+    denied = await plugin.guard_scoped_tools(
+        _pre_tool("apple_notes_create", {"document_key": document_key})
+    )
+    assert denied is not None
+    assert denied.decision == "deny"
+
+
+@pytest.mark.asyncio
 async def test_project_evidence_is_revision_bound_and_excludes_config(
     tmp_path: Path,
 ) -> None:

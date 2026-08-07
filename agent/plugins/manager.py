@@ -196,6 +196,7 @@ class PluginManager:
         session_manager: Any = None,
         memory_engine: Any = None,
         llm: PluginLlmService | None = None,
+        runtime_services: dict[str, object] | None = None,
         installed_cache_root: Path | None = None,
     ) -> None:
         self._dirs = plugin_dirs
@@ -205,6 +206,7 @@ class PluginManager:
         self._session_manager = session_manager
         self._memory_engine = memory_engine
         self._llm = llm
+        self._runtime_services = MappingProxyType(dict(runtime_services or {}))
         self._installed_cache_root = installed_cache_root
         self._channel_switcher: Callable[
             [str, tuple[Channel, ...], tuple[Channel, ...]],
@@ -1919,11 +1921,13 @@ class PluginManager:
             context.session_manager = self._session_manager
             context.memory_engine = self._memory_engine
             context.llm = self._llm
+            context.runtime_services = self._runtime_services
             generation.state = "activating"
             try:
                 cast(Any, generation.instance).activate()
             except BaseException:
                 context.data_dir = None
+                context.runtime_services = None
                 raise
             if isinstance(context.kv_store, PreparedPluginKVStore) and not stage_latest:
                 context.kv_store.commit()
@@ -2669,6 +2673,7 @@ class PluginManager:
             session_manager=None,
             memory_engine=None,
             llm=None,
+            runtime_services=None,
             scope=None,
             generation_id=generation_id,
         )
@@ -2964,6 +2969,7 @@ class PluginManager:
             instance.context.session_manager = self._session_manager
             instance.context.memory_engine = self._memory_engine
             instance.context.llm = self._llm
+            instance.context.runtime_services = self._runtime_services
             generation.state = "activating"
             instance.activate()
             if isinstance(instance.context.kv_store, PreparedPluginKVStore):

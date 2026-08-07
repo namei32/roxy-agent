@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from typing import cast
 
 from agent.plugins import Plugin, PluginSemanticCheck, tool
@@ -8,6 +9,7 @@ from agent.tools.base import get_current_tool_context
 from .bridge import AppleNotesBridge
 from .config import AppleNotesConfig
 from .receipt_store import AppleNotesReceiptStore
+from .remote_bridge import RemoteAppleNotesBridge
 from .renderer import NotesRenderer
 from .service import AppleNotesService
 
@@ -46,11 +48,23 @@ class AppleNotesPlugin(Plugin):
         config = cast(AppleNotesConfig, self.context.config)
         data_dir.mkdir(parents=True, exist_ok=True)
         receipts = AppleNotesReceiptStore(data_dir / "receipts.sqlite3")
-        bridge = AppleNotesBridge(
-            config=config,
-            script_path=self.context.plugin_dir / "scripts" / "notes.applescript",
-            temp_dir=data_dir / "tmp",
+        runtime_services = self.context.runtime_services or {}
+        broker = runtime_services.get("notes_bridge.broker.v1")
+        use_remote = config.execution_mode == "remote" or (
+            config.execution_mode == "auto"
+            and sys.platform != "darwin"
+            and broker is not None
         )
+        if use_remote:
+            if broker is None:
+                raise RuntimeError("Apple Notes remote 模式缺少 Notes Bridge Broker")
+            bridge = RemoteAppleNotesBridge(config=config, broker=broker)  # type: ignore[arg-type]
+        else:
+            bridge = AppleNotesBridge(
+                config=config,
+                script_path=self.context.plugin_dir / "scripts" / "notes.applescript",
+                temp_dir=data_dir / "tmp",
+            )
         self._service = AppleNotesService(
             config=config,
             renderer=NotesRenderer(config),

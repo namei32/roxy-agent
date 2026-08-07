@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import sys
@@ -24,6 +25,7 @@ from agent.config_models import (
     MobileKeyEncryptionConfig,
     MobileRealtimeConfig,
     ModelRuntimeConfig,
+    NotesBridgeConfig,
     QQChannelConfig,
     QQGroupConfig,
     TelegramChannelConfig,
@@ -69,13 +71,34 @@ def resolve_app_server_endpoint(value: str, workspace: Path) -> str:
 
     # 1. 显式配置保持原样
     if value:
+        if (
+            os.name != "nt"
+            and Path(value) == workspace / "akashic.sock"
+            and len(os.fsencode(value)) > 96
+        ):
+            return _short_workspace_socket(workspace)
         return value
 
     # 2. 缺省配置按 workspace 稳定派生
     if os.name != "nt":
-        return str(workspace / "akashic.sock")
+        candidate = workspace / "akashic.sock"
+        # macOS limits AF_UNIX paths to roughly 104 bytes. Pytest, mounted
+        # workspaces and nested deployments can exceed it, so keep a stable
+        # workspace-derived fallback without silently switching to a TCP port.
+        if len(os.fsencode(str(candidate))) <= 96:
+            return str(candidate)
+        return _short_workspace_socket(workspace)
     port_seed = zlib.crc32(str(workspace).encode("utf-8")) % 20000
     return f"127.0.0.1:{20000 + port_seed}"
+
+
+def _short_workspace_socket(workspace: Path) -> str:
+    digest = hashlib.sha256(str(workspace.resolve()).encode("utf-8")).hexdigest()
+    return str(
+        Path("/tmp")
+        / "akashic-sockets"
+        / f"{os.getuid()}-{digest[:24]}.sock"
+    )
 
 
 def _validated_timezone(tz_name: str, *, enabled: bool) -> str:
@@ -126,6 +149,7 @@ def load_config(
     channels = _load_channels_config(data, workspace_path)
     app_server = _load_app_server_config(data)
     mobile_realtime = _load_mobile_realtime_config(data)
+    notes_bridge = _load_notes_bridge_config(data, workspace_path)
     if mobile_realtime.enabled and (
         not channels.chat.enabled
         or channels.chat.host not in {"127.0.0.1", "localhost", "::1"}
@@ -165,6 +189,7 @@ def load_config(
         channels=channels,
         app_server=app_server,
         mobile_realtime=mobile_realtime,
+        notes_bridge=notes_bridge,
         proactive=proactive,
         memory_optimizer_enabled=_as_bool(
             agent_maintenance.get(
@@ -421,6 +446,47 @@ def _load_mobile_realtime_config(data: dict) -> MobileRealtimeConfig:
             or public.password
         ):
             raise ValueError("mobile_realtime.public_url 必须是无凭据的 wss://.../ws")
+    return config
+
+
+def _load_notes_bridge_config(data: dict, workspace: Path) -> NotesBridgeConfig:
+    """Load the live-only Mac Notes bridge and fail closed when enabled."""
+
+    raw = _as_dict(data.get("notes_bridge"), field="notes_bridge")
+    config = NotesBridgeConfig(
+        enabled=_as_bool(raw.get("enabled", False), field="notes_bridge.enabled"),
+        host=str(raw.get("host", "127.0.0.1") or "").strip(),
+        port=int(raw.get("port", 6330)),
+        bridge_id=str(raw.get("bridge_id", "mac-primary") or "").strip(),
+        token=_resolve(str(raw.get("token", "") or ""), workspace).strip(),
+        heartbeat_interval_seconds=float(raw.get("heartbeat_interval_seconds", 5.0)),
+        offline_after_seconds=float(raw.get("offline_after_seconds", 15.0)),
+        proposal_timeout_seconds=float(raw.get("proposal_timeout_seconds", 5.0)),
+        commit_timeout_seconds=float(raw.get("commit_timeout_seconds", 30.0)),
+        max_message_bytes=int(raw.get("max_message_bytes", 1024 * 1024)),
+    )
+    if not config.host:
+        raise ValueError("notes_bridge.host 不能为空")
+    if config.enabled and config.host not in {"127.0.0.1", "::1", "localhost"}:
+        raise ValueError(
+            "notes_bridge 只能监听 loopback；跨主机访问必须由 WSS 反向代理或 SSH 隧道转发"
+        )
+    if not 1 <= config.port <= 65535:
+        raise ValueError("notes_bridge.port 必须在 1..65535")
+    if not config.bridge_id or len(config.bridge_id) > 128:
+        raise ValueError("notes_bridge.bridge_id 必须是 1-128 位非空标识")
+    if config.enabled and len(config.token) < 32:
+        raise ValueError(
+            "notes_bridge 启用时 token 至少需要 32 个字符，建议通过环境变量注入"
+        )
+    if config.heartbeat_interval_seconds <= 0:
+        raise ValueError("notes_bridge.heartbeat_interval_seconds 必须大于 0")
+    if config.offline_after_seconds < config.heartbeat_interval_seconds * 2:
+        raise ValueError("notes_bridge.offline_after_seconds 至少是心跳周期的 2 倍")
+    if config.proposal_timeout_seconds <= 0 or config.commit_timeout_seconds <= 0:
+        raise ValueError("notes_bridge proposal/commit timeout 必须大于 0")
+    if not 1024 <= config.max_message_bytes <= 4 * 1024 * 1024:
+        raise ValueError("notes_bridge.max_message_bytes 必须在 1 KiB..4 MiB")
     return config
 
 

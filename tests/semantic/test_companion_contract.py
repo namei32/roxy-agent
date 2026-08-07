@@ -12,6 +12,7 @@ from tests_scenarios.contracts.oracles import assert_control_replay_contract
 from tests_scenarios.contracts.oracles import assert_dashboard_contract
 from tests_scenarios.contracts.oracles import assert_external_io_contract
 from tests_scenarios.contracts.oracles import assert_mcp_reservoir_contract
+from tests_scenarios.contracts.oracles import assert_mac_notes_bridge_contract
 from tests_scenarios.contracts.oracles import assert_peer_removed
 from tests_scenarios.contracts.oracles import assert_receipt_contract
 from tests_scenarios.contracts.oracles import assert_schedule_capacity_contract
@@ -39,6 +40,7 @@ def test_companion_contract_catalog() -> None:
     required = {
         "companion_tool_context_contract",
         "companion_external_io_contract",
+        "mac_notes_bridge_contract",
         "companion_peer_removal_contract",
         "companion_mcp_reservoir_contract",
         "companion_schedule_capacity_contract",
@@ -87,6 +89,15 @@ def test_external_io_rejects_ownerless_spill_mutant() -> None:
         )
     with pytest.raises(AssertionError, match="execution owner"):
         assert_external_io_contract({"spill_owner": ""})
+
+
+def test_mac_notes_bridge_rejects_offline_queue_mutant() -> None:
+    with pytest.raises(AssertionError, match="离线正文"):
+        assert_mac_notes_bridge_contract({"offline_payload_queued": True})
+    with pytest.raises(AssertionError, match="commit 前"):
+        assert_mac_notes_bridge_contract({"write_before_commit": True})
+    with pytest.raises(AssertionError, match="自动重放"):
+        assert_mac_notes_bridge_contract({"unknown_effect_replayed": True})
 
 
 def test_peer_surface_removal_rejects_surviving_route_mutant() -> None:

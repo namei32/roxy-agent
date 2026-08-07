@@ -24,6 +24,7 @@ unicode_utf16_command_length = "tests/mobile_realtime/test_channel.py::test_comm
 unmapped_executable_file = "tests/semantic/test_change_gate.py::test_unknown_executable_file_is_not_silently_accepted"
 companion_tool_context_origin_override = "tests/semantic/test_companion_contract.py::test_tool_context_rejects_origin_override_mutant"
 companion_external_io_spill_owner = "tests/semantic/test_companion_contract.py::test_external_io_rejects_ownerless_spill_mutant"
+mac_notes_bridge_offline_queue = "tests/semantic/test_companion_contract.py::test_mac_notes_bridge_rejects_offline_queue_mutant"
 companion_peer_surface_survives = "tests/semantic/test_companion_contract.py::test_peer_surface_removal_rejects_surviving_route_mutant"
 companion_mcp_bad_item_aborts_batch = "tests/semantic/test_companion_contract.py::test_mcp_quarantine_rejects_batch_abort_mutant"
 companion_schedule_unbounded = "tests/semantic/test_companion_contract.py::test_schedule_capacity_rejects_unbounded_add_mutant"
@@ -378,6 +379,15 @@ timeout_seconds = 60
 command = ["python", "-m", "pytest", "-q", "tests/semantic/test_companion_contract.py::test_external_io_rejects_ownerless_spill_mutant", "tests/test_http_resources.py", "tests/test_http_migrations.py", "tests/test_channel_clients.py", "tests/mobile_realtime/test_attachments.py", "tests/mobile_realtime/test_channel.py", "tests/mobile_realtime/test_gateway.py", "tests/mobile_realtime/test_storage.py", "tests/test_web_chat_channel.py"]
 observes = ["redirect_hop_url", "stream_byte_count", "spill_owner", "spill_lifetime", "cleanup_diagnostic", "attachment_write_set", "logical_message_receipt", "target_device_commit", "failure_semantics"]
 mutants = ["companion_external_io_spill_owner"]
+
+[scenarios.mac_notes_bridge_contract]
+requirements = ["CAP-002", "CAP-004", "PLG-001", "PLG-004", "SEC-010", "TST-001", "TST-002", "TST-003", "TST-005"]
+groups = ["mac_notes_bridge"]
+environment = "public_clean_workspace"
+timeout_seconds = 120
+command = ["python", "-m", "pytest", "-q", "tests/semantic/test_companion_contract.py::test_mac_notes_bridge_rejects_offline_queue_mutant", "tests/test_notes_bridge.py", "tests/test_apple_notes_plugin.py"]
+observes = ["authenticated_connection", "heartbeat_freshness", "proposal_ack", "commit_boundary", "offline_payload_queue", "cloud_ledger_write_set", "mac_ledger_write_set", "outcome_unknown", "note_body_privacy", "request_hash", "content_hash", "connection_epoch", "operation_status", "document_mapping", "notes_marker"]
+mutants = ["mac_notes_bridge_offline_queue"]
 
 [scenarios.companion_peer_removal_contract]
 requirements = ["SEC-003", "ERR-001", "TST-001", "TST-003"]

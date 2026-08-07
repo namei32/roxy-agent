@@ -482,6 +482,7 @@ def build_core_runtime(
     restart_coordinator: "RestartCoordinator | None" = None,
     *,
     clear_stale_session_admissions: bool = False,
+    runtime_services: dict[str, object] | None = None,
 ) -> CoreRuntime:
     """构造核心运行时及其插件快照依赖。"""
 
@@ -565,6 +566,7 @@ def build_core_runtime(
             model=config.model,
             max_tokens=config.max_tokens,
         ),
+        runtime_services=runtime_services,
         installed_cache_root=plugins_root() / "cache",
     )
     loop.bind_runtime_snapshot_store(plugin_manager.snapshot_store)

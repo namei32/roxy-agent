@@ -25,7 +25,14 @@ _SCOPED_TOOLS = frozenset(
     }
 )
 _NOTE_STATUSES = frozenset(
-    {"committed", "operation_rejected", "unit_failed", "outcome_unknown", "not_found"}
+    {
+        "committed",
+        "operation_rejected",
+        "unit_failed",
+        "outcome_unknown",
+        "not_found",
+        "skipped_offline",
+    }
 )
 
 
