@@ -114,7 +114,10 @@ input_modalities = ["text", "image"]
 实现采用与 Hermes 相同的简单策略：
 
 1. OpenCode Go 的授权可见模型来自其 `/models`；
-2. OpenCode Go 已知 `minimax-` 和 `qwen` 家族属于 Messages，当前 UI 隐藏；其余型号默认走 Chat Completions；
+2. OpenCode Go 当前 `minimax-` 家族属于 Messages，UI 隐藏；2026-08-12
+   真实边界已经证明 `qwen3.5-plus`、`qwen3.6-plus`、`qwen3.7-plus`
+   和 `qwen3.8-max` 走 Chat Completions，并支持图片块；其余型号默认先按
+   Chat Completions 验证；
 3. 保存前执行一次真实最小 Chat Completions 请求，协议不兼容时不修改当前运行时；
 4. OpenCode Go 的流式请求显式要求 usage；模型返回缓存明细时写入 Observe，未返回时保持未知；
 5. 本阶段不接入 models.dev 或离线模型能力库，上下文窗口和最大输出由用户确认。
@@ -133,7 +136,12 @@ OpenCode Go / 普通兼容端点
 安全默认值 + 页面明确覆盖
 ```
 
-Codex 继续使用其目录返回的 `context_window`、`max_context_window` 和 `input_modalities`。OpenCode Go v1 保守限制为文本输入，直到目录元数据和真实传输都证明图片输入可用。普通 OpenAI-compatible 端点允许高级覆盖。普通用户只看到“自动检测”；高级页才展示来源和覆盖字段。
+Codex 继续使用其目录返回的 `context_window`、`max_context_window` 和
+`input_modalities`。OpenCode Go v1 默认限制为文本输入；仅对 2026-08-12
+已通过真实图片请求的 `qwen3.5-plus`、`qwen3.6-plus`、`qwen3.7-plus` 和
+`qwen3.8-max` 开放 `["text", "image"]`。模型目录接口把该已验证能力投影到
+设置页，保存时仍执行真实最小请求。普通 OpenAI-compatible 端点允许高级覆盖。
+普通用户只看到“自动检测”；高级页才展示来源和覆盖字段。
 
 ## 6. 进程与所有权
 

@@ -18,6 +18,7 @@ from agent.model_runtime.provider_profiles import (
 class OpenCodeGoModel:
     slug: str
     supported_reasoning_efforts: tuple[str, ...] = ()
+    input_modalities: tuple[str, ...] = ("text",)
 
 
 _OPENCODE_PROVIDER_PREFIX = "opencode-go/"
@@ -169,6 +170,13 @@ class OpenCodeGoModelCatalog:
                         slug=model_id,
                         supported_reasoning_efforts=reasoning_efforts.get(
                             model_id, ()
+                        ),
+                        input_modalities=(
+                            ("text", "image")
+                            if OPENCODE_GO_PROFILE.supports_modalities(
+                                model_id, ("text", "image")
+                            )
+                            else ("text",)
                         ),
                     )
                 )

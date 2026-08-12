@@ -101,6 +101,7 @@ export function SettingsApp() {
   const [contextWindow, setContextWindow] = useState("128000");
   const [maxOutputTokens, setMaxOutputTokens] = useState("0");
   const [reasoningEffort, setReasoningEffort] = useState("");
+  const [inputModalities, setInputModalities] = useState<string[]>(["text"]);
   const [models, setModels] = useState<ModelOption[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -146,6 +147,7 @@ export function SettingsApp() {
     setContextWindow(String(runtime.contextWindow || 128000));
     setMaxOutputTokens(String(runtime.maxOutputTokens ?? 0));
     setReasoningEffort(runtime.reasoningEffort || "");
+    setInputModalities(runtime.inputModalities.length ? runtime.inputModalities : ["text"]);
     setApiKey("");
     setModels([]);
   }
@@ -168,6 +170,7 @@ export function SettingsApp() {
       setContextWindow("128000");
       setMaxOutputTokens("0");
       setReasoningEffort("");
+      setInputModalities(["text"]);
     } else if (next === "codex") {
       setProvider("codex");
       setBaseUrl("");
@@ -175,12 +178,14 @@ export function SettingsApp() {
       setContextWindow("128000");
       setMaxOutputTokens("0");
       setReasoningEffort("");
+      setInputModalities(["text"]);
     } else {
       setProvider("openai");
       setBaseUrl("https://api.openai.com/v1");
       setModel("");
       setMaxOutputTokens("0");
       setReasoningEffort("");
+      setInputModalities(["text"]);
     }
   }
 
@@ -212,6 +217,7 @@ export function SettingsApp() {
     if (!reasoningEffort && option.defaultReasoningEffort) {
       setReasoningEffort(option.defaultReasoningEffort);
     }
+    setInputModalities(option.inputModalities?.length ? option.inputModalities : ["text"]);
   }
 
   async function save() {
@@ -231,7 +237,7 @@ export function SettingsApp() {
           context_window: Number(contextWindow),
           max_output_tokens: Number(maxOutputTokens),
           reasoning_effort: reasoningEffort,
-          input_modalities: ["text"],
+          input_modalities: inputModalities,
         }),
       });
       setApiKey("");
@@ -429,6 +435,10 @@ export function SettingsApp() {
               <Field label="上下文窗口"><Input inputMode="numeric" value={contextWindow} onChange={(event) => setContextWindow(event.target.value)} /></Field>
               <Field label="最大输出（0 由 Provider 决定）"><Input inputMode="numeric" value={maxOutputTokens} onChange={(event) => setMaxOutputTokens(event.target.value)} /></Field>
             </div>
+
+            {inputModalities.includes("image") && (
+              <div className="settings-success"><Check /> 当前模型目录已验证图片输入。</div>
+            )}
 
             {error && <div className="settings-error" role="alert">{error}</div>}
             {saved && <div className="settings-success"><Check /> 已应用配置，Gateway 正在使用新的 Provider。</div>}

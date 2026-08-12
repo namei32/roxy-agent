@@ -11,6 +11,7 @@ class ProviderProfile:
     default_base_url: str
     messages_model_prefixes: tuple[str, ...]
     input_modalities: tuple[str, ...] = ("text",)
+    multimodal_models: tuple[str, ...] = ()
 
     def classify_model(self, model: str) -> str:
         """排除已知 Messages 家族，其余模型默认走 Chat Completions。"""
@@ -21,11 +22,29 @@ class ProviderProfile:
             return "messages"
         return "chat_completions"
 
+    def supports_modalities(
+        self, model: str, input_modalities: tuple[str, ...]
+    ) -> bool:
+        """按已验证的模型家族判断输入模态是否属于 provider 能力。"""
+        if input_modalities == self.input_modalities:
+            return True
+        normalized = model.strip().lower()
+        return (
+            input_modalities == ("text", "image")
+            and normalized in self.multimodal_models
+        )
+
 
 OPENCODE_GO_PROFILE = ProviderProfile(
     provider_id="opencode-go",
     default_base_url=OPENCODE_GO_BASE_URL,
-    messages_model_prefixes=("minimax-", "qwen"),
+    messages_model_prefixes=("minimax-",),
+    multimodal_models=(
+        "qwen3.5-plus",
+        "qwen3.6-plus",
+        "qwen3.7-plus",
+        "qwen3.8-max",
+    ),
 )
 
 _PROFILES = {
@@ -58,8 +77,9 @@ def validate_profile_runtime(
     if protocol == "unknown":
         raise ValueError(f"provider {profile.provider_id} 的模型 ID 不能为空")
 
-    # 2. OpenCode Go profile 只声明文本输入能力。
-    if input_modalities != profile.input_modalities:
+    # 2. 图片输入只对已经通过真实 Chat Completions 请求验证的家族开放。
+    if not profile.supports_modalities(model, input_modalities):
         raise ValueError(
-            f"provider {profile.provider_id} 仅支持 input_modalities = ['text']"
+            f"provider {profile.provider_id} 的模型 {model} 不支持 "
+            f"input_modalities = {list(input_modalities)!r}"
         )

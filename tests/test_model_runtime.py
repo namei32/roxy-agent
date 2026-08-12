@@ -113,7 +113,7 @@ def test_context_budget_and_runtime_config_share_the_same_boundary() -> None:
         )
 
 
-def test_opencode_go_profile_is_dynamic_and_rejects_wrong_wire() -> None:
+def test_opencode_go_profile_allows_verified_qwen_multimodal_and_rejects_wrong_wire() -> None:
     runtime = ModelRuntimeConfig(
         runtime_id="main",
         provider="opencode-go",
@@ -122,11 +122,27 @@ def test_opencode_go_profile_is_dynamic_and_rejects_wrong_wire() -> None:
     )
     assert runtime.model == "glm-5.99"
 
+    qwen = ModelRuntimeConfig(
+        runtime_id="vl",
+        provider="opencode-go",
+        model="qwen3.5-plus",
+        context_window=64_000,
+        input_modalities=("text", "image"),
+    )
+    assert qwen.input_modalities == ("text", "image")
+    with pytest.raises(ValueError, match="不支持 input_modalities"):
+        ModelRuntimeConfig(
+            runtime_id="vl",
+            provider="opencode-go",
+            model="qwen3.7-max",
+            context_window=64_000,
+            input_modalities=("text", "image"),
+        )
     with pytest.raises(ValueError, match="Messages API"):
         ModelRuntimeConfig(
             runtime_id="main",
             provider="opencode-go",
-            model="qwen3.5-plus",
+            model="minimax-m2.7",
             context_window=64_000,
         )
     future = ModelRuntimeConfig(
@@ -136,7 +152,7 @@ def test_opencode_go_profile_is_dynamic_and_rejects_wrong_wire() -> None:
         context_window=64_000,
     )
     assert future.model == "future-model-1"
-    with pytest.raises(ValueError, match="仅支持 input_modalities"):
+    with pytest.raises(ValueError, match="不支持 input_modalities"):
         ModelRuntimeConfig(
             runtime_id="vl",
             provider="opencode-go",
@@ -226,8 +242,11 @@ async def test_opencode_go_catalog_uses_http_boundary_and_opencode_variants(
     assert [model.slug for model in models] == [
         "glm-5.99",
         "kimi-k3",
+        "qwen3.5-plus",
         "future-model-1",
     ]
+    assert by_slug["qwen3.5-plus"].input_modalities == ("text", "image")
+    assert by_slug["glm-5.99"].input_modalities == ("text",)
     assert by_slug["glm-5.99"].supported_reasoning_efforts == ("high", "max")
     assert by_slug["kimi-k3"].supported_reasoning_efforts == ()
     assert by_slug["future-model-1"].supported_reasoning_efforts == (
