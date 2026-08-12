@@ -461,7 +461,7 @@ async def test_real_websocket_client_and_broker_complete_one_commit(
         await broker.handle_websocket(WebSocketAdapter(websocket))
 
     server = await websockets.serve(accept, "127.0.0.1", 0)
-    port = int(server.sockets[0].getsockname()[1])
+    port = int(next(iter(server.sockets)).getsockname()[1])
     client = MacNotesBridgeClient(
         url=f"ws://127.0.0.1:{port}/ws",
         bridge_id="mac-primary",

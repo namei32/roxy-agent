@@ -159,7 +159,7 @@ def test_codex_setup_reuses_existing_login_and_catalog(
     assert answers.reasoning_summary == "auto"
 
 
-def test_opencode_go_setup_uses_dynamic_catalog_and_forces_text_only(
+def test_opencode_go_setup_uses_dynamic_catalog_and_detects_modalities(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class Catalog:
@@ -168,7 +168,12 @@ def test_opencode_go_setup_uses_dynamic_catalog_and_forces_text_only(
             assert base_url == "https://opencode.ai/zen/go/v1"
 
         async def list_models(self) -> list[SimpleNamespace]:
-            return [SimpleNamespace(slug="glm-5.99")]
+            return [
+                SimpleNamespace(
+                    slug="qwen3.6-plus",
+                    input_modalities=("text", "image"),
+                )
+            ]
 
     confirms: list[str] = []
 
@@ -193,8 +198,8 @@ def test_opencode_go_setup_uses_dynamic_catalog_and_forces_text_only(
     _phase_api_key_llm(answers)
 
     assert answers.provider == "opencode-go"
-    assert answers.model == "glm-5.99"
+    assert answers.model == "qwen3.6-plus"
     assert answers.base_url == "https://opencode.ai/zen/go/v1"
     assert answers.max_output_tokens == 0
-    assert answers.multimodal is False
-    assert "主模型原生支持图片输入？" not in confirms
+    assert answers.multimodal is True
+    assert "主模型原生支持图片输入？" in confirms

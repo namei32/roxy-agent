@@ -16,7 +16,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import click
 from agent.plugins.manifest import (
@@ -25,6 +25,9 @@ from agent.plugins.manifest import (
     workspace_plugin_data_dir,
 )
 from plugins.default_memory.config import render_default_memory_config
+
+if TYPE_CHECKING:
+    from agent.model_runtime.catalog.opencode_go import OpenCodeGoModel
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +314,7 @@ def _phase_main_llm(
 def _phase_api_key_llm(a: WizardAnswers) -> None:
     """收集 OpenAI-compatible API Key 模型配置。"""
 
+    selected_modalities = ("text",)
     a.provider = click.prompt(
         "服务商",
         type=click.Choice(
@@ -327,7 +331,9 @@ def _phase_api_key_llm(a: WizardAnswers) -> None:
             default=OPENCODE_GO_BASE_URL,
         )
         a.api_key = _secret_prompt("API key")
-        a.model = _choose_api_key_model(a.provider, a.base_url, a.api_key)
+        selected = _choose_opencode_go_model(a.base_url, a.api_key)
+        a.model = selected.slug
+        selected_modalities = selected.input_modalities
     else:
         a.model = click.prompt("模型名")
         a.base_url = click.prompt("base_url（OpenAI 兼容格式）")
@@ -345,10 +351,9 @@ def _phase_api_key_llm(a: WizardAnswers) -> None:
         type=click.IntRange(min=0),
         default=0,
     )
-    a.multimodal = (
-        False
-        if a.provider == "opencode-go"
-        else click.confirm("主模型原生支持图片输入？", default=False)
+    detected_image = "image" in selected_modalities
+    a.multimodal = click.confirm(
+        "主模型原生支持图片输入？", default=detected_image
     )
 
 
@@ -357,6 +362,11 @@ def _choose_api_key_model(provider: str, base_url: str, api_key: str) -> str:
     if provider != "opencode-go":
         return click.prompt("模型名")
 
+    return _choose_opencode_go_model(base_url, api_key).slug
+
+
+def _choose_opencode_go_model(base_url: str, api_key: str) -> OpenCodeGoModel:
+    """从 Go 目录选择模型，并保留输入模态能力供向导默认值使用。"""
     from agent.model_runtime.catalog.opencode_go import OpenCodeGoModelCatalog
     from agent.model_runtime.errors import AuthenticationError, TransportError
 
@@ -368,8 +378,10 @@ def _choose_api_key_model(provider: str, base_url: str, api_key: str) -> str:
         raise click.ClickException(f"OpenCode Go 模型目录加载失败：{exc}") from exc
     if not models:
         raise click.ClickException("OpenCode Go 目录中没有可用的 Chat Completions 模型")
-    slugs = [model.slug for model in models]
-    return click.prompt("模型", type=click.Choice(slugs), default=slugs[0])
+    by_slug = {model.slug: model for model in models}
+    slugs = list(by_slug)
+    selected = click.prompt("模型", type=click.Choice(slugs), default=slugs[0])
+    return by_slug[selected]
 
 
 def _phase_codex_llm(
@@ -460,7 +472,7 @@ def _phase_vl_model(a: WizardAnswers) -> None:
     a.vl_model = click.prompt("视觉模型名")
     a.vl_provider, a.vl_base_url, a.vl_api_key = _phase_role_endpoint(
         a,
-        allow_opencode_go=False,
+        allow_opencode_go=True,
     )
     a.vl_auth_id = "vl_default"
     a.vl_context_window = click.prompt(
