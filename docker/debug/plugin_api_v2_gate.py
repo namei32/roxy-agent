@@ -309,6 +309,8 @@ def _run_host_channel_contract(
     # 1. 每个仓库独立运行，避免同名测试模块互相污染
     env = os.environ.copy()
     env["ROXY_AGENT_ROOT"] = str(ROOT)
+    # 锁定的外部渠道插件尚未迁移测试 bootstrap，继续读取旧变量。
+    env["AKASHIC_AGENT_ROOT"] = str(ROOT)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     outputs: list[str] = []
     returncode = 0

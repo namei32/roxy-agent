@@ -252,6 +252,9 @@ GitHub HTTPS 地址获取这些对象，不读取宿主插件 cache、正式 wor
 锁定的 `plugin-contracts` 仓库仍导出历史的 `akashic_plugin_contracts` Python 模块；Gate 在
 这个外部边界保留该模块名，不把它当作 Roxy Core 的新 API。
 
+同样，锁定的 Feishu/QQBot 测试 bootstrap 仍读取 `AKASHIC_AGENT_ROOT`；Gate 会同时注入
+`ROXY_AGENT_ROOT` 与该兼容变量，Core 自身只使用 Roxy 名称。
+
 ```text
 ┌─ 静态合同
 │  ├─ 拒绝 API v1 / initialize
