@@ -2926,6 +2926,6 @@
     "server.challenge"
   ],
   "protocolVersion": 1,
-  "title": "Akashic Mobile Realtime Protocol v1",
+  "title": "Roxy Mobile Realtime Protocol v1",
   "transport": "WebSocket JSON text frames and attachment binary chunks"
 }

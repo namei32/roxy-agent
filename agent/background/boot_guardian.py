@@ -12,6 +12,7 @@ import sys
 import time
 from pathlib import Path
 
+from agent.identity import set_roxy_env_in
 from core.common.diagnostic_log import diagnostic_line
 from utils.pidfd import open_pidfd
 from utils.process_group import process_group_exists
@@ -51,14 +52,13 @@ def run_boot_guardian(
     try:
         # 2. Guardian 不携带 boot identity；只有 Gateway 及其后代属于 boot。
         env = os.environ.copy()
-        env.update(
-            {
-                "AKASHIC_SUPERVISED": "1",
-                "AKASHIC_BOOT_ID": boot_id,
-                "AKASHIC_LIFECYCLE_FD": str(lifecycle_fd),
-                "AKASHIC_RESTART_NONCE": nonce,
-            }
-        )
+        for name, value in (
+            ("SUPERVISED", "1"),
+            ("BOOT_ID", boot_id),
+            ("LIFECYCLE_FD", str(lifecycle_fd)),
+            ("RESTART_NONCE", nonce),
+        ):
+            set_roxy_env_in(env, name, value)
         gateway = subprocess.Popen(
             [
                 sys.executable,
@@ -242,7 +242,10 @@ def _discover_boot_targets(
     groups: set[int],
     direct_pids: set[int],
 ) -> None:
-    expected = f"AKASHIC_BOOT_ID={boot_id}".encode()
+    expected = {
+        f"ROXY_BOOT_ID={boot_id}".encode(),
+        f"AKASHIC_BOOT_ID={boot_id}".encode(),
+    }
     own_group = os.getpgrp()
     own_pid = os.getpid()
     for entry in Path("/proc").iterdir():
@@ -251,7 +254,7 @@ def _discover_boot_targets(
         pid = int(entry.name)
         try:
             environ = (entry / "environ").read_bytes().split(b"\0")
-            if expected not in environ:
+            if not expected.intersection(environ):
                 continue
             group_id = os.getpgid(pid)
         except (OSError, ProcessLookupError):
@@ -267,9 +270,13 @@ def _discover_boot_targets(
 def _pid_has_boot_identity(pid: int, boot_id: str) -> bool:
     """判断一个 Linux 活进程是否携带精确的 boot token。"""
 
-    expected = f"AKASHIC_BOOT_ID={boot_id}".encode()
+    expected = {
+        f"ROXY_BOOT_ID={boot_id}".encode(),
+        f"AKASHIC_BOOT_ID={boot_id}".encode(),
+    }
     try:
-        return expected in Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
+        environment = Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
+        return bool(expected.intersection(environment))
     except OSError:
         return False
 

@@ -1,20 +1,20 @@
-# Akashic Python SDK
+# Roxy Python SDK
 
 ```python
-from akashic_sdk import Akashic
+from roxy_sdk import Roxy
 
-with Akashic.connect("/path/to/workspace/akashic.sock") as client:
+with Roxy.connect("/path/to/workspace/roxy.sock") as client:
     thread = client.thread_start()
     result = thread.run("整理最近的上下文")
     print(result["finalResponse"])
 ```
 
-异步 API 使用 `await AsyncAkashic.connect(endpoint)`，`Thread.turn()` 返回可消费
+异步 API 使用 `await AsyncRoxy.connect(endpoint)`，`Thread.turn()` 返回可消费
 `stream()`、`interrupt()` 和 `result()` 的 turn handle。连接断开不会取消服务端 turn；重新连接
 后可通过 `thread_resume()` 和协议 `turn/read` 恢复状态。
 
 ```python
-async with await AsyncAkashic.connect(endpoint) as client:
+async with await AsyncRoxy.connect(endpoint) as client:
     thread = await client.thread_resume(thread_id)
     handle = await thread.turn("继续分析")
     async for event in handle.events():
@@ -36,8 +36,11 @@ Unix socket 或 loopback TCP。
 loopback TCP 连接需显式传入 workspace token：
 
 ```python
-client = await AsyncAkashic.connect("127.0.0.1:2236", workspace_token=token)
+client = await AsyncRoxy.connect("127.0.0.1:2236", workspace_token=token)
 operation = await (await client.thread_resume(thread_id)).consolidate()
 ```
 
 consolidation 的最终结果通过全局 `operation/completed` notification 返回。
+
+旧版 `akashic_sdk`、`Akashic` 和 `AsyncAkashic` 仍是兼容别名；新代码应使用
+`roxy_sdk`、`Roxy` 和 `AsyncRoxy`。

@@ -1,6 +1,6 @@
-/// <reference path="../../types/akashic-dashboard.d.ts" />
+/// <reference path="../../types/roxy-dashboard.d.ts" />
 import { type ReactElement } from "react";
-import { Chip, JsonView, Markdown, api } from "@akashic/dashboard-ui";
+import { Chip, JsonView, Markdown, api } from "@roxy/dashboard-ui";
 
 interface Page {
   items: Record<string, unknown>[];
@@ -96,7 +96,7 @@ function Detail({ item }: { item: Record<string, unknown> | null }): ReactElemen
   );
 }
 
-window.AkashicDashboard.registerPlugin({
+window.RoxyDashboard.registerPlugin({
   id: "wake-proactive",
   label: "主动唤醒",
   viewLabel: "主动唤醒",

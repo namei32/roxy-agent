@@ -2,18 +2,18 @@
 
 > **历史说明，不能作为当前实现的状态清单。** 当前主线只初始化并维护 `MEMORY.md`、`SELF.md`、`PENDING.md` 和 `RECENT_CONTEXT.md`；`history_entries` 通过 `ConsolidationCommitted` 交给语义记忆引擎，当前代码不再写 `HISTORY.md` 或 `memory/journal/`。新会话请以 [`docs/INDEX.md`](../docs/INDEX.md) 和 [`docs/design/persistence-state-map.md`](../docs/design/persistence-state-map.md) 为入口，再核对当前代码。
 
-akashic 的记忆分为两层：**Markdown 文件层**（人类可读，LLM 直接写入）和**向量数据库层**（`memory2.db`，语义检索）。本文档只讲 Markdown 层——哪几个文件、各自干什么、consolidation 怎么把对话变成记忆。
+Roxy 的记忆分为两层：**Markdown 文件层**（人类可读，LLM 直接写入）和**向量数据库层**（`memory2.db`，语义检索）。本文档只讲 Markdown 层——哪几个文件、各自干什么、consolidation 怎么把对话变成记忆。
 
 ---
 
 ## 五个 Markdown 文件
 
-都在 `~/.akashic/workspace/memory/` 下：
+都在 `~/.roxy/workspace/memory/` 下：
 
 | 文件 | 写者 | 读方 | 用途 |
 |------|------|------|------|
 | **MEMORY.md** | Optimizer（主 agent 自动维护） | 被动/主动 agent 的 system prompt | 长期记忆——用户的稳定事实、偏好、身份 |
-| **SELF.md** | Optimizer（主 agent 自动维护） | 被动/主动 agent 的 system prompt | Akashic 的自我认知——形象、对用户的理解、关系定义 |
+| **SELF.md** | Optimizer（主 agent 自动维护） | 被动/主动 agent 的 system prompt | Roxy 的自我认知——形象、对用户的理解、关系定义 |
 | **HISTORY.md** | Consolidation worker 自动追加 | 被动 agent（检索时 grep）、consolidation 自身（取最近 3 条做上下文） | 按时间线的事件日志，只追加不修改 |
 | **RECENT_CONTEXT.md** | Consolidation worker 自动维护 | 被动/主动 agent 的 system prompt | 近期上下文摘要——最近在聊什么、关注什么 |
 | **PENDING.md** | Consolidation worker 追加 → Optimizer 消费后清空 | Optimizer | 缓冲队列——从对话中提取的待归档事实 |
@@ -153,7 +153,7 @@ Optimizer 在主 agent 启动时注册为后台任务（`memory_optimizer_enable
 
 | Priority | 块名 | 来源文件 | 注入形式 |
 |----------|------|---------|---------|
-| 30 | SelfModel | `SELF.md` | `## Akashic 自我认知\n\n{全文}` |
+| 30 | SelfModel | `SELF.md` | `## Roxy 自我认知\n\n{全文}` |
 | 35 | LongTermMemory | `MEMORY.md` | `## Long-term Memory\n\n{全文}` |
 | 45 | RecentContext | `RECENT_CONTEXT.md` | Compression + Ongoing Threads（不含 Recent Turns，那个有独立的滑动窗口） |
 | 55 | MemoryBlock | 向量检索结果 | `recall_memory` 的语义召回块（带 [id] 前缀和时间戳） |

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://akashic-agent.local/docker/debug/context_probe.schema.json",
-  "title": "Akashic Context Probe Scenario",
+  "$id": "https://roxy-agent.local/docker/debug/context_probe.schema.json",
+  "title": "Roxy Context Probe Scenario",
   "type": "object",
   "additionalProperties": false,
   "required": ["name", "turns"],

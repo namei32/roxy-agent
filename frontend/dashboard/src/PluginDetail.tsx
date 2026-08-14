@@ -22,12 +22,22 @@ export function PluginDetail(props: {
   // 2. Otherwise fall back to the legacy DOM render contract.
   if (Detail) {
     return (
-      <div className="plugin-workbench-root" data-akashic-plugin={props.plugin.id}>
+      <div
+        className="plugin-workbench-root"
+        data-roxy-plugin={props.plugin.id}
+        data-akashic-plugin={props.plugin.id}
+      >
         <Detail item={props.item} dispatch={props.dispatch} />
       </div>
     );
   }
-  return <div ref={ref} data-akashic-plugin={props.plugin.id} />;
+  return (
+    <div
+      ref={ref}
+      data-roxy-plugin={props.plugin.id}
+      data-akashic-plugin={props.plugin.id}
+    />
+  );
 }
 
 export function PluginMain(props: {
@@ -52,10 +62,21 @@ export function PluginMain(props: {
 
   if (Main) {
     return (
-      <div className="plugin-workbench-root" data-akashic-plugin={props.plugin.id}>
+      <div
+        className="plugin-workbench-root"
+        data-roxy-plugin={props.plugin.id}
+        data-akashic-plugin={props.plugin.id}
+      >
         <Main dispatch={props.dispatch} />
       </div>
     );
   }
-  return <div className="plugin-workbench-root" ref={ref} data-akashic-plugin={props.plugin.id} />;
+  return (
+    <div
+      className="plugin-workbench-root"
+      ref={ref}
+      data-roxy-plugin={props.plugin.id}
+      data-akashic-plugin={props.plugin.id}
+    />
+  );
 }

@@ -149,7 +149,7 @@ class McpClient:
                 "params": {
                     "protocolVersion": _MCP_PROTOCOL_VERSION,
                     "capabilities": {"tools": {}},
-                    "clientInfo": {"name": "akashic-agent", "version": "1.0"},
+                    "clientInfo": {"name": "roxy-agent", "version": "1.0"},
                 },
             }
         )

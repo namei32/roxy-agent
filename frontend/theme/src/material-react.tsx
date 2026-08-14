@@ -32,7 +32,13 @@ export function MaterialButton({
   return createElement(
     tag,
     {
-      className: ["ak-material-button", `ak-material-button--${variant}`, className].filter(Boolean).join(" "),
+      className: [
+        "roxy-material-button",
+        "ak-material-button",
+        `roxy-material-button--${variant}`,
+        `ak-material-button--${variant}`,
+        className,
+      ].filter(Boolean).join(" "),
       disabled: disabled || loading,
       type,
       onClick,
@@ -59,7 +65,7 @@ export function MaterialFilterChip({
   onClick?: (event: MouseEvent<HTMLElement>) => void;
 }) {
   return createElement("md-filter-chip", {
-    className: ["ak-material-filter-chip", className].filter(Boolean).join(" "),
+    className: ["roxy-material-filter-chip", "ak-material-filter-chip", className].filter(Boolean).join(" "),
     selected,
     disabled,
     onClick,
@@ -87,7 +93,13 @@ export function MaterialIconButton({
       ? "md-icon-button"
       : "md-filled-tonal-icon-button";
   return createElement(tag, {
-    className: ["ak-material-icon-button", `ak-material-icon-button--${variant}`, className].filter(Boolean).join(" "),
+    className: [
+      "roxy-material-icon-button",
+      "ak-material-icon-button",
+      `roxy-material-icon-button--${variant}`,
+      `ak-material-icon-button--${variant}`,
+      className,
+    ].filter(Boolean).join(" "),
     disabled,
     onClick,
     "aria-label": label,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 
-from agent.persona import AKASHIC_BEHAVIOR_RULES
+from agent.persona import ROXY_BEHAVIOR_RULES
 from agent.prompting import (
     PromptSectionRender,
     build_context_frame_content,
@@ -44,7 +44,7 @@ class ProactivePromptBuilder:
         )
         return (
             f"{veda}\n\n"
-            f"{AKASHIC_BEHAVIOR_RULES}\n\n"
+            f"{ROXY_BEHAVIOR_RULES}\n\n"
             f"{proactive_plugin_block}"
             "你现在处于主动推送决策模式：判断现在是否该给用户发一条消息，以及发什么。\n"
             "数据已预取完毕，会在后续 system context frame 里提供；基于那些数据直接决策。\n\n"

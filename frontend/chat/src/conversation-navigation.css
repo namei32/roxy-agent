@@ -6,8 +6,8 @@
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
-  color: var(--ak-color-text-primary);
-  background: var(--ak-color-bg-canvas);
+  color: var(--roxy-color-text-primary);
+  background: var(--roxy-color-bg-canvas);
   outline: none;
 }
 
@@ -22,7 +22,7 @@
 
 .conversation-destination small,
 .conversation-session small {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
 }
 
 .conversation-destinations {
@@ -56,12 +56,12 @@
 
 .conversation-destination:hover,
 .conversation-destination:focus-visible {
-  background: var(--ak-color-bg-surface);
+  background: var(--roxy-color-bg-surface);
 }
 
 .conversation-destination.active {
-  color: var(--ak-color-on-action-container);
-  background: var(--ak-color-action-container);
+  color: var(--roxy-color-on-action-container);
+  background: var(--roxy-color-action-container);
 }
 
 .conversation-destination.active .conversation-destination__icon,
@@ -73,7 +73,7 @@
 .conversation-destination:focus-visible,
 .conversation-session:focus-visible,
 .conversation-navigation__action:focus-visible {
-  outline: 2px solid var(--ak-color-action-primary);
+  outline: 2px solid var(--roxy-color-action-primary);
   outline-offset: -2px;
 }
 
@@ -91,8 +91,8 @@
   gap: 11px;
   border-radius: 22px;
   padding: 10px 14px;
-  color: var(--ak-color-on-action-primary);
-  background: var(--ak-color-action-primary);
+  color: var(--roxy-color-on-action-primary);
+  background: var(--roxy-color-action-primary);
   box-shadow: none;
 }
 
@@ -112,7 +112,7 @@
   width: 24px;
   height: 24px;
   place-items: center;
-  color: var(--ak-color-action-primary);
+  color: var(--roxy-color-action-primary);
   background: transparent;
 }
 
@@ -137,7 +137,7 @@
 }
 
 .conversation-destination__badge {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
@@ -151,7 +151,7 @@
 }
 
 .conversation-navigation__heading {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.875rem;
   font-weight: 650;
   line-height: 1.1;
@@ -201,7 +201,7 @@
 
 .conversation-session:hover,
 .conversation-session:focus-visible {
-  background: var(--ak-color-bg-surface);
+  background: var(--roxy-color-bg-surface);
 }
 
 .conversation-session:active {
@@ -209,7 +209,7 @@
 }
 
 .conversation-session.active {
-  background: var(--ak-color-action-container);
+  background: var(--roxy-color-action-container);
 }
 
 .conversation-session.unavailable {
@@ -218,7 +218,7 @@
 
 .conversation-session.unavailable .conversation-session__copy small,
 .conversation-session.unavailable .conversation-session__state {
-  color: var(--ak-color-status-warning);
+  color: var(--roxy-color-status-warning);
 }
 
 .conversation-session__copy,
@@ -249,7 +249,7 @@
 
 .conversation-session__title time {
   flex: 0 0 auto;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
   line-height: 1.35;
@@ -265,7 +265,7 @@
 
 .conversation-session.active .conversation-session__title time,
 .conversation-session.active .conversation-session__copy small {
-  color: var(--ak-color-on-action-container);
+  color: var(--roxy-color-on-action-container);
   opacity: 0.76;
 }
 
@@ -273,7 +273,7 @@
   display: grid;
   min-width: 20px;
   place-items: center;
-  color: var(--ak-color-action-primary);
+  color: var(--roxy-color-action-primary);
 }
 
 .conversation-navigation__actions {
@@ -291,7 +291,7 @@
   border-radius: 14px;
   padding-block: 8px;
   padding-inline: 16px;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   background: transparent;
   font: inherit;
   font-size: 0.875rem;
@@ -303,7 +303,7 @@
 
 .conversation-navigation__action:hover,
 .conversation-navigation__action:focus-visible {
-  background: var(--ak-color-bg-surface);
+  background: var(--roxy-color-bg-surface);
 }
 
 .conversation-navigation__action:active {
@@ -315,14 +315,14 @@
   margin-top: 8px;
   border-radius: 24px;
   padding-inline: 16px 18px;
-  color: var(--ak-color-on-action-container);
-  background: var(--ak-color-action-container);
+  color: var(--roxy-color-on-action-container);
+  background: var(--roxy-color-action-container);
   font-weight: 650;
 }
 
 .conversation-navigation__action.primary:hover,
 .conversation-navigation__action.primary:focus-visible {
-  background: color-mix(in oklch, var(--ak-color-action-container), var(--ak-color-action-primary) 12%);
+  background: color-mix(in oklch, var(--roxy-color-action-container), var(--roxy-color-action-primary) 12%);
 }
 
 .conversation-navigation__action:disabled {

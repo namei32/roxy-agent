@@ -15,7 +15,7 @@ max_output_tokens = 0
 input_modalities = ["text"]
 
 [agent]
-system_prompt = "You are Akashic, a helpful AI assistant with access to tools. Always respond in the same language the user uses."
+system_prompt = "You are Roxy, a helpful AI assistant with access to tools. Always respond in the same language the user uses."
 max_tokens = 0
 max_iterations = 0
 dev_mode = true

@@ -68,7 +68,7 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: {
       "Content-Type": "application/json",
-      "X-Akasic-CSRF": "1",
+      "X-Roxy-CSRF": "1",
       ...init?.headers,
     },
   });

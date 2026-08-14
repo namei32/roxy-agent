@@ -610,8 +610,8 @@ def _inside_smoke(report_dir: Path) -> int:
 
     report_dir.mkdir(parents=True, exist_ok=True)
     events_path = report_dir / "events.jsonl"
-    model_url = os.environ.get("AKASHIC_MODEL_GATE_URL", "http://model-gate:8090")
-    endpoint = Path("/sandbox/akashic.sock")
+    model_url = os.environ.get("ROXY_MODEL_GATE_URL", "http://model-gate:8090")
+    endpoint = Path("/sandbox/roxy.sock")
     checks: list[CheckResult] = []
     client: JsonRpcSocketClient | None = None
     try:
@@ -833,8 +833,8 @@ def _inside_memory_context(report_dir: Path) -> int:
 
     report_dir.mkdir(parents=True, exist_ok=True)
     events_path = report_dir / "events.jsonl"
-    model_url = os.environ.get("AKASHIC_MODEL_GATE_URL", "http://model-gate:8090")
-    endpoint = Path("/sandbox/akashic.sock")
+    model_url = os.environ.get("ROXY_MODEL_GATE_URL", "http://model-gate:8090")
+    endpoint = Path("/sandbox/roxy.sock")
     session_key = "programmatic:memory-context"
     checks: list[CheckResult] = []
     client: JsonRpcSocketClient | None = None
@@ -1001,8 +1001,8 @@ def _inside_failure_matrix(report_dir: Path) -> int:
 
     report_dir.mkdir(parents=True, exist_ok=True)
     events_path = report_dir / "events.jsonl"
-    model_url = os.environ.get("AKASHIC_MODEL_GATE_URL", "http://model-gate:8090")
-    endpoint = Path("/sandbox/akashic.sock")
+    model_url = os.environ.get("ROXY_MODEL_GATE_URL", "http://model-gate:8090")
+    endpoint = Path("/sandbox/roxy.sock")
     checks: list[CheckResult] = []
     clients: list[JsonRpcSocketClient] = []
     restart_state: dict[str, str] = {}
@@ -1381,7 +1381,7 @@ def _inside_failure_matrix(report_dir: Path) -> int:
         # 7. WebSocket channel adapter 保留领域投影、完整出站字段和 lane 语义。
         from websockets.sync.client import connect as connect_websocket
 
-        websocket_url = "ws://akashic-control-gate:6322/ws"
+        websocket_url = "ws://roxy-control-gate:6322/ws"
         with connect_websocket(websocket_url, open_timeout=READINESS_DEADLINE_S) as web:
             web.send(
                 json.dumps({"type": "session.create", "request_id": "pc16-create"})
@@ -1751,7 +1751,7 @@ def _inside_failure_matrix(report_dir: Path) -> int:
 def _inside_restart_check(report_dir: Path) -> int:
     """重启后验证协议 readiness 与既有 turn 持久可读。"""
 
-    endpoint = Path("/sandbox/akashic.sock")
+    endpoint = Path("/sandbox/roxy.sock")
     _wait_socket(endpoint, READINESS_DEADLINE_S)
     client = _connect_client(endpoint, report_dir / "events.jsonl")
     try:
@@ -1775,9 +1775,9 @@ def _inside_soak(report_dir: Path) -> int:
     """执行 10 次预热和 100 次混合 turn，并记录稳定终态。"""
 
     report_dir.mkdir(parents=True, exist_ok=True)
-    endpoint = Path("/sandbox/akashic.sock")
+    endpoint = Path("/sandbox/roxy.sock")
     events_path = report_dir / "events.jsonl"
-    model_url = os.environ.get("AKASHIC_MODEL_GATE_URL", "http://model-gate:8090")
+    model_url = os.environ.get("ROXY_MODEL_GATE_URL", "http://model-gate:8090")
     _wait_http_ready(f"{model_url}/readyz", READINESS_DEADLINE_S)
     _wait_socket(endpoint, READINESS_DEADLINE_S)
     client = _connect_client(endpoint, events_path)
@@ -1982,7 +1982,7 @@ memory_optimizer_enabled = false
 
 [app_server]
 enabled = true
-listen = "/sandbox/akashic.sock"
+listen = "/sandbox/roxy.sock"
 max_connections = 8
 ingress_queue_size = 32
 outbound_queue_size = 64
@@ -2070,8 +2070,8 @@ def _prepare_host_sandbox(sandbox: Path, source_root: Path) -> None:
 def _install_control_failure_plugin(sandbox: Path) -> None:
     """安装只为 PC10 构造 started 后 gate failure 的隔离插件。"""
 
-    cache = sandbox / "home/.akashic-plugin/cache/gate/control_failure/1.0.0"
-    manifest = sandbox / "home/.akashic-plugin/manifest.toml"
+    cache = sandbox / "home/.roxy-plugin/cache/gate/control_failure/1.0.0"
+    manifest = sandbox / "home/.roxy-plugin/manifest.toml"
     cache.mkdir(parents=True, exist_ok=True)
     _ = (cache / "plugin.py").write_text(
         "from agent.control.context import current_turn_id\n"
@@ -2132,7 +2132,7 @@ manager.close()
             "-T",
             "--entrypoint",
             "python",
-            "akashic-control-gate",
+            "roxy-control-gate",
             "-c",
             script,
         ],
@@ -2173,7 +2173,7 @@ def _run_stdio_check(
         "--rm",
         "-T",
         "--no-deps",
-        "akashic-control-gate",
+        "roxy-control-gate",
         "app-server",
         "--stdio",
     ]
@@ -2278,7 +2278,7 @@ def _workspace_lock_check(
             "--rm",
             "-T",
             "--no-deps",
-            "akashic-control-gate",
+            "roxy-control-gate",
             "app-server",
             "--stdio",
         ],
@@ -2332,7 +2332,7 @@ def _sample_resources(
             *compose,
             "exec",
             "-T",
-            "akashic-control-gate",
+            "roxy-control-gate",
             "python",
             "-c",
             script,
@@ -2455,7 +2455,7 @@ def _run_host(gate: str) -> int:
     run_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
     report_dir = repo / "docker/debug/reports/programmatic-control" / run_id
     report_dir.mkdir(parents=True)
-    sandbox = Path(tempfile.mkdtemp(prefix="akashic-control-gate-", dir="/tmp"))
+    sandbox = Path(tempfile.mkdtemp(prefix="roxy-control-gate-", dir="/tmp"))
     _prepare_host_sandbox(sandbox, repo)
     if gate == "failure-matrix":
         _install_control_failure_plugin(sandbox)
@@ -2465,11 +2465,11 @@ def _run_host(gate: str) -> int:
     _write_json(report_dir / "repo-digest.before.json", before)
     env = {
         **os.environ,
-        "AKASHIC_CONTROL_SANDBOX": str(sandbox),
+        "ROXY_CONTROL_SANDBOX": str(sandbox),
         "UID": str(os.getuid()),
         "GID": str(os.getgid()),
     }
-    project = f"akashic-control-{run_id.lower()}"
+    project = f"roxy-control-{run_id.lower()}"
     compose = [
         "docker",
         "compose",
@@ -2490,7 +2490,7 @@ def _run_host(gate: str) -> int:
         if gate == "memory-context":
             _seed_memory_context_fixture(compose, repo, env)
         up = subprocess.run(
-            [*compose, "up", "-d", "model-gate", "akashic-control-gate"],
+            [*compose, "up", "-d", "model-gate", "roxy-control-gate"],
             cwd=repo,
             env=env,
             check=False,
@@ -2513,7 +2513,7 @@ def _run_host(gate: str) -> int:
             checks.append(_workspace_lock_check(compose, repo, env, report_dir))
         stop_started = time.monotonic()
         gateway_stop = subprocess.run(
-            [*compose, "stop", "-t", "15", "akashic-control-gate"],
+            [*compose, "stop", "-t", "15", "roxy-control-gate"],
             cwd=repo,
             env=env,
             check=False,
@@ -2537,7 +2537,7 @@ def _run_host(gate: str) -> int:
                 )
             )
             restart = subprocess.run(
-                [*compose, "start", "akashic-control-gate"],
+                [*compose, "start", "roxy-control-gate"],
                 cwd=repo,
                 env=env,
                 check=False,
@@ -2560,13 +2560,13 @@ def _run_host(gate: str) -> int:
                 )
 
             crash = subprocess.run(
-                [*compose, "kill", "-s", "SIGKILL", "akashic-control-gate"],
+                [*compose, "kill", "-s", "SIGKILL", "roxy-control-gate"],
                 cwd=repo,
                 env=env,
                 check=False,
             )
             restart_after_crash = subprocess.run(
-                [*compose, "start", "akashic-control-gate"],
+                [*compose, "start", "roxy-control-gate"],
                 cwd=repo,
                 env=env,
                 check=False,

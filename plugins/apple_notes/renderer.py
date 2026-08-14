@@ -234,10 +234,10 @@ class NotesRenderer:
         return f"<p><strong>{label}</strong> · {escape(date_text)}</p><hr>"
 
     def _footer(self, operation_id: str, saved_at: datetime) -> str:
-        marker = f"AKASHIC_EXPORT:{operation_id}"
+        marker = f"ROXY_EXPORT:{operation_id}"
         saved_text = saved_at.astimezone().strftime("%Y-%m-%d %H:%M %Z")
         return (
-            "<hr><p><small>由 Akashic 保存 · "
+            "<hr><p><small>由 Roxy 保存 · "
             f"{escape(saved_text)} · {escape(marker)}</small></p>"
         )
 

@@ -82,6 +82,7 @@ def test_plugin_uninstall_defers_only_inside_runtime_turn(
         }
 
     monkeypatch.setattr(main, "_request_plugin_uninstall", request)
+    monkeypatch.delenv("ROXY_DEFER_PLUGIN_UNINSTALL", raising=False)
     monkeypatch.delenv("AKASHIC_DEFER_PLUGIN_UNINSTALL", raising=False)
     completed = main._uninstall_via_runtime(
         str(config_path),
@@ -104,8 +105,8 @@ def test_app_runtime_uses_explicit_dashboard_bind(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("AKASHIC_DASHBOARD_HOST", "127.0.0.1")
-    monkeypatch.setenv("AKASHIC_DASHBOARD_PORT", "16403")
+    monkeypatch.setenv("ROXY_DASHBOARD_HOST", "127.0.0.1")
+    monkeypatch.setenv("ROXY_DASHBOARD_PORT", "16403")
 
     runtime = bootstrap_app.AppRuntime(cast(Any, object()), tmp_path)
 
@@ -119,9 +120,9 @@ def test_app_runtime_rejects_invalid_dashboard_port(
     tmp_path: Path,
     value: str,
 ) -> None:
-    monkeypatch.setenv("AKASHIC_DASHBOARD_PORT", value)
+    monkeypatch.setenv("ROXY_DASHBOARD_PORT", value)
 
-    with pytest.raises(ValueError, match="AKASHIC_DASHBOARD_PORT"):
+    with pytest.raises(ValueError, match="ROXY_DASHBOARD_PORT"):
         bootstrap_app.AppRuntime(cast(Any, object()), tmp_path)
 
 
@@ -285,11 +286,11 @@ def test_default_socket_is_derived_from_workspace(tmp_path: Path) -> None:
 
     if sys.platform == "win32":
         assert endpoint.startswith("127.0.0.1:")
-    elif len(os.fsencode(str(tmp_path / "akashic.sock"))) > 96:
-        assert Path(endpoint).parent.name == "akashic-sockets"
+    elif len(os.fsencode(str(tmp_path / "roxy.sock"))) > 96:
+        assert Path(endpoint).parent.name == "roxy-sockets"
         assert len(os.fsencode(endpoint)) <= 96
     else:
-        assert endpoint == str(tmp_path / "akashic.sock")
+        assert endpoint == str(tmp_path / "roxy.sock")
 
 
 def test_main_help_does_not_start_runtime() -> None:
@@ -315,6 +316,7 @@ def test_workspace_selection_prefers_cli_then_env_then_config(
         encoding="utf-8",
     )
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("ROXY_WORKSPACE", raising=False)
     monkeypatch.delenv("AKASHIC_WORKSPACE", raising=False)
 
     assert main._workspace_from_args([], config_path) == (
@@ -327,6 +329,10 @@ def test_workspace_selection_prefers_cli_then_env_then_config(
         [],
         config_path,
     ) == environment_workspace.resolve()
+
+    roxy_workspace = tmp_path / "roxy-environment-workspace"
+    monkeypatch.setenv("ROXY_WORKSPACE", str(roxy_workspace))
+    assert main._workspace_from_args([], config_path) == roxy_workspace.resolve()
 
     cli_workspace = tmp_path / "cli-workspace"
     assert main._workspace_from_args(
@@ -341,13 +347,14 @@ def test_workspace_selection_uses_default_only_for_bootstrap(
 ) -> None:
     config_path = tmp_path / "missing.toml"
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("ROXY_WORKSPACE", raising=False)
     monkeypatch.delenv("AKASHIC_WORKSPACE", raising=False)
 
     assert main._workspace_from_args(
         [],
         config_path,
         allow_default=True,
-    ) == (tmp_path / ".akashic" / "workspace").resolve()
+    ) == (tmp_path / ".roxy" / "workspace").resolve()
     with pytest.raises(ValueError, match="找不到配置文件"):
         main._workspace_from_args([], config_path)
 
@@ -939,14 +946,14 @@ def test_init_workspace_creates_expected_assets(tmp_path):
     assert "[channels.chat]" in config_text
     assert "port = 6322" in config_text
     assert '[runtime]\n' in config_text
-    assert 'workspace = "~/.akashic/workspace"' in config_text
+    assert 'workspace = "~/.roxy/workspace"' in config_text
     assert any("http://127.0.0.1:6322" in step for step in summary.next_steps)
     assert (workspace / "sessions.db").exists()
     assert (workspace / "observe").is_dir()
     assert (workspace / "memory" / "consolidation_writes.db").exists()
     assert not (workspace / "memory" / "journal").exists()
     assert (workspace / "memory" / "memory2.db").exists()
-    assert "你是 Akashic" in (
+    assert "你是 Roxy" in (
         workspace / "memory" / "VEDA.md"
     ).read_text(encoding="utf-8")
     assert "Proactive Context" in (

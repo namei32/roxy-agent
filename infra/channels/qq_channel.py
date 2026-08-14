@@ -53,8 +53,17 @@ from infra.channels.group_filter import (
 from core.net.http import HttpRequester, RequestBudget, get_default_http_requester
 from session.manager import SessionManager
 
-# NcatBot 运行时产物（plugins、logs）放到用户目录，不污染项目目录
-_NCATBOT_DIR = Path.home() / ".akashic" / "ncatbot"
+# NcatBot 运行时产物（plugins、logs）放到用户目录，不污染项目目录。
+# 已有 Akashic 目录会作为兼容根保留，避免升级后丢失既有 NcatBot 插件。
+def _default_ncatbot_dir() -> Path:
+    canonical = Path.home() / ".roxy" / "ncatbot"
+    legacy = Path.home() / ".akashic" / "ncatbot"
+    if canonical.exists():
+        return canonical
+    return legacy if legacy.exists() else canonical
+
+
+_NCATBOT_DIR = _default_ncatbot_dir()
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +71,7 @@ _CHANNEL = "qq"
 _GROUP_PREFIX = "gqq:"
 _TRACE_THINKING_LIMIT = 500
 _TRACE_TOOL_RESULT_LIMIT = 120
-_TRACE_DEFAULT_ACTOR = "Akashic"
+_TRACE_DEFAULT_ACTOR = "Roxy"
 MAX_QQ_IMAGE_COUNT = 10
 MAX_QQ_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_QQ_TOTAL_IMAGE_BYTES = 20 * 1024 * 1024
@@ -233,26 +242,26 @@ def _patch_ncatbot_ws_open_timeout(timeout_seconds: float) -> None:
         adapter_mod = importlib.import_module("ncatbot.core.adapter.adapter")
         original_connect = getattr(
             adapter_mod,
-            "_akashic_original_websockets_connect",
+            "_roxy_original_websockets_connect",
             None,
         )
         if original_connect is None:
             original_connect = adapter_mod.websockets.connect
-            adapter_mod._akashic_original_websockets_connect = original_connect
+            adapter_mod._roxy_original_websockets_connect = original_connect
 
             def _patched_connect(*args, **kwargs):
                 configured_timeout = getattr(
                     adapter_mod,
-                    "_akashic_websocket_open_timeout_seconds",
+                    "_roxy_websocket_open_timeout_seconds",
                     None,
                 )
                 if configured_timeout is not None:
                     kwargs["open_timeout"] = configured_timeout
-                return adapter_mod._akashic_original_websockets_connect(*args, **kwargs)
+                return adapter_mod._roxy_original_websockets_connect(*args, **kwargs)
 
             adapter_mod.websockets.connect = _patched_connect
 
-        adapter_mod._akashic_websocket_open_timeout_seconds = timeout_seconds
+        adapter_mod._roxy_websocket_open_timeout_seconds = timeout_seconds
     except Exception as e:
         logger.warning("[qq] patch ncatbot WebSocket open_timeout 失败，沿用 SDK 默认值: %s", e)
 
@@ -306,7 +315,7 @@ async def _download_to_temp(
             ext = ext_map.get(ct, ".jpg")
             path = attachments.write_bytes(
                 content,
-                prefix="akashic_qq_",
+                prefix="roxy_qq_",
                 suffix=ext,
             )
             paths.append(str(path))
@@ -413,10 +422,10 @@ class QQChannel:
         ncatbot_config.check_ncatbot_update = False
         ncatbot_config.skip_ncatbot_install_check = True
         ncatbot_config.napcat.remote_mode = True
-        # Akashic 只需要 NapCat 的 OneBot WebSocket，禁用 WebUI 避免启动时卡交互 token。
+        # Roxy 只需要 NapCat 的 OneBot WebSocket，禁用 WebUI 避免启动时卡交互 token。
         ncatbot_config.napcat.enable_webui = False
         ncatbot_config.enable_webui_interaction = False
-        # 运行时产物重定向到 ~/.akashic/ncatbot/，不污染项目目录
+        # 运行时产物重定向到 ~/.roxy/ncatbot/（旧根仍兼容），不污染项目目录
         _NCATBOT_DIR.mkdir(parents=True, exist_ok=True)
         (_NCATBOT_DIR / "plugins").mkdir(exist_ok=True)
         ncatbot_config.plugin.plugins_dir = str(_NCATBOT_DIR / "plugins")

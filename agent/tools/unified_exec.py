@@ -376,7 +376,7 @@ class ShellProcessManager:
         """创建子进程和诊断日志，但不开始等待。"""
 
         log_fd, output_path = tempfile.mkstemp(
-            prefix=f"akashic-exec-{execution_id}-",
+            prefix=f"roxy-exec-{execution_id}-",
             suffix=".log",
         )
         log_file = os.fdopen(log_fd, "wb", buffering=0)

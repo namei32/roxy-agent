@@ -31,11 +31,11 @@ from prompts.completion import VERIFIABLE_COMPLETION_RULES
 logger = logging.getLogger(__name__)
 
 _SUBAGENT_TURN_ID: ContextVar[str | None] = ContextVar(
-    "akashic_subagent_turn_id",
+    "roxy_subagent_turn_id",
     default=None,
 )
 _SUBAGENT_BASE_CONTEXT: ContextVar[ToolExecutionContext | None] = ContextVar(
-    "akashic_subagent_base_context",
+    "roxy_subagent_base_context",
     default=None,
 )
 

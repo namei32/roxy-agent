@@ -100,4 +100,4 @@ def test_workspace_mcp_probe_separates_host_and_internal_arguments(
     assert compose[:5] == ["docker", "compose", "-p", "gate-project", "-f"]
     assert compose[-1].endswith("docker/debug/docker-compose.control-gate.yml")
     environment = _compose_environment(tmp_path / "sandbox")
-    assert "AKASHIC_EXTRA_PLUGIN_DIRS" not in environment
+    assert "ROXY_EXTRA_PLUGIN_DIRS" not in environment

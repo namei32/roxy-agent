@@ -5,14 +5,15 @@
 ## 目录与格式
 
 - 每个技能目录必须包含 `SKILL.md`。
-- `SKILL.md` 建议包含 frontmatter：`name`、`description`、`metadata.akashic`。
+- `SKILL.md` 建议包含 frontmatter：`name`、`description`、`metadata.roxy`；运行时仍读取
+  旧的 `metadata.akashic` 作为兼容别名。
 - 主循环可按需读取具体技能文件；本索引只做发现与导航，不承载执行细节。
 
 ## 当前内置技能
 
-- `develop-akashic-plugin`
-  - 在 canonical source 中创建或修改 Akashic 插件及插件内 Skill/MCP，并按 stable/latest 合同做递归行为验证。
-  - 文件：`skills/develop-akashic-plugin/SKILL.md`
+- `develop-roxy-plugin`
+  - 在 canonical source 中创建或修改 Roxy 插件及插件内 Skill/MCP，并按 stable/latest 合同做递归行为验证。
+  - 文件：`skills/develop-roxy-plugin/SKILL.md`
 
 - `feed-manage`
   - 管理和查询 RSS/信息来源订阅，支持列订阅、查最新、查概况、关键词搜索。
@@ -26,16 +27,19 @@
   - 把长代码库任务委托给本机 Codex CLI 后台执行，并等待完成后回灌结果。
   - 文件：`skills/codex-delegate/SKILL.md`
 
-- `akashic-call`
-  - 指导 Codex 或其他外部程序调用已运行的固定 Akashic runtime，并复用持久 thread。
-  - 文件：`skills/akashic-call/SKILL.md`
+- `roxy-call`
+  - 指导 Codex 或其他外部程序调用已运行的固定 Roxy runtime，并复用持久 thread。
+  - 文件：`skills/roxy-call/SKILL.md`
+
+- 兼容入口：`akashic-call`、`develop-akashic-plugin`
+  - 为已保存的自动化保留；正文会路由到相应的 Roxy Skill，不会自动移动旧插件缓存或工作区数据。
 
 - `skill-creater`
   - 创建或改写技能 `SKILL.md`，用于新增技能与结构迁移。
   - 文件：`skills/skill-creater/SKILL.md`
 
 - `plugin-system`
-  - 说明并执行 Akashic 插件系统的安装、加载、启停、配置、插件内 MCP、skill 与 lifecycle。
+  - 说明并执行 Roxy 插件系统的安装、加载、启停、配置、插件内 MCP、skill 与 lifecycle。
   - 文件：`skills/plugin-system/SKILL.md`
 
 - `manage-workspace-mcp`

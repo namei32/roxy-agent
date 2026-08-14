@@ -1,6 +1,6 @@
 # 决策记录
 
-这个目录保存 Akashic Agent 已经作出的重要工程决策和后续勘误。新会话先按任务关键词查找相关记录，不需要一次读完全部文件。
+这个目录保存 Roxy Agent 已经作出的重要工程决策和后续勘误。新会话先按任务关键词查找相关记录，不需要一次读完全部文件。
 
 ## 索引
 
@@ -33,6 +33,7 @@
 | [0025](0025-codex-style-same-turn-input.md) | accepted | 中断后的新 Attempt 续接同一 Logical Interaction | SES-007～SES-008、MEM-010～MEM-011、RUN-008、OUT-005 |
 | [0026](0026-scoped-interview-images-may-auto-export-to-notes.md) | accepted | 面经图片只在持久窄域授权内自动导出到 Notes | CAP-002～CAP-003、PLG-001～PLG-010、SES-005～SES-006 |
 | [0027](0027-mac-notes-bridge-writes-only-through-live-commit.md) | accepted | Mac Notes Bridge 只在当前在线提交 | CAP-002～CAP-004、PLG-001～PLG-005、SEC-010 |
+| [0028](0028-roxy-runtime-identity-migration.md) | accepted | Roxy 是唯一的新增运行时身份，旧 Akashic 仅作兼容 | WSP-003～WSP-005、MIG-001～MIG-002、WEBUI-007、SEC-010 |
 
 ## 新增规则
 

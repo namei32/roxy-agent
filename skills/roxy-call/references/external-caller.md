@@ -2,15 +2,15 @@
 
 ## 固定运行环境
 
-以下调用都连接已经运行的 gateway，不创建第二个 Akashic runtime：
+以下调用都连接已经运行的 gateway，不创建第二个 Roxy runtime：
 
 ```bash
-export AKASHIC_REPO=/path/to/akasic-agent
-export AKASHIC_WORKSPACE="$HOME/.akashic/workspace"
-export AKASHIC_ENDPOINT="$AKASHIC_WORKSPACE/akashic.sock"
+export ROXY_REPO=/path/to/roxy-agent
+export ROXY_WORKSPACE="$HOME/.roxy/workspace"
+export ROXY_ENDPOINT="$ROXY_WORKSPACE/roxy.sock"
 ```
 
-默认 Unix socket 位于 `<workspace>/akashic.sock`。若配置使用 loopback TCP，Python SDK 还需传入
+默认 Unix socket 位于 `<workspace>/roxy.sock`。若配置使用 loopback TCP，Python SDK 还需传入
 `<workspace>/.app-server-token` 的内容。禁止连接非 loopback TCP endpoint。
 
 ## CLI：适合 Codex 和 shell 自动化
@@ -18,18 +18,18 @@ export AKASHIC_ENDPOINT="$AKASHIC_WORKSPACE/akashic.sock"
 创建新 thread，并从 JSONL 事件中提取、校验和持久化明确的 `threadId`：
 
 ```bash
-export AKASHIC_THREAD_FILE=./akashic-thread-id
-export AKASHIC_EVENTS_FILE=./akashic-first-turn.jsonl
-if ! python "$AKASHIC_REPO/main.py" exec \
-    --workspace "$AKASHIC_WORKSPACE" \
-    --endpoint "$AKASHIC_ENDPOINT" \
+export ROXY_THREAD_FILE=./roxy-thread-id
+export ROXY_EVENTS_FILE=./roxy-first-turn.jsonl
+if ! python "$ROXY_REPO/main.py" exec \
+    --workspace "$ROXY_WORKSPACE" \
+    --endpoint "$ROXY_ENDPOINT" \
     --new --json \
-    "分析当前任务并给出下一步" > "$AKASHIC_EVENTS_FILE"; then
-  echo "Akashic 首次 turn 执行失败" >&2
+    "分析当前任务并给出下一步" > "$ROXY_EVENTS_FILE"; then
+  echo "Roxy 首次 turn 执行失败" >&2
   exit 1
 fi
 
-AKASHIC_THREAD_ID="$(python - "$AKASHIC_EVENTS_FILE" <<'PY'
+ROXY_THREAD_ID="$(python - "$ROXY_EVENTS_FILE" <<'PY'
 import json
 import sys
 
@@ -39,25 +39,25 @@ with open(sys.argv[1], encoding="utf-8") as events:
         params = json.loads(line).get("params", {})
         thread_id = thread_id or params.get("threadId", "")
 if not thread_id:
-    raise SystemExit("Akashic JSONL 中缺少 threadId")
+    raise SystemExit("Roxy JSONL 中缺少 threadId")
 print(thread_id)
 PY
 )"
-test -n "$AKASHIC_THREAD_ID" || {
-  echo "未取得 Akashic threadId" >&2
+test -n "$ROXY_THREAD_ID" || {
+  echo "未取得 Roxy threadId" >&2
   exit 1
 }
-printf '%s\n' "$AKASHIC_THREAD_ID" > "$AKASHIC_THREAD_FILE"
+printf '%s\n' "$ROXY_THREAD_ID" > "$ROXY_THREAD_FILE"
 ```
 
 后续调用必须使用保存的 ID：
 
 ```bash
-export AKASHIC_THREAD_ID='programmatic:明确的-thread-id'
-python "$AKASHIC_REPO/main.py" exec \
-  --workspace "$AKASHIC_WORKSPACE" \
-  --endpoint "$AKASHIC_ENDPOINT" \
-  --thread "$AKASHIC_THREAD_ID" \
+export ROXY_THREAD_ID='programmatic:明确的-thread-id'
+python "$ROXY_REPO/main.py" exec \
+  --workspace "$ROXY_WORKSPACE" \
+  --endpoint "$ROXY_ENDPOINT" \
+  --thread "$ROXY_THREAD_ID" \
   --final-only - <<'EOF'
 继续上一次会话，执行下一步。
 EOF
@@ -72,7 +72,7 @@ Codex 作为外部调用者时可以直接执行以上命令并读取 stdout。`
 安装当前仓库 SDK：
 
 ```bash
-python -m pip install -e "$AKASHIC_REPO/sdk/python"
+python -m pip install -e "$ROXY_REPO/sdk/python"
 ```
 
 首次创建并保存 thread ID：
@@ -80,10 +80,10 @@ python -m pip install -e "$AKASHIC_REPO/sdk/python"
 ```python
 import os
 
-from akashic_sdk import Akashic
+from roxy_sdk import Roxy
 
-endpoint = os.environ["AKASHIC_ENDPOINT"]
-with Akashic.connect(endpoint) as client:
+endpoint = os.environ["ROXY_ENDPOINT"]
+with Roxy.connect(endpoint) as client:
     thread = client.thread_start({"caller": "external-automation"})
     print(thread.id)  # 调用方必须持久化这个 ID
     result = thread.run("分析当前任务并给出下一步")
@@ -95,15 +95,15 @@ with Akashic.connect(endpoint) as client:
 ```python
 import os
 
-from akashic_sdk import Akashic
+from roxy_sdk import Roxy
 
-with Akashic.connect(os.environ["AKASHIC_ENDPOINT"]) as client:
-    thread = client.thread_resume(os.environ["AKASHIC_THREAD_ID"])
+with Roxy.connect(os.environ["ROXY_ENDPOINT"]) as client:
+    thread = client.thread_resume(os.environ["ROXY_THREAD_ID"])
     result = thread.run("继续上一次会话，执行下一步")
     print(result["finalResponse"])
 ```
 
-需要流式 item、interrupt、断线后的 `turn/read` 时使用 `AsyncAkashic`。SDK 只连接现有 gateway，
+需要流式 item、interrupt、断线后的 `turn/read` 时使用 `AsyncRoxy`。SDK 只连接现有 gateway，
 不会隐式启动 runtime。
 
 ## 原始 JSON-RPC：适合其他语言
@@ -124,9 +124,9 @@ with Akashic.connect(os.environ["AKASHIC_ENDPOINT"]) as client:
 Unix socket 完整客户端：
 
 ```bash
-python "$AKASHIC_REPO/skills/akashic-call/examples/raw_jsonrpc_uds.py" \
-  "$AKASHIC_ENDPOINT" \
-  --thread "$AKASHIC_THREAD_ID" \
+python "$ROXY_REPO/skills/roxy-call/examples/raw_jsonrpc_uds.py" \
+  "$ROXY_ENDPOINT" \
+  --thread "$ROXY_THREAD_ID" \
   --timeout 600 \
   "继续上一次会话"
 ```

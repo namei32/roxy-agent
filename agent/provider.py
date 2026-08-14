@@ -44,8 +44,8 @@ _THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL)
 
 logger = logging.getLogger(__name__)
 _LLM_PAYLOAD_SNAPSHOT_ENABLED = False
-_LAST_PAYLOAD_PATH = Path(tempfile.gettempdir()) / "akashic-last-llm-payload.json"
-_PAYLOAD_SNAPSHOT_DIR = Path(tempfile.gettempdir()) / "akashic-llm-payloads"
+_LAST_PAYLOAD_PATH = Path(tempfile.gettempdir()) / "roxy-last-llm-payload.json"
+_PAYLOAD_SNAPSHOT_DIR = Path(tempfile.gettempdir()) / "roxy-llm-payloads"
 _PAYLOAD_SNAPSHOT_SEQ = itertools.count(1)
 StreamDelta = dict[str, str]
 

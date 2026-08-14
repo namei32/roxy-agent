@@ -1,7 +1,7 @@
 # 程序化控制面迁移
 
 旧的本地聊天 IPC、纯文本 CLI 和 TUI 已删除。运行中的 gateway 现在通过 workspace 私有
-`akashic.sock` 暴露 JSON-RPC 2.0 NDJSON app-server；socket 权限为 `0600`。
+`roxy.sock` 暴露 JSON-RPC 2.0 NDJSON app-server；socket 权限为 `0600`。
 
 ## 配置
 
@@ -9,7 +9,7 @@
 
 ```toml
 [channels]
-socket = "/tmp/akashic.sock"
+socket = "/tmp/roxy.sock"
 ```
 
 新配置：
@@ -17,7 +17,7 @@ socket = "/tmp/akashic.sock"
 ```toml
 [app_server]
 enabled = true
-listen = "" # 留空时使用 <workspace>/akashic.sock
+listen = "" # 留空时使用 <workspace>/roxy.sock
 max_connections = 32
 ingress_queue_size = 128
 outbound_queue_size = 512
@@ -50,8 +50,8 @@ Windows 和显式 loopback TCP 使用 `<workspace>/.app-server-token`，客户�
 `workspaceToken` 中提交；非 loopback bind 会在启动边界拒绝。Linux 默认仍使用权限 `0600`
 的 workspace UDS。
 
-Python SDK 位于 `sdk/python/`，提供异步 `AsyncAkashic` 和使用单一 event-loop thread 的同步
-`Akashic` facade。SDK 只依赖 wire protocol，不 import 服务端 runtime。
+Python SDK 位于 `sdk/python/`，提供异步 `AsyncRoxy` 和使用单一 event-loop thread 的同步
+`Roxy` facade。SDK 只依赖 wire protocol，不 import 服务端 runtime。
 
 升级前备份 config 和 workspace 数据库。回滚时恢复旧 binary 与旧 config 备份，禁止新旧进程
 同时占有同一 workspace/socket。

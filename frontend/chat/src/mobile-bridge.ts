@@ -31,8 +31,17 @@ const METHOD_ARITY: Record<(typeof METHODS)[number], number> = {
 };
 
 export function installMobileBridge(): void {
-  const transport = window.AkashicNativeTransport as NativeTransport | undefined;
-  if (!transport || typeof transport.postMessage !== "function") return;
+  const transport = (
+    window.RoxyNativeTransport ?? window.AkashicNativeTransport
+  ) as NativeTransport | undefined;
+  if (!transport || typeof transport.postMessage !== "function") {
+    // 旧原生壳可能直接注入 AkashicNative，而不是 transport；将它仅作为
+    // 兼容来源映射到规范名称，页面其余部分只读取 RoxyNative。
+    if (!window.RoxyNative && window.AkashicNative) {
+      window.RoxyNative = window.AkashicNative;
+    }
+    return;
+  }
   const url = new URL(window.location.href);
   const generationId = url.searchParams.get("generation_id");
   const nonce = url.searchParams.get("nonce");
@@ -55,5 +64,8 @@ export function installMobileBridge(): void {
       }));
     };
   }
-  window.AkashicNative = bridge as unknown as Window["AkashicNative"];
+  const nativeBridge = bridge as unknown as NonNullable<Window["RoxyNative"]>;
+  window.RoxyNative = nativeBridge;
+  // 已发布的 Akashic Mobile 壳仍会查找这个全局名。
+  window.AkashicNative = nativeBridge;
 }

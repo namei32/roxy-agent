@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from uuid import uuid4
 
+from agent.identity import roxy_env
+
 logger = logging.getLogger(__name__)
 
 
@@ -52,12 +54,12 @@ class SupervisorCommitChannel:
 
     @classmethod
     def from_environment(cls) -> SupervisorCommitChannel | None:
-        supervised = os.environ.get("AKASHIC_SUPERVISED") == "1"
+        supervised = roxy_env("SUPERVISED") == "1"
         if not supervised:
             return None
-        raw_fd = os.environ.get("AKASHIC_LIFECYCLE_FD")
-        boot_id = os.environ.get("AKASHIC_BOOT_ID", "")
-        nonce = os.environ.get("AKASHIC_RESTART_NONCE", "")
+        raw_fd = roxy_env("LIFECYCLE_FD") or None
+        boot_id = roxy_env("BOOT_ID")
+        nonce = roxy_env("RESTART_NONCE")
         if raw_fd is None:
             raise RuntimeError("supervised child 缺少 lifecycle fd")
         try:

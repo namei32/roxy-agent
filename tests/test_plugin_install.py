@@ -28,7 +28,7 @@ def test_plugins_root_honors_explicit_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     target = tmp_path / "isolated-plugin-home"
-    monkeypatch.setenv("AKASHIC_PLUGIN_HOME", str(target))
+    monkeypatch.setenv("ROXY_PLUGIN_HOME", str(target))
 
     assert plugins_root() == target
 
@@ -36,7 +36,7 @@ def test_plugins_root_honors_explicit_environment(
 def test_plugins_root_rejects_blank_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("AKASHIC_PLUGIN_HOME", "   ")
+    monkeypatch.setenv("ROXY_PLUGIN_HOME", "   ")
 
     with pytest.raises(ValueError, match="不能为空"):
         plugins_root()
@@ -562,7 +562,7 @@ def test_plugin_probe_cleans_imported_submodules(tmp_path: Path) -> None:
 
     _ = install_module._load_plugin_class(tmp_path)
 
-    assert not any(name.startswith("akasic_plugin_install_") for name in sys.modules)
+    assert not any(name.startswith("roxy_plugin_install_") for name in sys.modules)
 
 
 def test_mcp_runtime_path_cannot_escape_plugin_root(tmp_path: Path) -> None:

@@ -86,7 +86,7 @@ def main() -> int:
         release = _load_lock(args.lock.resolve())
         report["contract"] = asdict(release.contract)
         report["plugins"] = [asdict(item) for item in release.plugins]
-        with tempfile.TemporaryDirectory(prefix="akashic-plugin-api-v2-") as raw_temp:
+        with tempfile.TemporaryDirectory(prefix="roxy-plugin-api-v2-") as raw_temp:
             temp_root = Path(raw_temp)
             contract_root = temp_root / "contract"
             plugin_root = temp_root / "plugins"
@@ -242,7 +242,7 @@ def _run_static_contract(
         [
             sys.executable,
             "-m",
-            "akashic_plugin_contracts",
+            "roxy_plugin_contracts",
             "check",
             *(str(plugin_root / plugin.id / "plugin.py") for plugin in plugins),
         ],
@@ -271,7 +271,7 @@ def _run_runtime_phase(
 
     output_path = report_dir / f"runtime-{phase}.log"
     env = os.environ.copy()
-    env["AKASHIC_PLUGIN_SOURCE"] = str(plugin_root)
+    env["ROXY_PLUGIN_SOURCE"] = str(plugin_root)
     result = subprocess.run(
         [
             sys.executable,
@@ -306,7 +306,7 @@ def _run_host_channel_contract(
 
     # 1. 每个仓库独立运行，避免同名测试模块互相污染
     env = os.environ.copy()
-    env["AKASHIC_AGENT_ROOT"] = str(ROOT)
+    env["ROXY_AGENT_ROOT"] = str(ROOT)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     outputs: list[str] = []
     returncode = 0

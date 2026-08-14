@@ -30,6 +30,8 @@ class FakeBridge:
         self.append_calls = 0
         self.find_calls = 0
         self.found: NotesMutationReceipt | None = None
+        self.found_by_marker: dict[str, NotesMutationReceipt | None] = {}
+        self.markers: list[str] = []
         self.create_error: BaseException | None = None
 
     def require_available(self) -> None:
@@ -41,7 +43,7 @@ class FakeBridge:
         self.create_calls += 1
         assert title
         assert document_key
-        assert "AKASHIC_EXPORT:" in html
+        assert "ROXY_EXPORT:" in html
         if self.create_error is not None:
             raise self.create_error
         return NotesMutationReceipt(note_id="note-1", folder_id="folder-1")
@@ -52,13 +54,14 @@ class FakeBridge:
         self.append_calls += 1
         assert note_id == "note-1"
         assert document_key
-        assert "AKASHIC_EXPORT:" in html
+        assert "ROXY_EXPORT:" in html
         return NotesMutationReceipt(note_id=note_id, folder_id="folder-1")
 
     async def find_marker(self, marker: str) -> NotesMutationReceipt | None:
         self.find_calls += 1
-        assert marker.startswith("AKASHIC_EXPORT:")
-        return self.found
+        assert marker.startswith(("ROXY_EXPORT:", "AKASHIC_EXPORT:"))
+        self.markers.append(marker)
+        return self.found_by_marker.get(marker, self.found)
 
 
 class OfflineBridge(FakeBridge):
@@ -115,7 +118,7 @@ def test_renderer_produces_bounded_safe_knowledge_card() -> None:
     assert 'href="https://example.com"' in rendered.html
     assert 'href="javascript:' not in rendered.html
     assert "<script>" not in rendered.html
-    assert "AKASHIC_EXPORT:preview" in rendered.html
+    assert "ROXY_EXPORT:preview" in rendered.html
     assert rendered.html_bytes == len(rendered.html.encode("utf-8"))
 
 
@@ -356,7 +359,11 @@ async def test_unknown_outcome_never_replays_effect_and_can_reconcile(
     assert second.status == "outcome_unknown"
     assert second.idempotent_replay is True
     assert bridge.create_calls == 1
-    assert bridge.find_calls == 1
+    assert bridge.find_calls == 2
+    assert bridge.markers == [
+        f"ROXY_EXPORT:{first.operation_id}",
+        f"AKASHIC_EXPORT:{first.operation_id}",
+    ]
 
     bridge.found = NotesMutationReceipt(note_id="note-1", folder_id="folder-1")
     status = await service.status("recoverable-note")
@@ -364,7 +371,36 @@ async def test_unknown_outcome_never_replays_effect_and_can_reconcile(
     assert status.status == "committed"
     assert status.idempotent_replay is True
     assert bridge.create_calls == 1
-    assert bridge.find_calls == 2
+    assert bridge.find_calls == 3
+
+
+@pytest.mark.asyncio
+async def test_recovery_falls_back_to_legacy_akashic_marker(tmp_path: Path) -> None:
+    bridge = FakeBridge()
+    bridge.create_error = NotesOutcomeUnknown(
+        "notes_script_timeout",
+        "timeout",
+        stage="create",
+    )
+    service, _ = _service(tmp_path, bridge)
+    first = await service.create(
+        title="旧标识恢复",
+        markdown="可能已经写入",
+        document_key="legacy-marker",
+        template="plain",
+        context=_context(),
+    )
+    bridge.found_by_marker[f"AKASHIC_EXPORT:{first.operation_id}"] = (
+        NotesMutationReceipt(note_id="note-legacy", folder_id="folder-1")
+    )
+
+    status = await service.status("legacy-marker")
+
+    assert status.status == "committed"
+    assert bridge.markers[-2:] == [
+        f"ROXY_EXPORT:{first.operation_id}",
+        f"AKASHIC_EXPORT:{first.operation_id}",
+    ]
 
 
 @pytest.mark.asyncio

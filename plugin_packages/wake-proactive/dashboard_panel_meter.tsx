@@ -1,6 +1,6 @@
-/// <reference path="../../types/akashic-dashboard.d.ts" />
+/// <reference path="../../types/roxy-dashboard.d.ts" />
 import { useEffect, useState, type ReactElement } from "react";
-import { api } from "@akashic/dashboard-ui";
+import { api } from "@roxy/dashboard-ui";
 
 interface MeterData {
   session_key: string;
@@ -153,7 +153,7 @@ function MeterPage(): ReactElement {
   );
 }
 
-window.AkashicDashboard.registerPlugin({
+window.RoxyDashboard.registerPlugin({
   id: "wake-meter",
   label: "兴奋阈值",
   viewLabel: "兴奋阈值",

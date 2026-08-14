@@ -396,9 +396,8 @@ class AppleNotesService:
                 ),
                 updated_at=_now().isoformat(),
             )
-        marker = f"AKASHIC_EXPORT:{receipt.operation_id}"
         try:
-            found = await self._bridge.find_marker(marker)
+            found = await _find_existing_marker(self._bridge, receipt.operation_id)
         except NotesBridgeError as error:
             return _unknown_reconciliation_result(receipt, error)
         if found is None:
@@ -708,6 +707,19 @@ def _hash_json(value: dict[str, str]) -> str:
 
 def _now() -> datetime:
     return datetime.now().astimezone()
+
+
+async def _find_existing_marker(
+    bridge: AppleNotesExecutionBridge,
+    operation_id: str,
+):
+    """先查询 Roxy 标识；旧笔记只在未命中时走 Akashic 兼容标识。"""
+
+    for prefix in ("ROXY_EXPORT", "AKASHIC_EXPORT"):
+        found = await bridge.find_marker(f"{prefix}:{operation_id}")
+        if found is not None:
+            return found
+    return None
 
 
 def _clip(value: str, limit: int) -> str:

@@ -127,7 +127,7 @@ test("desktop and mobile keep one shared conversation owner", () => {
 
 test("shared navigation keeps the compact mobile drawer language", () => {
   assert.doesNotMatch(navigationSource, /对话与知识/);
-  assert.doesNotMatch(navigationSource, />Akashic</);
+  assert.doesNotMatch(navigationSource, />Roxy</);
   assert.match(navigationSource, /conversation-navigation__heading">会话/);
   assert.match(navigationSource, /featuredDestinations/);
   assert.match(mobileSource, /label: "知识与运行",[\s\S]*?featured: true,/);
@@ -153,11 +153,11 @@ test("shared navigation keeps the compact mobile drawer language", () => {
   );
   assert.match(
     sharedStyles,
-    /\.mobile-plugin-slot\[data-slot="drawer\.panel"\]\s*\{[^}]*position:\s*absolute;[^}]*inset-block-end:\s*0;[^}]*background:\s*var\(--ak-color-bg-canvas\);/,
+    /\.mobile-plugin-slot\[data-slot="drawer\.panel"\]\s*\{[^}]*position:\s*absolute;[^}]*inset-block-end:\s*0;[^}]*background:\s*var\(--roxy-color-bg-canvas\);/,
   );
   assert.match(
     navigationStyles,
-    /\.conversation-destination\.featured\s*\{[^}]*min-height:\s*68px;[^}]*border-radius:\s*22px;[^}]*background:\s*var\(--ak-color-action-primary\);[^}]*box-shadow:\s*none;/,
+    /\.conversation-destination\.featured\s*\{[^}]*min-height:\s*68px;[^}]*border-radius:\s*22px;[^}]*background:\s*var\(--roxy-color-action-primary\);[^}]*box-shadow:\s*none;/,
   );
   assert.match(
     platformStyles,
@@ -167,7 +167,7 @@ test("shared navigation keeps the compact mobile drawer language", () => {
 
 test("Material shadow roles always declare opacity at use sites", () => {
   for (const styles of [themeStyles, platformStyles, desktopStyles, navigationStyles, dashboardStyles]) {
-    assert.doesNotMatch(styles, /var\(--ak-color-shadow\)/);
+    assert.doesNotMatch(styles, /var\(--roxy-color-shadow\)/);
   }
 });
 
@@ -262,7 +262,7 @@ test("streaming redraws only dynamic message subtrees", () => {
 });
 
 test("user message bubble uses a defined secondary container token", () => {
-  assert.match(platformStyles, /\.mobile-plain-message-view\.user[\s\S]*?background:\s*var\(--ak-color-action-soft\)/);
+  assert.match(platformStyles, /\.mobile-plain-message-view\.user[\s\S]*?background:\s*var\(--roxy-color-action-soft\)/);
   assert.doesNotMatch(themeStyles, /--m-secondary-container:/);
 });
 

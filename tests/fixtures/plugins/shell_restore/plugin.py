@@ -10,7 +10,11 @@ logger = logging.getLogger("plugin.shell_restore_fixture")
 
 
 def _restore_dir() -> str:
-    return os.environ.get("AKASIC_RESTORE_DIR", str(Path.home() / "restore"))
+    return (
+        os.environ.get("ROXY_RESTORE_DIR")
+        or os.environ.get("AKASIC_RESTORE_DIR")
+        or str(Path.home() / "restore")
+    )
 
 
 class ShellRestore(Plugin):

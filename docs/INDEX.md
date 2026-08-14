@@ -1,10 +1,10 @@
-# Akashic Agent 项目阅读索引
+# Roxy Agent 项目阅读索引
 
 这份文件是每个新会话进入仓库后的第一站。它只回答三件事：先读什么、什么情况下继续读哪份文件、读完后去哪里核对真实实现。
 
 它不是需求规范，也不保存临时进度。修改仓库文件时按 [`WORKFLOW.md`](WORKFLOW.md) 执行；长期语义以 [`projectneed.md`](projectneed.md) 为准，当前接手点以 [`NOW.md`](NOW.md) 为准，决策理由以 [`decisions/`](decisions/README.md) 为准。
 
-## 1. 先分清 Git worktree 与 Akashic workspace
+## 1. 先分清 Git worktree 与 Roxy workspace
 
 本项目同时使用两个容易混淆的“工作区”，它们不是一回事：
 
@@ -14,12 +14,12 @@
 └──────────────────────────────┘
 
 ┌──────────────────────────────┐
-│ Akashic <workspace>          │  会话、记忆、附件、调度、主动流程、
+│ Roxy <workspace>             │  会话、记忆、附件、调度、主动流程、
 │                              │  plugin-data、能力投影和运行状态
 └──────────────────────────────┘
 ```
 
-文档中的裸词 `workspace` 一律指第二种：由 `--workspace`、`AKASHIC_WORKSPACE` 或 `config.toml` 选中的 Akashic 运行数据根。要表达代码副本时必须写 `Git worktree`、`repository` 或 `checkout`。代码 worktree 可以随时重建；正式 Akashic workspace 含用户和 agent 的持续数据，不能随代码清理、切分支或重构一起变化。
+文档中的裸词 `workspace` 一律指第二种：由 `--workspace`、`ROXY_WORKSPACE` 或 `config.toml` 选中的 Roxy 运行数据根。旧 `AKASHIC_WORKSPACE` 只为既有部署兼容；两者同时存在时 Roxy 优先。要表达代码副本时必须写 `Git worktree`、`repository` 或 `checkout`。代码 worktree 可以随时重建；正式 Roxy workspace 含用户和 agent 的持续数据，不能随代码清理、切分支或重构一起变化。
 
 ## 2. 新会话固定入口
 
@@ -106,7 +106,7 @@
 | 正式启动、Supervisor、自重启、停止信号 | `projectneed` RUN-001～RUN-004 → [Linux Supervisor 安全自重启提议](design/linux-supervisor-safe-self-restart.md) → [`docker/debug/README.md`](../docker/debug/README.md) | `main.py`、`agent/supervisor.py`、`agent/restart.py`、`agent/tools/agent_restart.py`、`scripts/stop-runtime.sh`、restart Gate 报告 |
 | 插件安装、热重载、自验证、plugin-data、Skill、Drift skill、MCP | `projectneed` 第 6、9～13 节 → [0008](decisions/0008-plugin-runtime-publishes-only-committed-snapshots.md) → [0024](decisions/0024-plugin-self-validation-uses-stable-and-latest.md) → [插件递归自验证运行时设计](design/recursive-plugin-self-validation.md) → [持久化状态地图](design/persistence-state-map.md)；Apple Notes 写入另读 [Apple「备忘录」导出插件](design/apple-notes-export-plugin.md)，面经自动归档另读 [Telegram 面经教练](design/telegram-interview-coach.md) 与 [0026](decisions/0026-scoped-interview-images-may-auto-export-to-notes.md)，远程 Mac 提交另读 [Mac Notes Bridge](design/mac-notes-bridge.md) 与 [0027](decisions/0027-mac-notes-bridge-writes-only-through-live-commit.md) | `agent/plugins/base.py`、`agent/plugins/install.py`、`agent/plugins/manager.py`、`agent/plugins/snapshot.py`、`agent/plugins/reload_journal.py`、`agent/plugins/skill_links.py`、`agent/control/runtime.py`、`agent/looping/core.py`、`agent/mcp/host.py`、`infra/notes_bridge/`、`plugins/apple_notes/`、`plugins/interview_coach/` |
 | 移动端查看 Markdown、定时任务、插件、Skill、MCP | `projectneed` 第 6、10～13 节 → [移动端运行时检查](design/mobile-runtime-inspection.md) → [持久化状态地图](design/persistence-state-map.md) | `infra/mobile_realtime/runtime_inspection.py`、`infra/mobile_realtime/protocol.py`、`infra/mobile_realtime/channel.py` |
-| Workspace、配置、凭据、迁移、备份 | `projectneed` 第 6、11～13 节 → [持久化状态地图](design/persistence-state-map.md) → [0021](decisions/0021-yoyo-workspace-ledger-defines-migration-origin.md) → [Yoyo 迁移维护手册](design/git-migration-authoring.md) | `main.py`、`bootstrap/init_workspace.py`、`agent/config.py`、`agent/migrations/`、`migrations/yoyo/`、`agent/model_runtime/auth/store.py`、`scripts/rolling_backup.py` |
+| Workspace、配置、凭据、迁移、备份 | `projectneed` 第 6、11～13 节 → [持久化状态地图](design/persistence-state-map.md) → [0028](decisions/0028-roxy-runtime-identity-migration.md) → [Roxy 身份迁移设计](design/roxy-brand-migration.md) → [0021](decisions/0021-yoyo-workspace-ledger-defines-migration-origin.md) → [Yoyo 迁移维护手册](design/git-migration-authoring.md) | `main.py`、`agent/identity.py`、`agent/config.py`、`agent/migrations/`、`migrations/yoyo/`、`agent/model_runtime/auth/store.py`、`scripts/rolling_backup.py` |
 | 高风险 refactor、语义不变重构、CI oracle | `projectneed` 第 4～6、13、15 节 → [综合重构账本](refactor/clean-code-ledger.md) → [上下文事故设计](design/project-workbook-and-semantic-safety.md) → 相关决策 | 改动前后的完整 diff、semantic tests、write set、故障注入 |
 | 变更影响 Gate、跨仓库插件契约 | `projectneed` 第 10、13、15 节 → [0004](decisions/0004-cross-repository-evidence-is-an-immutable-combination.md) → [移动端与跨仓库 Gate](design/mobile-cross-repository-semantic-gate.md) → [Gate 总体设计](spark/2026-07-16-change-impact-contract-gate.md) → [持久化状态地图](design/persistence-state-map.md) | `tests_scenarios/contracts/`、`docker/debug/gate.py`、`private_runtime/` |
 | Companion 安全、容量和长时运行 Edge Case | `projectneed` SEC-001～SEC-010 → [0017](decisions/0017-one-person-companion-security-boundary.md) → [Companion 安全边界与 Edge Case 实施设计](design/security-scan-edge-cases.md) → [持久化状态地图](design/persistence-state-map.md) | 相关 D1～D9 owner、`tests_scenarios/contracts/`、`docker/debug/gate.py` |
@@ -114,7 +114,7 @@
 | Shell、长任务、PTY、进程续接或轮询 | `projectneed` SH-001、RUN-002～RUN-003、ERR-001 → [0014](decisions/0014-shell-uses-unified-execution.md) → [Unified Shell Execution 设计](design/unified-shell-execution.md) | `agent/tools/shell.py`、`agent/tools/unified_exec.py`、`agent/tools/meta/register.py`、`agent/background/subagent_profiles.py`、`bootstrap/tools.py` |
 | 移动端、客户端协议、跨仓库 runtime patch 或 stacked PR 评审 | `projectneed` MOB-001～MOB-007、GOV-001～GOV-005、TST-001～TST-008 → [0003](decisions/0003-core-capability-ownership-is-semantic.md) → [0004](decisions/0004-cross-repository-evidence-is-an-immutable-combination.md) → [0007](decisions/0007-mobile-plugin-control-and-data-planes-are-explicit.md) → [0009](decisions/0009-akasha-mobile-recall-preserves-semantic-lanes.md) → [0019](decisions/0019-mobile-long-messages-use-bounded-events.md) → [0020](decisions/0020-mobile-history-content-uses-authenticated-http-ranges.md) → [Mobile 长消息投递](design/mobile-long-message-delivery.md) → [移动端与跨仓库 Gate](design/mobile-cross-repository-semantic-gate.md) → [`templates/review-contract.md`](templates/review-contract.md) | 每层 `base..head`、最终累计 diff、所有 schema lineage、协议 source、runtime/provider/scenario identity 和设备隔离证据 |
 | 新增或修改项目文档 | 本索引 → [`writing-rules.md`](writing-rules.md) → 目标文档的权威上游 | 所有相对链接、重复规则、过时入口和 Git diff |
-| Dashboard、Chat UI | `projectneed` 公共合同、WEBUI-001～WEBUI-007 → [0018](decisions/0018-chat-webui-has-one-source-and-two-adapters.md) → [0022](decisions/0022-mobile-webui-uses-server-selected-generations.md) → [0023](decisions/0023-akashic-tokens-own-material-3-semantics.md) → [共享对话 WebUI](design/shared-chat-webui.md) → [服务端发布的移动 WebUI OTA](design/server-published-mobile-webui.md) → `NOW.md` 对应事项 | `frontend/**/src`、真实构建和渲染结果 |
+| Dashboard、Chat UI | `projectneed` 公共合同、WEBUI-001～WEBUI-007 → [0028](decisions/0028-roxy-runtime-identity-migration.md) → [0018](decisions/0018-chat-webui-has-one-source-and-two-adapters.md) → [0022](decisions/0022-mobile-webui-uses-server-selected-generations.md) → [0023](decisions/0023-akashic-tokens-own-material-3-semantics.md)（历史名称） → [共享对话 WebUI](design/shared-chat-webui.md) → [服务端发布的移动 WebUI OTA](design/server-published-mobile-webui.md) → `NOW.md` 对应事项 | `frontend/**/src`、真实构建和渲染结果 |
 
 任务同时命中两行以上、会修改持久数据或会产生外部不可逆效果时，读取 `projectneed.md` 全文。执行阶段可以收窄材料，评审阶段必须展开所有相关 diff、状态变化和证据。
 
@@ -209,7 +209,8 @@ docs/
 │   ├── 0024-plugin-self-validation-uses-stable-and-latest.md
 │   ├── 0025-codex-style-same-turn-input.md
 │   ├── 0026-scoped-interview-images-may-auto-export-to-notes.md
-│   └── 0027-mac-notes-bridge-writes-only-through-live-commit.md
+│   ├── 0027-mac-notes-bridge-writes-only-through-live-commit.md
+│   └── 0028-roxy-runtime-identity-migration.md
 ├── design/
 │   ├── akasha-v2-runtime-migration.md
 │   ├── apple-notes-export-plugin.md
@@ -229,6 +230,7 @@ docs/
 │   ├── persistence-state-map.md
 │   ├── programmatic-session-memory-exclusion.md
 │   ├── recursive-plugin-self-validation.md
+│   ├── roxy-brand-migration.md
 │   └── wake-recent-delivery-context.md
 ├── spark/
 │   ├── 2026-07-16-change-impact-contract-gate.md

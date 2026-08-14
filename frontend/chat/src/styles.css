@@ -5,21 +5,21 @@
 @tailwind utilities;
 
 :root {
-  --pairing-surface: var(--ak-color-bg-canvas);
-  --pairing-surface-container-low: var(--ak-color-bg-surface-low);
-  --pairing-surface-container: var(--ak-color-bg-surface);
-  --pairing-surface-container-high: var(--ak-color-bg-surface-high);
-  --pairing-on-surface: var(--ak-color-text-primary);
-  --pairing-on-surface-variant: var(--ak-color-text-secondary);
-  --pairing-on-surface-muted: var(--ak-color-border-strong);
-  --pairing-primary: var(--ak-color-action-primary);
-  --pairing-primary-hover: var(--ak-color-action-hover);
-  --pairing-primary-container: var(--ak-color-action-container);
-  --pairing-primary-container-high: color-mix(in oklch, var(--ak-color-action-primary) 18%, var(--ak-color-action-container));
-  --pairing-on-primary: var(--ak-color-on-action-primary);
-  --pairing-on-primary-container: var(--ak-color-on-action-container);
-  --pairing-error-container: var(--ak-color-status-error-container);
-  --pairing-on-error-container: var(--ak-color-status-error);
+  --pairing-surface: var(--roxy-color-bg-canvas);
+  --pairing-surface-container-low: var(--roxy-color-bg-surface-low);
+  --pairing-surface-container: var(--roxy-color-bg-surface);
+  --pairing-surface-container-high: var(--roxy-color-bg-surface-high);
+  --pairing-on-surface: var(--roxy-color-text-primary);
+  --pairing-on-surface-variant: var(--roxy-color-text-secondary);
+  --pairing-on-surface-muted: var(--roxy-color-border-strong);
+  --pairing-primary: var(--roxy-color-action-primary);
+  --pairing-primary-hover: var(--roxy-color-action-hover);
+  --pairing-primary-container: var(--roxy-color-action-container);
+  --pairing-primary-container-high: color-mix(in oklch, var(--roxy-color-action-primary) 18%, var(--roxy-color-action-container));
+  --pairing-on-primary: var(--roxy-color-on-action-primary);
+  --pairing-on-primary-container: var(--roxy-color-on-action-container);
+  --pairing-error-container: var(--roxy-color-status-error-container);
+  --pairing-on-error-container: var(--roxy-color-status-error);
   --pairing-outline: oklch(0 0 0 / 0.06);
   --pairing-outline-strong: oklch(0 0 0 / 0.1);
   --pairing-qr-surface: oklch(1 0 0);
@@ -38,11 +38,11 @@ body,
   width: 100%;
   height: 100%;
   margin: 0;
-  background: var(--ak-color-bg-canvas);
+  background: var(--roxy-color-bg-canvas);
 }
 
 body {
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
 }
 
 button,
@@ -56,8 +56,8 @@ input {
   width: 100%;
   min-height: 100%;
   place-items: center;
-  color: var(--ak-color-text-secondary);
-  background: var(--ak-color-bg-canvas);
+  color: var(--roxy-color-text-secondary);
+  background: var(--roxy-color-bg-canvas);
   font-size: 0.875rem;
 }
 
@@ -67,7 +67,7 @@ input {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  background: var(--ak-color-bg-canvas);
+  background: var(--roxy-color-bg-canvas);
 }
 
 .chat-sidebar {
@@ -86,14 +86,14 @@ input {
   align-items: center;
   gap: 12px;
   padding: 0 22px;
-  background: var(--ak-color-bg-canvas);
+  background: var(--roxy-color-bg-canvas);
 }
 
 .chat-sidebar-brand__mark {
   width: 40px;
   height: 40px;
   flex: 0 0 40px;
-  background: var(--ak-color-action-primary);
+  background: var(--roxy-color-action-primary);
   -webkit-mask-position: center;
   mask-position: center;
   -webkit-mask-repeat: no-repeat;
@@ -116,7 +116,7 @@ input {
 
 .chat-sidebar-brand small {
   margin-top: 2px;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.75rem;
 }
 
@@ -199,18 +199,18 @@ input {
   place-items: center;
   border: 0;
   border-radius: 9px;
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
   background: transparent;
   cursor: pointer;
 }
 
 .icon-button:hover,
 .composer-tool:hover {
-  background: var(--ak-color-bg-surface);
+  background: var(--roxy-color-bg-surface);
 }
 
 .session-button:hover {
-  background: var(--ak-color-bg-surface);
+  background: var(--roxy-color-bg-surface);
 }
 
 .session-section {
@@ -230,7 +230,7 @@ input {
 
 .session-title {
   padding: 0;
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
   font-size: 15px;
   font-weight: 700;
 }
@@ -249,7 +249,7 @@ input {
   border: 0;
   border-radius: 10px;
   padding: 8px 10px;
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
   background: transparent;
   font-size: 14px;
   line-height: 1.35;
@@ -258,8 +258,8 @@ input {
 }
 
 .session-button.active {
-  color: var(--ak-color-on-action-primary);
-  background: var(--ak-color-bg-surface);
+  color: var(--roxy-color-on-action-primary);
+  background: var(--roxy-color-bg-surface);
 }
 
 .chat-main {
@@ -326,7 +326,7 @@ input {
 
 .home-state h1 {
   margin: 0 0 88px;
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
   font-family: var(--md-ref-typeface-brand);
   font-size: clamp(1.75rem, 3.1vw, 2.25rem);
   font-weight: 500;
@@ -373,7 +373,7 @@ input {
   padding: 6px 10px;
   background: var(--md-sys-color-surface-container-high);
   box-shadow: 0 1px 2px rgb(var(--md-sys-color-shadow-rgb) / 0.12);
-  transition: box-shadow var(--ak-sys-duration-short) var(--ak-sys-motion-standard);
+  transition: box-shadow var(--roxy-sys-duration-short) var(--roxy-sys-motion-standard);
 }
 
 .composer:focus-within {
@@ -390,14 +390,14 @@ form.composer:focus-within [data-slot="input-group"] {
   resize: none;
   border: 0;
   padding: 14px 10px;
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
   background: transparent;
   font-size: 17px;
   outline: none;
 }
 
 .composer textarea::placeholder {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
 }
 
 .composer-attachments {
@@ -409,9 +409,9 @@ form.composer:focus-within [data-slot="input-group"] {
 .composer-attachments [data-radix-collection-item],
 .composer-attachments .group {
   max-width: min(100%, 260px);
-  border-color: var(--ak-color-border-strong);
-  background: var(--ak-color-bg-surface);
-  color: var(--ak-color-text-primary);
+  border-color: var(--roxy-color-border-strong);
+  background: var(--roxy-color-bg-surface);
+  color: var(--roxy-color-text-primary);
 }
 
 .attachment-preview-slot {
@@ -428,13 +428,13 @@ form.composer:focus-within [data-slot="input-group"] {
 }
 
 .attachment-remove-inline {
-  background: var(--ak-color-on-action-primary);
-  color: var(--ak-color-bg-surface-low);
+  background: var(--roxy-color-on-action-primary);
+  color: var(--roxy-color-bg-surface-low);
 }
 
 .attachment-hover {
   max-width: 320px;
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
 }
 
 .attachment-hover-image {
@@ -451,7 +451,7 @@ form.composer:focus-within [data-slot="input-group"] {
   height: 96px;
   place-items: center;
   border-radius: 8px;
-  background: var(--ak-color-bg-surface);
+  background: var(--roxy-color-bg-surface);
 }
 
 .attachment-hover-title {
@@ -465,7 +465,7 @@ form.composer:focus-within [data-slot="input-group"] {
 
 .attachment-hover-type {
   margin-top: 4px;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
 }
@@ -477,7 +477,7 @@ form.composer:focus-within [data-slot="input-group"] {
 
 .error-line {
   margin: 8px 12px 0;
-  color: var(--ak-color-status-error);
+  color: var(--roxy-color-status-error);
   font-size: 13px;
 }
 

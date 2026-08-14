@@ -281,11 +281,11 @@ class ContextBuilder:
         )
         self._assembler = PromptAssembler(self)
         self._last_debug_breakdown: ContextVar[tuple[PromptSectionMeta, ...]] = (
-            ContextVar("akashic_context_debug_breakdown", default=())
+            ContextVar("roxy_context_debug_breakdown", default=())
         )
         self._last_assembled_contexts: ContextVar[
             dict[str, dict[str, str]] | None
-        ] = ContextVar("akashic_context_assembled_contexts", default=None)
+        ] = ContextVar("roxy_context_assembled_contexts", default=None)
 
     def build_user_message_content(
         self,

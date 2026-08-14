@@ -32,10 +32,10 @@ from benchmark.harbor_v4flash.runtime_volume import (
     RUNTIME_VENV_PATH,
 )
 
-_RUNTIME_ROOT = "/opt/akashic"
+_RUNTIME_ROOT = "/opt/roxy"
 _SOURCE_ROOT = f"{_RUNTIME_ROOT}/src"
-_WORKSPACE = "/opt/akashic-workspace"
-_ENDPOINT = f"{_WORKSPACE}/akashic.sock"
+_WORKSPACE = "/opt/roxy-workspace"
+_ENDPOINT = f"{_WORKSPACE}/roxy.sock"
 _AGENT_LOGS = "/logs/agent"
 _VERIFIER_PREPARE_TIMEOUT_SEC = 14_400
 _CANDIDATE_DIGEST_COMMAND = (
@@ -218,7 +218,7 @@ async def _start_gateway_with_resource_evidence(
             credential_names=credential_names,
         )
         _require_success(
-            "启动 Akasic gateway",
+            "启动 Roxy gateway",
             started.return_code,
             (started.stdout or "") + (started.stderr or ""),
         )
@@ -278,7 +278,7 @@ async def _run_driver_and_shutdown(
             timeout_sec=70,
         )
         _require_success(
-            "收束 Akasic gateway",
+            "收束 Roxy gateway",
             shutdown_result.return_code,
             (shutdown_result.stdout or "") + (shutdown_result.stderr or ""),
         )
@@ -400,7 +400,7 @@ async def _prepare_verifier_runtime(
     if after_digest != before_digest:
         raise RuntimeError("verifier 依赖准备改变了 /app 候选，禁止进入评分")
     return {
-        "schema": "akasic.verifier-bootstrap.v1",
+        "schema": "roxy.verifier-bootstrap.v1",
         "status": "prepared" if dependency_command is not None else "not_required",
         "official_verifier_timeout_started": False,
         "timeout_sec": timeout_sec,
@@ -411,12 +411,12 @@ async def _prepare_verifier_runtime(
     }
 
 
-class AkashicHarborAgent(BaseAgent):
-    """在 Harbor task 容器内运行完整 Akasic runtime。"""
+class RoxyHarborAgent(BaseAgent):
+    """在 Harbor task 容器内运行完整 Roxy runtime。"""
 
     @staticmethod
     def name() -> str:
-        return "akasic-v4flash"
+        return "roxy-v4flash"
 
     def __init__(
         self,
@@ -563,7 +563,7 @@ class AkashicHarborAgent(BaseAgent):
             user="root",
         )
         _require_success(
-            "校验 Akasic runtime volume",
+            "校验 Roxy runtime volume",
             checked_runtime.return_code,
             (checked_runtime.stdout or "") + (checked_runtime.stderr or ""),
         )
@@ -572,7 +572,7 @@ class AkashicHarborAgent(BaseAgent):
             user="root",
         )
         _require_success(
-            "校验 Akasic Git volume",
+            "校验 Roxy Git volume",
             checked_git.return_code,
             (checked_git.stdout or "") + (checked_git.stderr or ""),
         )
@@ -617,7 +617,7 @@ class AkashicHarborAgent(BaseAgent):
             user="root",
         )
         _require_success(
-            "准备 Akasic source checkout",
+            "准备 Roxy source checkout",
             installed.return_code,
             (installed.stdout or "") + (installed.stderr or ""),
         )

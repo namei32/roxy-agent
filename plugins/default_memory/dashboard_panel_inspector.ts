@@ -1,4 +1,4 @@
-/// <reference path="../../types/akashic-dashboard.d.ts" />
+/// <reference path="../../types/roxy-dashboard.d.ts" />
 
 interface RecallItem {
   id: string;
@@ -81,7 +81,7 @@ function _renderRecallItems(items: RecallItem[], source: string): string {
   `;
 }
 
-window.AkashicDashboard.registerPlugin({
+window.RoxyDashboard.registerPlugin({
   id: "recall_inspector",
   label: "Recall Inspector",
   viewLabel: "recall inspector",

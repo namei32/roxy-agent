@@ -33,9 +33,9 @@ def _repo(tmp_path: Path, *, lock: bool = True) -> Path:
                 "scripts": {
                     "build:mobile-web": (
                         "node -e \"const fs=require('fs');"
-                        "fs.mkdirSync(process.env.AKASHIC_MOBILE_WEB_OUT_DIR,{recursive:true});"
+                        "fs.mkdirSync(process.env.ROXY_MOBILE_WEB_OUT_DIR,{recursive:true});"
                         "fs.copyFileSync('frontend/chat/mobile.html',"
-                        "process.env.AKASHIC_MOBILE_WEB_OUT_DIR+'/mobile.html')\""
+                        "process.env.ROXY_MOBILE_WEB_OUT_DIR+'/mobile.html')\""
                     )
                 },
             }
@@ -120,12 +120,12 @@ def test_build_context_tracks_effective_env_and_normalizes_output_dir(tmp_path: 
     environment["VITE_PRIVATE_TOKEN"] = "do-not-write-this-value"
     first = _PUBLISHER._capture_provenance(
         repo,
-        environment={**environment, "AKASHIC_MOBILE_WEB_OUT_DIR": "/tmp/mobile-web-a"},
+        environment={**environment, "ROXY_MOBILE_WEB_OUT_DIR": "/tmp/mobile-web-a"},
         output_dir=Path("/tmp/mobile-web-a"),
     )
     second = _PUBLISHER._capture_provenance(
         repo,
-        environment={**environment, "AKASHIC_MOBILE_WEB_OUT_DIR": "/tmp/mobile-web-b"},
+        environment={**environment, "ROXY_MOBILE_WEB_OUT_DIR": "/tmp/mobile-web-b"},
         output_dir=Path("/tmp/mobile-web-b"),
     )
     assert first["build_context_digest"] == second["build_context_digest"]
@@ -136,7 +136,7 @@ def test_build_context_tracks_effective_env_and_normalizes_output_dir(tmp_path: 
         environment={
             **environment,
             "VITE_PUBLIC_THEME": "light",
-            "AKASHIC_MOBILE_WEB_OUT_DIR": "/tmp/mobile-web-b",
+            "ROXY_MOBILE_WEB_OUT_DIR": "/tmp/mobile-web-b",
         },
         output_dir=Path("/tmp/mobile-web-b"),
     )
@@ -217,8 +217,8 @@ def test_clean_publish_rejects_nondeterministic_artifact_rebuild(tmp_path: Path)
     package = json.loads((repo / "package.json").read_text(encoding="utf-8"))
     package["scripts"]["build:mobile-web"] = (
         "node -e \"const fs=require('fs');"
-        "fs.mkdirSync(process.env.AKASHIC_MOBILE_WEB_OUT_DIR,{recursive:true});"
-        "fs.writeFileSync(process.env.AKASHIC_MOBILE_WEB_OUT_DIR+'/mobile.html',String(Math.random()))\""
+        "fs.mkdirSync(process.env.ROXY_MOBILE_WEB_OUT_DIR,{recursive:true});"
+        "fs.writeFileSync(process.env.ROXY_MOBILE_WEB_OUT_DIR+'/mobile.html',String(Math.random()))\""
     )
     (repo / "package.json").write_text(json.dumps(package) + "\n", encoding="utf-8")
     _run(repo, "add", "package.json")

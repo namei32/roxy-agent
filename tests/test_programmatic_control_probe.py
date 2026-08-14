@@ -47,11 +47,11 @@ def test_control_gate_prepares_external_static_mount_without_repo_static(
     assert not (sandbox / "app/.git").exists()
     assert "read_only: true" in compose
     assert (
-        "${AKASHIC_CONTROL_SANDBOX:?set by programmatic_control_probe.py}"
+        "${ROXY_CONTROL_SANDBOX:?set by programmatic_control_probe.py}"
         "/app:/app:ro"
     ) in compose
     assert (
-        "${AKASHIC_CONTROL_SANDBOX:?set by programmatic_control_probe.py}"
+        "${ROXY_CONTROL_SANDBOX:?set by programmatic_control_probe.py}"
         "/static:/app/static"
     ) in compose
 

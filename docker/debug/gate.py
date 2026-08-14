@@ -36,7 +36,7 @@ REQUIREMENT_PATTERN = re.compile(r"\b[A-Z]{2,5}-[0-9]{3}\b")
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 IMAGE_BUILD_TIMEOUT_SECONDS = 600
-GATE_TMPDIR_ENV = "AKASHIC_CHANGE_GATE_TMPDIR"
+GATE_TMPDIR_ENV = "ROXY_CHANGE_GATE_TMPDIR"
 PROTECTED_CONTRACT_PATHS = (
     "docs/projectneed.md",
     "docs/decisions/**",
@@ -338,7 +338,7 @@ def load_catalog() -> Catalog:
 
 
 def _tracked_and_untracked_files() -> list[str]:
-    inventory_path = os.environ.get("AKASHIC_GATE_INVENTORY")
+    inventory_path = os.environ.get("ROXY_GATE_INVENTORY")
     if inventory_path:
         payload = json.loads(Path(inventory_path).read_text(encoding="utf-8"))
         if not isinstance(payload, list) or not all(
@@ -348,7 +348,7 @@ def _tracked_and_untracked_files() -> list[str]:
             and ".." not in Path(path).parts
             for path in payload
         ):
-            raise GateError("AKASHIC_GATE_INVENTORY 必须是安全的相对路径数组")
+            raise GateError("ROXY_GATE_INVENTORY 必须是安全的相对路径数组")
         return sorted(cast(list[str], payload))
     output = _run_git(
         "ls-files", "-z", "--cached", "--others", "--exclude-standard"
@@ -1014,7 +1014,7 @@ def _compose_env(sandbox: Path) -> dict[str, str]:
     env = dict(os.environ)
     env.update(
         {
-            "AKASHIC_CHANGE_GATE_SANDBOX": str(sandbox),
+            "ROXY_CHANGE_GATE_SANDBOX": str(sandbox),
             "UID": str(os.getuid()),
             "GID": str(os.getgid()),
         }
@@ -1054,7 +1054,7 @@ def _residual_resources(project: str) -> dict[str, list[str]]:
 def _prepare_sandbox(run_id: str, scenario_id: str) -> Path:
     sandbox = Path(
         tempfile.mkdtemp(
-            prefix=f"akashic-change-gate-{run_id}-{scenario_id}-",
+            prefix=f"roxy-change-gate-{run_id}-{scenario_id}-",
             dir=_gate_temp_root(),
         )
     )
@@ -1075,10 +1075,10 @@ def _build_change_gate_image(run_id: str, report_dir: Path) -> dict[str, object]
 
     # 1. Compose 解析配置需要隔离路径，但构建阶段不会挂载或运行它。
     with tempfile.TemporaryDirectory(
-        prefix=f"akashic-change-gate-{run_id}-image-build-",
+        prefix=f"roxy-change-gate-{run_id}-image-build-",
         dir=_gate_temp_root(),
     ) as sandbox_name:
-        project = f"akashic-change-gate-build-{uuid.uuid4().hex[:12]}"
+        project = f"roxy-change-gate-build-{uuid.uuid4().hex[:12]}"
         env = _compose_env(Path(sandbox_name))
         started = time.monotonic()
         result: subprocess.CompletedProcess[str] | None = None
@@ -1118,7 +1118,7 @@ def _run_scenario(
 
     # 1. 每个场景建立全新的 workspace、plugin home 和 Compose project。
     sandbox = _prepare_sandbox(run_id, scenario.id)
-    project = f"akashic-change-gate-{uuid.uuid4().hex[:12]}"
+    project = f"roxy-change-gate-{uuid.uuid4().hex[:12]}"
     env = _compose_env(sandbox)
     started = time.monotonic()
     result: subprocess.CompletedProcess[str] | None = None
@@ -1251,7 +1251,7 @@ def command_run(args: argparse.Namespace) -> int:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Akashic 变更影响契约 Gate")
+    parser = argparse.ArgumentParser(description="Roxy 变更影响契约 Gate")
     subparsers = parser.add_subparsers(dest="command", required=True)
     for name, handler in (
         ("init", command_init),

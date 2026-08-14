@@ -1,5 +1,5 @@
 [project]
-name = "akashic-agent"
+name = "roxy-agent"
 version = "0.1.0"
 requires-python = ">=3.12"
 
@@ -12,4 +12,3 @@ include = '\.pyi?$'
 dev = [
     "rich>=15.0.0",
 ]
-

@@ -1,15 +1,15 @@
 ---
 name: plugin-system
-description: 说明并执行 Akashic 插件安装、加载、启停、配置、插件内 MCP、skill、生命周期与 manifest 管理。
-when_to_use: 用户询问或要求处理 Akashic 插件、marketplace、插件自带 MCP、skill、插件配置、安装、更新、启用、禁用或排障时。独立本地 MCP server 使用 manage-workspace-mcp。
-metadata: {"akashic": {"always": false}}
+description: 说明并执行 Roxy 插件安装、加载、启停、配置、插件内 MCP、skill、生命周期与 manifest 管理。
+when_to_use: 用户询问或要求处理 Roxy 插件、marketplace、插件自带 MCP、skill、插件配置、安装、更新、启用、禁用或排障时。独立本地 MCP server 使用 manage-workspace-mcp。
+metadata: {"roxy": {"always": false}}
 ---
 
-# Akashic 插件系统
+# Roxy 插件系统
 
 优先直接完成明确的插件管理请求，并在修改后验证。
 
-用户要求创建/改写插件源码、把 Skill/MCP 收入插件或递归验证候选时，先加载 `develop-akashic-plugin`；本 Skill 继续拥有已安装插件的查询、配置、启停、卸载和当前实现排障。
+用户要求创建/改写插件源码、把 Skill/MCP 收入插件或递归验证候选时，先加载 `develop-roxy-plugin`；本 Skill 继续拥有已安装插件的查询、配置、启停、卸载和当前实现排障。
 
 独立 binary、脚本或本地项目需要作为 MCP 常驻时，加载 `manage-workspace-mcp`；
 不要为它创建插件，也不要修改主 `config.toml`。
@@ -17,9 +17,9 @@ metadata: {"akashic": {"always": false}}
 ## 事实来源
 
 ```text
-┌─ ~/.akashic-plugin/manifest.toml
+┌─ ~/.roxy-plugin/manifest.toml
 │  └─ 全局安装清单与 enabled
-├─ ~/.akashic-plugin/cache/<marketplace>/<plugin>/<version>/plugin.py
+├─ ~/.roxy-plugin/cache/<marketplace>/<plugin>/<version>/plugin.py
 │  └─ 插件能力声明与代码
 └─ <workspace>/plugin-data/<plugin>-<marketplace>/config.local.toml
    └─ 插件配置和持久状态
@@ -43,7 +43,7 @@ python main.py plugin-doctor <name>@github
 
 ## 更新已有插件
 
-不要直接修改 `~/.akashic-plugin/cache`。先修改插件的可编辑源码仓库；个人插件通常位于 `/mnt/data/coding/akashic-plugin/<plugin-name>`。如果只知道已安装插件而找不到源码仓库，先确认其 Git remote 或向用户询问。
+不要直接修改 `~/.roxy-plugin/cache`。先修改插件的可编辑源码仓库；个人插件通常位于 `/mnt/data/coding/roxy-plugin/<plugin-name>`。如果只知道已安装插件而找不到源码仓库，先确认其 Git remote 或向用户询问。
 
 `plugin-install` 即使接收本地仓库路径，也会执行 `git clone`，只安装已提交的 Git HEAD，不会复制工作区里的未提交文件。必须先提交；需要从 GitHub 更新时，还必须先推送，再使用 GitHub source 安装。
 
@@ -106,8 +106,8 @@ python main.py plugin-uninstall demo@github
 只有同时满足以下条件，才能报告“卸载完成”：
 
 ```text
-┌─ ~/.akashic-plugin/manifest.toml 不再包含该 plugin ID
-├─ ~/.akashic-plugin/cache/<marketplace>/<plugin>/ 不存在
+┌─ ~/.roxy-plugin/manifest.toml 不再包含该 plugin ID
+├─ ~/.roxy-plugin/cache/<marketplace>/<plugin>/ 不存在
 └─ 卸载前已存在的 <workspace>/plugin-data/<plugin>-<marketplace>/ 仍存在
 ```
 

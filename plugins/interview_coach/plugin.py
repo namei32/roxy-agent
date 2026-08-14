@@ -19,6 +19,8 @@ _NOTE_TOOLS = frozenset(
 _SCOPED_TOOLS = frozenset(
     {
         "interview_prepare",
+        "roxy_project_search",
+        "roxy_project_read",
         "akashic_project_search",
         "akashic_project_read",
         *_NOTE_TOOLS,
@@ -66,7 +68,7 @@ class InterviewCoachPlugin(Plugin):
     name = "interview_coach"
     version = "0.1.0"
     desc = "识别 Telegram 面经图片，分题拓展回答并一次一道追加到 Apple Notes"
-    author = "Akashic Agent"
+    author = "Roxy Agent"
     ConfigModel = InterviewCoachConfig
 
     def __init__(self) -> None:
@@ -173,8 +175,9 @@ class InterviewCoachPlugin(Plugin):
         interview_confidence: float,
         interview_signals: list[str],
         question_count: int,
-        akashic_related_count: int,
-        general_count: int,
+        roxy_related_count: int | None = None,
+        general_count: int | None = None,
+        akashic_related_count: int | None = None,
     ) -> str:
         """为高置信度面经准备稳定批次和 Notes document key。
 
@@ -186,8 +189,9 @@ class InterviewCoachPlugin(Plugin):
             interview_confidence: 视觉模型判断整批为面经的 0-1 置信度。
             interview_signals: 图片中支持面经判断的简短信号。
             question_count: 提取出的原题总数。
-            akashic_related_count: 可用 Akashic 真实证据回答的题目数。
+            roxy_related_count: 可用 Roxy 真实证据回答的题目数。
             general_count: 只应通用回答的题目数。
+            akashic_related_count: 旧调用方的兼容别名；不能与 Roxy 值冲突。
         """
 
         del event
@@ -237,8 +241,8 @@ class InterviewCoachPlugin(Plugin):
             return _json_result("rejected", code="invalid_topic_summary")
         counts = _validate_counts(
             question_count,
-            akashic_related_count,
-            general_count,
+            _resolve_related_count(roxy_related_count, akashic_related_count),
+            _resolve_general_count(general_count),
         )
         batch, created = self._require_state().prepare(
             session_key=context.origin_session_key,
@@ -247,7 +251,7 @@ class InterviewCoachPlugin(Plugin):
             topic_summary=clean_topic,
             follow_up_questions=followups,
             question_count=counts[0],
-            akashic_related_count=counts[1],
+            roxy_related_count=counts[1],
             general_count=counts[2],
         )
         return _json_result(
@@ -269,10 +273,10 @@ class InterviewCoachPlugin(Plugin):
         )
 
     @tool(
-        name="akashic_project_search",
+        name="roxy_project_search",
         risk="read-only",
         always_on=False,
-        search_hint="检索 Akashic Agent 当前源码 设计 真实项目证据",
+        search_hint="检索 Roxy Agent 当前源码、设计与真实项目证据",
     )
     async def project_search(
         self,
@@ -291,10 +295,26 @@ class InterviewCoachPlugin(Plugin):
         return await self._require_evidence().search(query, max_results)
 
     @tool(
-        name="akashic_project_read",
+        name="akashic_project_search",
         risk="read-only",
         always_on=False,
-        search_hint="读取 Akashic Agent 当前源码证据 指定文件行范围",
+        search_hint="兼容旧 Akashic 项目源码检索工具；新调用请使用 roxy_project_search",
+    )
+    async def legacy_project_search(
+        self,
+        event: object,
+        query: str,
+        max_results: int = 12,
+    ) -> str:
+        """兼容已保存的旧工具调用。"""
+
+        return await self.project_search(event, query, max_results)
+
+    @tool(
+        name="roxy_project_read",
+        risk="read-only",
+        always_on=False,
+        search_hint="读取 Roxy Agent 当前源码证据与指定文件行范围",
     )
     async def project_read(
         self,
@@ -313,6 +333,23 @@ class InterviewCoachPlugin(Plugin):
 
         del event
         return await self._require_evidence().read(path, start_line, end_line)
+
+    @tool(
+        name="akashic_project_read",
+        risk="read-only",
+        always_on=False,
+        search_hint="兼容旧 Akashic 项目源码读取工具；新调用请使用 roxy_project_read",
+    )
+    async def legacy_project_read(
+        self,
+        event: object,
+        path: str,
+        start_line: int = 1,
+        end_line: int = 200,
+    ) -> str:
+        """兼容已保存的旧工具调用。"""
+
+        return await self.project_read(event, path, start_line, end_line)
 
     @on_tool_pre()
     async def guard_scoped_tools(self, event: PreToolCtx) -> HookOutcome | None:
@@ -482,6 +519,29 @@ def _validate_counts(
     if counts[1] + counts[2] > counts[0]:
         raise ValueError("分类题目数不能超过原题总数")
     return counts
+
+
+def _resolve_related_count(
+    roxy_related_count: int | None,
+    akashic_related_count: int | None,
+) -> int:
+    """Roxy 参数优先；旧参数只为延续已保存的工具调用。"""
+
+    if roxy_related_count is None and akashic_related_count is None:
+        raise ValueError("roxy_related_count 不能为空")
+    if roxy_related_count is not None and akashic_related_count is not None:
+        if int(roxy_related_count) != int(akashic_related_count):
+            raise ValueError("roxy_related_count 与 akashic_related_count 不能冲突")
+    if roxy_related_count is not None:
+        return int(roxy_related_count)
+    assert akashic_related_count is not None
+    return int(akashic_related_count)
+
+
+def _resolve_general_count(general_count: int | None) -> int:
+    if general_count is None:
+        raise ValueError("general_count 不能为空")
+    return int(general_count)
 
 
 def _note_result_status(event: AfterToolResultCtx) -> str | None:

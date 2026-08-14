@@ -86,7 +86,7 @@ def test_settings_round_trip_preserves_explicit_legacy_output_limit(
 
     response = client.post(
         "/api/settings/apply",
-        headers={"Origin": "http://testserver", "X-Akasic-CSRF": "1"},
+        headers={"Origin": "http://testserver", "X-Roxy-CSRF": "1"},
         json={
             "provider": "deepseek",
             "model": "deepseek-chat",
@@ -142,7 +142,7 @@ def test_apply_writes_inline_key_and_preserves_other_config(
     )
     response = TestClient(app).post(
         "/api/settings/apply",
-        headers={"Origin": "http://testserver", "X-Akasic-CSRF": "1"},
+        headers={"Origin": "http://testserver", "X-Roxy-CSRF": "1"},
         json={
             "provider": "opencode-go",
             "model": "glm-5",
@@ -203,7 +203,7 @@ def test_apply_writes_reasoning_effort(tmp_path: Path, monkeypatch) -> None:
     )
     response = TestClient(app).post(
         "/api/settings/apply",
-        headers={"Origin": "http://testserver", "X-Akasic-CSRF": "1"},
+        headers={"Origin": "http://testserver", "X-Roxy-CSRF": "1"},
         json={
             "provider": "opencode-go",
             "model": "glm-5",
@@ -256,7 +256,7 @@ def test_codex_models_expose_reasoning_effort_capabilities(
     )
     response = TestClient(app).post(
         "/api/settings/models",
-        headers={"Origin": "http://testserver", "X-Akasic-CSRF": "1"},
+        headers={"Origin": "http://testserver", "X-Roxy-CSRF": "1"},
         json={"provider": "codex"},
     )
 
@@ -301,7 +301,7 @@ def test_opencode_go_models_expose_reasoning_efforts(
     )
     response = TestClient(app).post(
         "/api/settings/models",
-        headers={"Origin": "http://testserver", "X-Akasic-CSRF": "1"},
+        headers={"Origin": "http://testserver", "X-Roxy-CSRF": "1"},
         json={"provider": "opencode-go", "api_key": "secret"},
     )
 
@@ -364,12 +364,29 @@ def test_mutation_rejects_cross_origin(tmp_path: Path) -> None:
 
     response = TestClient(app).post(
         "/api/settings/models",
-        headers={"Origin": "https://attacker.invalid", "X-Akasic-CSRF": "1"},
+        headers={"Origin": "https://attacker.invalid", "X-Roxy-CSRF": "1"},
         json={"provider": "codex"},
     )
 
     assert response.status_code == 403
     assert response.json()["code"] == "csrf_rejected"
+
+
+def test_mutation_accepts_legacy_csrf_header(tmp_path: Path) -> None:
+    app = create_settings_app(
+        tmp_path / "config.toml",
+        tmp_path / "workspace",
+        credential_store=CredentialStore(tmp_path / "auth" / "auth.json"),
+    )
+
+    response = TestClient(app).post(
+        "/api/settings/models",
+        headers={"Origin": "http://testserver", "X-Akasic-CSRF": "1"},
+        json={"provider": "api"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"models": []}
 
 
 def test_settings_page_allows_only_local_shell_frames(tmp_path: Path) -> None:
@@ -427,7 +444,7 @@ def test_failed_gateway_restart_restores_config_and_restarts_old_generation(
     )
     response = TestClient(app, raise_server_exceptions=False).post(
         "/api/settings/apply",
-        headers={"Origin": "http://testserver", "X-Akasic-CSRF": "1"},
+        headers={"Origin": "http://testserver", "X-Roxy-CSRF": "1"},
         json={
             "provider": "opencode-go",
             "model": "glm-5",

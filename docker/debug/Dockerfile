@@ -34,8 +34,8 @@ RUN python -m venv /opt/venv \
     && python -m pip install -r /tmp/requirements-dev.txt \
     && python -m pip install mcp==1.28.1
 
-COPY docker/debug/entrypoint.sh /usr/local/bin/akashic-debug
-RUN chmod +x /usr/local/bin/akashic-debug
+COPY docker/debug/entrypoint.sh /usr/local/bin/roxy-debug
+RUN chmod +x /usr/local/bin/roxy-debug
 
-ENTRYPOINT ["akashic-debug"]
+ENTRYPOINT ["roxy-debug"]
 CMD ["run"]

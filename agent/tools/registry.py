@@ -184,7 +184,7 @@ class _TurnSearchScope:
 
 
 _TURN_SEARCH_SCOPE: ContextVar[_TurnSearchScope | None] = ContextVar(
-    "akashic_turn_search_scope",
+    "roxy_turn_search_scope",
     default=None,
 )
 
@@ -226,7 +226,7 @@ class ToolRegistry:
         self._metadata: dict[str, ToolMeta] = {}
         self._documents: dict[str, ToolDocument] = {}
         self._execution_context: ContextVar[ToolExecutionContext | None] = ContextVar(
-            f"akashic_tool_registry_context_{id(self)}",
+            f"roxy_tool_registry_context_{id(self)}",
             default=None,
         )
         self._backend: SearchBackend = backend or KeywordSearchBackend()

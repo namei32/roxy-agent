@@ -301,7 +301,7 @@ class SkillsLoader:
             if not isinstance(parsed, dict):
                 raise ValueError(f"Skill metadata 必须是对象: {skill_file}")
             data = cast(dict[str, Any], parsed)
-        for key in ("akashic", "skill"):
+        for key in ("roxy", "akashic", "skill"):
             value = data.get(key)
             if isinstance(value, dict):
                 return cast(dict[str, Any], value)

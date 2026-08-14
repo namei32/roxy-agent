@@ -11,6 +11,9 @@ class AppleNotesConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     account: str = "default"
+    # This is external user data, not an internal runtime identifier. Keep the
+    # historical default so an upgrade never silently starts writing a second
+    # Notes folder; new installations may explicitly configure folder = "Roxy".
     folder: str = "Akashic"
     create_folder_if_missing: bool = True
     allow_create: bool = True

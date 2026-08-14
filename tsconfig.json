@@ -12,7 +12,9 @@
     "noImplicitReturns": true,
     "baseUrl": ".",
     "paths": {
-      "akashic-dashboard": ["types/akashic-dashboard.d.ts"],
+      "roxy-dashboard": ["types/roxy-dashboard.d.ts"],
+      "akashic-dashboard": ["types/roxy-dashboard.d.ts"],
+      "@roxy/dashboard-ui": ["frontend/dashboard/src/design/sdk.ts"],
       "@akashic/dashboard-ui": ["frontend/dashboard/src/design/sdk.ts"],
       "@/*": ["frontend/chat/src/*"]
     },

@@ -121,7 +121,7 @@ def test_load_resource_evidence_preserves_valid_failure_artifact(
     path.write_text(
         json.dumps(
             {
-                "schema": "akasic.container-resource.v1",
+                "schema": "roxy.container-resource.v1",
                 "status": "collection_failed",
                 "classification": "unknown",
                 "error": {"type": "RuntimeError", "message": "probe failed"},

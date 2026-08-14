@@ -1,6 +1,6 @@
-# Akashic Agent 项目需求与语义不变量
+# Roxy Agent 项目需求与语义不变量
 
-这份文件是 Akashic Agent 的长期需求规范。它回答“系统必须保持什么”，供新会话、维护者、coding agent、评审者和 CI 使用。
+这份文件是 Roxy Agent 的长期需求规范。它回答“系统必须保持什么”，供新会话、维护者、coding agent、评审者和 CI 使用。
 
 实现细节、临时进度和历史讨论不放在这里：
 
@@ -43,7 +43,7 @@
 
 ### OBJ-001 连续、可恢复的个人 Agent
 
-Akashic Agent 必须在多轮会话、进程重启、插件换代和工作区切换后保留用户授权保存的事实。临时预算、展示窗口和缓存策略不得改写数据保留范围。
+Roxy Agent 必须在多轮会话、进程重启、插件换代和工作区切换后保留用户授权保存的事实。临时预算、展示窗口和缓存策略不得改写数据保留范围。
 
 ### OBJ-002 可观察的自主执行
 
@@ -133,9 +133,9 @@ Writer 交接前必须把允许范围内的修改提交成可引用 commit，或
 
 ### MOB-001 核心按权威语义演进，不按客户端便利性扩张
 
-移动端提出的需求默认由移动端仓库或客户端适配层拥有。修改 Akashic 核心运行时必须同时证明：该能力属于既有或已批准的 Akashic 语义；权威状态或跨客户端一致性确实由核心或中立协议拥有；接口不包含 Android、iOS 或单一产品界面细节；只在客户端实现会复制、猜测或破坏权威语义。
+移动端提出的需求默认由移动端仓库或客户端适配层拥有。修改 Roxy 核心运行时必须同时证明：该能力属于既有或已批准的 Roxy 语义；权威状态或跨客户端一致性确实由核心或中立协议拥有；接口不包含 Android、iOS 或单一产品界面细节；只在客户端实现会复制、猜测或破坏权威语义。
 
-“未来可能复用”“所有移动端可能都需要”“放在核心更方便”不能单独成为 runtime patch 的理由。平台普遍能力仍由平台层拥有，例如 Android 前台服务、通知、Room、缓存、图标和手势；Akashic 移动端专属交互仍由移动端产品拥有，例如命令面板和富文本展示。只有 session、turn、ack、resume、附件传输确认、取消终态等需要服务端权威状态或跨客户端一致语义的能力，才进入核心或中立协议边界。
+“未来可能复用”“所有移动端可能都需要”“放在核心更方便”不能单独成为 runtime patch 的理由。平台普遍能力仍由平台层拥有，例如 Android 前台服务、通知、Room、缓存、图标和手势；Roxy 移动端专属交互仍由移动端产品拥有，例如命令面板和富文本展示。只有 session、turn、ack、resume、附件传输确认、取消终态等需要服务端权威状态或跨客户端一致语义的能力，才进入核心或中立协议边界。
 
 跨仓库客户端任务必须在开工和评审时记录 `capability_owner`、`consumer_scope`、`runtime_patch`、`runtime_patch_reason`、`authoritative_state_owner` 和 `client_only_alternative`。存在核心改动却无法填写这些字段时停止并等待维护者确认，不得用候选实现反向证明核心本来就应拥有该能力。
 
@@ -209,9 +209,9 @@ APK 或 IPA 必须保留 embedded baseline，远程发现、下载、校验、�
 
 candidate 在 10 秒健康提交前必须由 process-scope attempt lease 持有，Activity 旋转、配置重建或 server switch 不得把它误当成已提交 serving。在该边界前不开放写动作或外链 Activity；GC 只有在物理文件删除成功后才能删除对应 metadata/reference owner，删除失败必须 fail-loud 并保留引用。
 
-### WEBUI-007 Akashic Token 以 Material 3 系统角色表达产品语义
+### WEBUI-007 Roxy Token 以 Material 3 系统角色表达产品语义
 
-6321 设置、桌面 Chat、共享 Mobile WebUI、Dashboard 和插件公开控件必须从同一个 Akashic Theme Catalog 读取颜色。Catalog 以 Material 3 的 primary、secondary、tertiary、error 与 tonal surface 角色表达通用界面语义，并由 Akashic 扩展 success、warning、trace 和 info 等领域角色；组件库的默认值、插件私有颜色和页面局部常量都不得成为第二主题真源。
+6321 设置、桌面 Chat、共享 Mobile WebUI、Dashboard 和插件公开控件必须从同一个 Roxy Theme Catalog 读取颜色。Catalog 以 Material 3 的 primary、secondary、tertiary、error 与 tonal surface 角色表达通用界面语义，并由 Roxy 扩展 success、warning、trace 和 info 等领域角色；组件库的默认值、插件私有颜色和页面局部常量都不得成为第二主题真源。
 
 颜色必须表达动作、选择、状态或层级：primary 只突出当前主要动作，容器色表达选择和低强度强调，error、warning、success、trace 不能互相借色。布局优先使用留白和 tonal surface 建立层级，边框只表达结构或状态；卡片、胶囊和阴影不得作为所有内容的默认容器。引入 Material 组件不能改变 WEBUI-001～WEBUI-006 的源码、平台能力、状态 owner 与发布边界。
 
@@ -536,7 +536,7 @@ active 检查错误、generation key 错配、名称冲突、依赖缺失和拓�
 
 ### PLG-009 Skill 和 MCP 通过插件安装发布
 
-Skill、Drift skill 和 MCP server 都由插件包声明并通过插件安装系统进入 Akashic。插件的 `skill_roots`、`drift_skill_roots` 和 `mcp_servers` 是能力来源；安装阶段准备代码与 MCP runtime，generation readiness 全部通过后再原子发布 catalog。workspace 中的 skill 软链接只是当前插件 generation 的可重建投影，不是 canonical source。独立 `mcp/servers/*.toml` 和 workspace 内手工 skill 目录不属于目标安装模型；现有兼容路径必须迁移到插件，不能继续扩展成第二套能力所有权。
+Skill、Drift skill 和 MCP server 都由插件包声明并通过插件安装系统进入 Roxy。插件的 `skill_roots`、`drift_skill_roots` 和 `mcp_servers` 是能力来源；安装阶段准备代码与 MCP runtime，generation readiness 全部通过后再原子发布 catalog。workspace 中的 skill 软链接只是当前插件 generation 的可重建投影，不是 canonical source。独立 `mcp/servers/*.toml` 和 workspace 内手工 skill 目录不属于目标安装模型；现有兼容路径必须迁移到插件，不能继续扩展成第二套能力所有权。
 
 ### PLG-010 卸载插件默认保留 plugin-data
 
@@ -572,9 +572,18 @@ plugin、marketplace、snapshot 等名称必须是安全单片段；resolved pat
 
 迁移先获得 workspace 单实例锁。SQLite 使用在线 backup 与 integrity check；全部内容写到唯一 staging，再一次性发布。目标已存在时拒绝合并，源数据保留到独立清理步骤。
 
-### WSP-004 Workspace 是 Akashic 运行数据根
+### WSP-004 Workspace 是 Roxy 运行数据根
 
-`<workspace>` 表示由 `--workspace`、`AKASHIC_WORKSPACE` 或主配置选中的 Akashic 运行实例主要工作区。它承载会话、长期记忆、附件、调度、主动流程、plugin-data、能力投影、诊断和运行控制状态，不是源码仓库、Git checkout 或 Git worktree。插件代码、Skill/MCP 的 canonical source、全局插件清单和凭据可以位于 workspace 之外，必须作为明确 companion state 管理。Git worktree 只承载代码、测试和项目工作手册；任何代码 worktree 都不得把自己的目录当成正式运行数据根。
+`<workspace>` 表示由 `--workspace`、`ROXY_WORKSPACE` 或主配置选中的 Roxy 运行实例主要工作区。旧 `AKASHIC_WORKSPACE` 仅为已有安装兼容，且不得在新旧同时出现时覆盖 Roxy。它承载会话、长期记忆、附件、调度、主动流程、plugin-data、能力投影、诊断和运行控制状态，不是源码仓库、Git checkout 或 Git worktree。插件代码、Skill/MCP 的 canonical source、全局插件清单和凭据可以位于 workspace 之外，必须作为明确 companion state 管理。Git worktree 只承载代码、测试和项目工作手册；任何代码 worktree 都不得把自己的目录当成正式运行数据根。
+
+### WSP-005 Roxy 身份迁移必须显式、保留源且不越权
+
+Roxy 是新增配置、路径、Socket、SDK、Skill、Dashboard 与 Mobile bridge 的唯一 canonical 名称；
+旧 Akashic 名称只能作为既有部署的兼容入口。将旧 workspace 切换到新名称空间必须由明确命令
+指定源和目标，离线持锁、校验 staging 并原子发布。目标已存在时必须拒绝合并，源 workspace 必须
+保留，运行锁和 Socket 不得随状态复制。迁移不得借品牌升级自动改写人格、配置、凭据、全局插件根
+或外部 Apple Notes；这些对象只能由各自 owner 的明确操作改变。新旧环境变量同时存在时必须选择
+Roxy，且旧移动端 keyset 必须保留其历史身份直到具有明确 Roxy marker 的新 keyset 被创建。
 
 ### MIG-001 兼容迁移由 workspace Yoyo 账本一次性推进
 
@@ -594,7 +603,7 @@ old text 不存在时失败；多次匹配而未声明 replace-all 时拒绝猜�
 
 ### SH-001 Shell 使用统一执行句柄管理进程生命周期
 
-Shell 在短等待窗口内返回已完成结果；命令仍运行时返回当前对话 owner 可继续读取和写入的 `execution_id`。该 ID 是 manager 内一次命令执行的句柄，不是 OS PID，也不是 Akashic 对话 session。初始等待或后续等待被取消不得隐式杀死已注册进程；只有硬超时、显式 stop、当前 query 结束、进程容量回收或 runtime shutdown 才终止该 execution 的平台执行边界：Unix 是启动时创建的 process group，Windows 是 `taskkill /T` 可见的后代集合。显式 `setsid`、daemonize 或外部服务管理器会脱离这个边界，不得声称已被 manager 回收；需要强制覆盖这类命令时必须使用具备 cgroup/Job Object 所有权的受控容器或 runner。每次读取只返回上次读取后的新增输出，完整输出保存在临时诊断日志中。路径字符串检查只防误操作，不得冒充安全沙箱；运行不可信命令使用容器、namespace 和最小权限。
+Shell 在短等待窗口内返回已完成结果；命令仍运行时返回当前对话 owner 可继续读取和写入的 `execution_id`。该 ID 是 manager 内一次命令执行的句柄，不是 OS PID，也不是 Roxy 对话 session。初始等待或后续等待被取消不得隐式杀死已注册进程；只有硬超时、显式 stop、当前 query 结束、进程容量回收或 runtime shutdown 才终止该 execution 的平台执行边界：Unix 是启动时创建的 process group，Windows 是 `taskkill /T` 可见的后代集合。显式 `setsid`、daemonize 或外部服务管理器会脱离这个边界，不得声称已被 manager 回收；需要强制覆盖这类命令时必须使用具备 cgroup/Job Object 所有权的受控容器或 runner。每次读取只返回上次读取后的新增输出，完整输出保存在临时诊断日志中。路径字符串检查只防误操作，不得冒充安全沙箱；运行不可信命令使用容器、namespace 和最小权限。
 
 ### SH-002 Shell cleanup 不拥有 turn 与重启终态
 

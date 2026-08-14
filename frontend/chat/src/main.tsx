@@ -45,7 +45,7 @@ import {
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ConversationNavigation } from "./conversation-navigation";
 import { ComposerActionButton } from "./composer-action";
-import { akashicBrandIcon } from "./akashic-brand";
+import { roxyBrandIcon } from "./roxy-brand";
 import { ComposerReply, MessageReplyReference, SharedMessageActions } from "./message-actions";
 import { MobilePairingDialog } from "./mobile-pairing-dialog";
 import { loadWebPluginCatalog, MobilePluginSlot } from "./mobile-plugin-runtime";
@@ -473,10 +473,10 @@ function App() {
         {!isEmbeddedShell && <header className="chat-sidebar-brand">
           <span
             className="chat-sidebar-brand__mark"
-            style={{ WebkitMaskImage: `url(${akashicBrandIcon})`, maskImage: `url(${akashicBrandIcon})` }}
+            style={{ WebkitMaskImage: `url(${roxyBrandIcon})`, maskImage: `url(${roxyBrandIcon})` }}
             aria-hidden="true"
           />
-          <span><strong>Akashic</strong><small>Dashboard</small></span>
+          <span><strong>Roxy</strong><small>Dashboard</small></span>
         </header>}
         <ConversationNavigation
           destinationHeading={isEmbeddedShell ? undefined : "工作空间"}
@@ -1338,7 +1338,10 @@ if (isEmbeddedShell) {
   window.addEventListener("message", (event: MessageEvent<unknown>) => {
     if (!parentOrigins.has(event.origin) || typeof event.data !== "object" || event.data === null) return;
     const message = event.data as Record<string, unknown>;
-    if (message.type !== "akashic.theme" || typeof message.themeId !== "string") return;
+    if (
+      (message.type !== "roxy.theme" && message.type !== "akashic.theme")
+      || typeof message.themeId !== "string"
+    ) return;
     setTheme(message.themeId, false);
   });
 }

@@ -15,6 +15,7 @@ from types import FrameType
 from typing import IO
 from uuid import uuid4
 
+from agent.identity import roxy_env
 from agent.background.boot_guardian import (
     _cleanup_boot_processes,
     _cleanup_boot_processes_best_effort,
@@ -311,6 +312,10 @@ def run_supervisor(
             os.set_blocking(lifecycle_read_fd, False)
             guardian_env = os.environ.copy()
             for name in (
+                "ROXY_SUPERVISED",
+                "ROXY_BOOT_ID",
+                "ROXY_LIFECYCLE_FD",
+                "ROXY_RESTART_NONCE",
                 "AKASHIC_SUPERVISED",
                 "AKASHIC_BOOT_ID",
                 "AKASHIC_LIFECYCLE_FD",
@@ -611,9 +616,9 @@ def _start_settings_server(
 
     from bootstrap.settings_api import create_settings_server
 
-    host = os.environ.get("AKASHIC_SETTINGS_HOST", "127.0.0.1")
+    host = roxy_env("SETTINGS_HOST", "127.0.0.1")
     if host != "127.0.0.1":
-        raise RuntimeError("AKASHIC_SETTINGS_HOST 只允许 127.0.0.1")
+        raise RuntimeError("ROXY_SETTINGS_HOST 只允许 127.0.0.1")
     server = create_settings_server(
         config_path,
         workspace,

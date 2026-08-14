@@ -12,7 +12,7 @@
 - 进入仓库后的第一个主动读取动作必须是 [`docs/INDEX.md`](docs/INDEX.md)。即使任务看起来简单，也先由索引确认 owner、必读材料和真实证据入口。
 - 任何会修改仓库文件的任务，在索引之后读取 [`docs/WORKFLOW.md`](docs/WORKFLOW.md)。它是 Read、Ownership、Isolate、Contract、Implement、Verify、Review、Reconcile 和 Deliver 的唯一执行顺序；本文件不复制步骤、字段或 Gate 状态表。
 - 索引之后渐进读取相关 `projectneed` 条款、`NOW.md`、决策、设计和真实实现。历史记忆与 `_handbook/` 只提供线索，不能覆盖当前工作手册和代码事实。
-- Git worktree 保存源码、测试和项目文档；Akashic `<workspace>` 保存会话、记忆、附件、调度、主动流程、plugin-data 和运行状态。除非任务明确要求迁移或修复运行数据，不得因修改代码而写入正式 workspace。
+- Git worktree 保存源码、测试和项目文档；Roxy `<workspace>` 保存会话、记忆、附件、调度、主动流程、plugin-data 和运行状态。旧 Akashic 路径仅用于兼容或经维护者明确批准的迁移；除非任务明确要求迁移或修复运行数据，不得因修改代码而写入正式 workspace。
 - 任务涉及数据库、Markdown 记忆、附件、workspace、插件数据、调度、迁移、备份、裁切、清理或删除时，按索引先读 [`docs/design/persistence-state-map.md`](docs/design/persistence-state-map.md)。其中的推断和未知在维护者确认前不能升级成需求或删除依据。
 - Skill、Drift skill 和 MCP 通过插件声明、安装和 generation 发布。修改前定位已安装能力的 canonical source；workspace 软链接和插件 cache 都不是可编辑源码。
 

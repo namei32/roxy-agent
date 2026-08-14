@@ -220,7 +220,7 @@ def _strip_paste_markers(value: str) -> str:
 # ---------------------------------------------------------------------------
 
 def run_setup_wizard(config_path: Path, workspace: Path) -> None:
-    click.echo(click.style("\n══ akashic 初始化向导 ══\n", bold=True))
+    click.echo(click.style("\n══ Roxy 初始化向导 ══\n", bold=True))
     _hint("全程按回车使用括号内的默认值")
     _hint("API key / token 输入时会显示为 *，正常输入后回车即可")
 
@@ -970,7 +970,7 @@ def _render_llm(a: WizardAnswers) -> str:
 def _render_agent(a: WizardAnswers) -> str:
     return f"""\
 [agent]
-system_prompt = "You are Akashic, a helpful AI assistant with access to tools. Always respond in the same language the user uses."
+system_prompt = "You are Roxy, a helpful AI assistant with access to tools. Always respond in the same language the user uses."
 max_tokens = {a.max_output_tokens}
 # 设为 0 表示不限制迭代轮数；长任务仍可用 /stop 中断。
 max_iterations = 40

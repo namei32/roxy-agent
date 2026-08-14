@@ -122,7 +122,7 @@ class SandboxProvider:
 
 
 def _workspace_from_env() -> Path:
-    root = Path(os.environ.get("AKASHIC_DEBUG_WORKSPACE", "/sandbox/workspace"))
+    root = Path(os.environ.get("ROXY_DEBUG_WORKSPACE", "/sandbox/workspace"))
     return root / "proactive-sandbox"
 
 
@@ -395,7 +395,7 @@ async def tick(
     http_resources = SharedHttpResources()
     configure_default_shared_http_resources(http_resources)
     tools.register(WebFetchTool(http_resources.external_default))
-    installed_cache = Path.home() / ".akashic-plugin" / "cache"
+    installed_cache = Path.home() / ".roxy-plugin" / "cache"
     feed_root = _installed_plugin_root(installed_cache, "feed")
     sessions = SessionManager(workspace)
     plugins = PluginManager(

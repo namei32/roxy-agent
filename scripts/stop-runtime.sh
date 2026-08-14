@@ -43,7 +43,7 @@ done
 command -v flock >/dev/null 2>&1 || die "flock is required"
 command -v fuser >/dev/null 2>&1 || die "fuser is required"
 
-python_bin="${AKASHIC_PYTHON:-$project_root/.venv/bin/python}"
+python_bin="${ROXY_PYTHON:-${AKASHIC_PYTHON:-$project_root/.venv/bin/python}}"
 if [[ ! -x "$python_bin" ]]; then
     python_bin="$(command -v python3 || true)"
 fi
@@ -58,7 +58,11 @@ from pathlib import Path
 
 config_path = Path(sys.argv[1])
 workspace_override = sys.argv[2]
-workspace_value = workspace_override or os.environ.get("AKASHIC_WORKSPACE", "")
+workspace_value = (
+    workspace_override
+    or os.environ.get("ROXY_WORKSPACE", "")
+    or os.environ.get("AKASHIC_WORKSPACE", "")
+)
 if not workspace_value.strip():
     with config_path.open("rb") as stream:
         runtime = tomllib.load(stream).get("runtime")

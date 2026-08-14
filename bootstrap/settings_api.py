@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from agent.identity import roxy_env
 from agent.config import Config
 from agent.model_runtime.auth.codex import CodexAuthDriver
 from agent.model_runtime.auth.store import CredentialStore
@@ -105,7 +106,11 @@ def create_settings_app(
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
             origin = request.headers.get("origin", "")
             expected = f"http://{request.url.netloc}"
-            if origin != expected or request.headers.get("x-akasic-csrf") != "1":
+            csrf_valid = (
+                request.headers.get("x-roxy-csrf") == "1"
+                or request.headers.get("x-akasic-csrf") == "1"
+            )
+            if origin != expected or not csrf_valid:
                 return _error_response(403, "csrf_rejected", "请求来源无效")
 
         # 2. 所有响应禁止缓存和跨页面泄露引用信息。
@@ -575,7 +580,7 @@ def _new_config(workspace: Path) -> str:
     channels = tomlkit.table()
     chat = tomlkit.table()
     chat["enabled"] = True
-    chat["host"] = os.environ.get("AKASHIC_CHAT_HOST", "127.0.0.1")
+    chat["host"] = roxy_env("CHAT_HOST", "127.0.0.1")
     chat["port"] = 6322
     chat["channel_name"] = "web"
     channels["chat"] = chat

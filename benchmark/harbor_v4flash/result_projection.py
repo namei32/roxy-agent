@@ -11,7 +11,7 @@ def project_agent_context(
     harness_version: str,
     source_digest: str,
 ) -> None:
-    """把已核对的 Akasic terminal result 投影到 Harbor AgentContext。"""
+    """把已核对的 Roxy terminal result 投影到 Harbor AgentContext。"""
 
     # 1. 成功或已有 usage 的终态投影精确用量；provider 前置失败允许 usage=None。
     usage = turn_result["terminal"]["usage"]

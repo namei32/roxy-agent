@@ -100,7 +100,7 @@ class ModelGateState:
                 "headers": {
                     key: value
                     for key, value in headers.items()
-                    if key.startswith("x-akashic-") or key == "x-request-id"
+                    if key.startswith("x-roxy-") or key == "x-request-id"
                 },
                 "payload": payload,
                 "script": script,

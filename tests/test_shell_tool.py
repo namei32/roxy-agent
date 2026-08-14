@@ -818,11 +818,14 @@ def test_shell_env_sets_noninteractive_defaults(monkeypatch, tmp_path: Path) -> 
 def test_shell_env_defers_plugin_uninstall_owned_by_current_turn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("ROXY_DEFER_PLUGIN_UNINSTALL", "stale")
     monkeypatch.setenv("AKASHIC_DEFER_PLUGIN_UNINSTALL", "stale")
+    assert "ROXY_DEFER_PLUGIN_UNINSTALL" not in _shell_env()
     assert "AKASHIC_DEFER_PLUGIN_UNINSTALL" not in _shell_env()
 
     token = current_turn_id.set("turn:context-pressure-uninstall")
     try:
+        assert _shell_env()["ROXY_DEFER_PLUGIN_UNINSTALL"] == "1"
         assert _shell_env()["AKASHIC_DEFER_PLUGIN_UNINSTALL"] == "1"
     finally:
         current_turn_id.reset(token)

@@ -13,7 +13,7 @@ test("pre-unification drawer preview uses the real shared navigation component",
   assert.match(source, /label: "插件"/);
   assert.match(source, /className="legacy-memory-summary"/);
   assert.match(main, /preview === "drawer-islands"/);
-  assert.doesNotMatch(source, /fetch\(|WebSocket|AkashicNative/);
+  assert.doesNotMatch(source, /fetch\(|WebSocket|RoxyNative/);
 });
 
 test("preview preserves current sessions and every mobile action", () => {

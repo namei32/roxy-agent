@@ -53,7 +53,7 @@ TestClient = _TrackedTestClient
 def _isolate_dashboard_plugin_home(monkeypatch: pytest.MonkeyPatch) -> None:
     """让 Dashboard 测试只观察各自声明的 HOME/manifest。"""
 
-    monkeypatch.delenv("AKASHIC_PLUGIN_HOME", raising=False)
+    monkeypatch.delenv("ROXY_PLUGIN_HOME", raising=False)
 
 
 def _use_writable_dashboard_plugins(
@@ -1124,7 +1124,7 @@ def test_wake_package_owns_dashboard_visibility(tmp_path, monkeypatch) -> None:
 def test_dashboard_lists_installed_plugin_panels(tmp_path, monkeypatch) -> None:
     _seed_workspace(tmp_path)
     home = tmp_path / "home"
-    plugin_dir = home / ".akashic-plugin" / "cache" / "github" / "status_commands" / "1.0.0"
+    plugin_dir = home / ".roxy-plugin" / "cache" / "github" / "status_commands" / "1.0.0"
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "dashboard.py").write_text(
         "from fastapi import FastAPI\n"
@@ -1137,7 +1137,7 @@ def test_dashboard_lists_installed_plugin_panels(tmp_path, monkeypatch) -> None:
         "from agent.plugins import Plugin\nclass StatusPlugin(Plugin):\n    name='status_commands'\n    version='1.0.0'\n",
         encoding="utf-8",
     )
-    manifest_path = home / ".akashic-plugin" / "manifest.toml"
+    manifest_path = home / ".roxy-plugin" / "manifest.toml"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text('[plugins."status_commands@github"]\nenabled = true\n', encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
@@ -1161,7 +1161,7 @@ def test_standalone_dashboard_honors_builtin_plugin_manifest(
     tmp_path, monkeypatch
 ) -> None:
     home = tmp_path / "home"
-    manifest_path = home / ".akashic-plugin" / "manifest.toml"
+    manifest_path = home / ".roxy-plugin" / "manifest.toml"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(
         '[plugins.akasha]\nenabled = false\n',
@@ -1179,7 +1179,7 @@ def test_standalone_dashboard_rejects_invalid_manifest(
     tmp_path, monkeypatch
 ) -> None:
     home = tmp_path / "home"
-    manifest_path = home / ".akashic-plugin" / "manifest.toml"
+    manifest_path = home / ".roxy-plugin" / "manifest.toml"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text("invalid = [\n", encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
@@ -1191,7 +1191,7 @@ def test_standalone_dashboard_rejects_invalid_manifest(
 def test_installed_plugin_dashboard_supports_relative_imports(tmp_path, monkeypatch) -> None:
     _seed_workspace(tmp_path)
     home = tmp_path / "home"
-    plugin_dir = home / ".akashic-plugin" / "cache" / "github" / "observe" / "1.0.0"
+    plugin_dir = home / ".roxy-plugin" / "cache" / "github" / "observe" / "1.0.0"
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "db.py").write_text(
         "def ping():\n"
@@ -1211,7 +1211,7 @@ def test_installed_plugin_dashboard_supports_relative_imports(tmp_path, monkeypa
         "from agent.plugins import Plugin\nclass ObservePlugin(Plugin):\n    name='observe'\n    version='1.0.0'\n",
         encoding="utf-8",
     )
-    manifest_path = home / ".akashic-plugin" / "manifest.toml"
+    manifest_path = home / ".roxy-plugin" / "manifest.toml"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text('[plugins."observe@github"]\nenabled = true\n', encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))

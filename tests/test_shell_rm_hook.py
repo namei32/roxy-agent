@@ -50,7 +50,7 @@ def _run(coro: Any) -> Any:
 
 def test_shell_rm_hook_rewrites_rm_and_creates_restore_dir(tmp_path: Path) -> None:
     restore_dir = tmp_path / "restore"
-    os.environ["AKASIC_RESTORE_DIR"] = str(restore_dir)
+    os.environ["ROXY_RESTORE_DIR"] = str(restore_dir)
     try:
         bus = EventBus()
         mgr = _make_manager([FIXTURES_DIR], event_bus=bus)
@@ -89,12 +89,12 @@ def test_shell_rm_hook_rewrites_rm_and_creates_restore_dir(tmp_path: Path) -> No
             str(restore_dir),
         ]
     finally:
-        os.environ.pop("AKASIC_RESTORE_DIR", None)
+        os.environ.pop("ROXY_RESTORE_DIR", None)
 
 
 def test_shell_rm_hook_rewrites_sudo_rm(tmp_path: Path) -> None:
     restore_dir = tmp_path / "restore"
-    os.environ["AKASIC_RESTORE_DIR"] = str(restore_dir)
+    os.environ["ROXY_RESTORE_DIR"] = str(restore_dir)
     try:
         bus = EventBus()
         mgr = _make_manager([FIXTURES_DIR], event_bus=bus)
@@ -124,7 +124,7 @@ def test_shell_rm_hook_rewrites_sudo_rm(tmp_path: Path) -> None:
             str(restore_dir),
         ]
     finally:
-        os.environ.pop("AKASIC_RESTORE_DIR", None)
+        os.environ.pop("ROXY_RESTORE_DIR", None)
 
 
 def test_shell_rm_hook_skips_non_rm_command(tmp_path: Path) -> None:

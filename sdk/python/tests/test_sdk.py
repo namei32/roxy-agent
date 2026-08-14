@@ -13,14 +13,21 @@ from agent.control.service import ControlService
 from infra.control.socket import SocketAppServer
 from session.manager import SessionManager
 
-from akashic_sdk import (
-    Akashic,
-    AsyncAkashic,
+from roxy_sdk import (
+    Roxy,
+    AsyncRoxy,
     RemoteError,
     SlowConsumerError,
     TurnHandle,
 )
-from akashic_sdk.client import _WireClient
+from roxy_sdk.client import _WireClient
+
+
+def test_legacy_sdk_exports_remain_aliases() -> None:
+    from akashic_sdk import Akashic, AsyncAkashic
+
+    assert Akashic is Roxy
+    assert AsyncAkashic is AsyncRoxy
 
 
 def _buffered_notification_reader(
@@ -65,7 +72,7 @@ async def test_sdk_reader_yields_to_active_turn_consumer() -> None:
 async def test_sdk_reader_fails_loud_for_unconsumed_notification_queue() -> None:
     reader = _buffered_notification_reader(513)
     wire = _WireClient(reader, cast(asyncio.StreamWriter, object()))
-    client = AsyncAkashic(wire)
+    client = AsyncRoxy(wire)
 
     await wire.reader_task
 
@@ -90,7 +97,7 @@ async def test_async_sdk_runs_against_real_socket_router(tmp_path: Path) -> None
     server = SocketAppServer(tmp_path / "control.sock", ControlService(runtime, sessions, tmp_path))
     await server.start()
     try:
-        async with await AsyncAkashic.connect(str(server.endpoint)) as client:
+        async with await AsyncRoxy.connect(str(server.endpoint)) as client:
             thread = await client.thread_start()
             handle = await thread.turn("hello")
             events = [event async for event in handle.stream()]
@@ -124,7 +131,7 @@ async def test_async_sdk_exposes_active_turn_busy_as_retryable(tmp_path: Path) -
     )
     await server.start()
     try:
-        async with await AsyncAkashic.connect(str(server.endpoint)) as client:
+        async with await AsyncRoxy.connect(str(server.endpoint)) as client:
             thread = await client.thread_start()
             first = await thread.turn("u1")
             await started.wait()
@@ -158,7 +165,7 @@ async def test_async_sdk_reads_terminal_frame_larger_than_streamreader_default(
     )
     await server.start()
     try:
-        async with await AsyncAkashic.connect(str(server.endpoint)) as client:
+        async with await AsyncRoxy.connect(str(server.endpoint)) as client:
             thread = await client.thread_start()
             result = await thread.run("large")
             assert result["status"] == "completed"
@@ -214,7 +221,7 @@ async def test_sdk_result_leaves_no_duplicate_terminal_in_turn_queue(
     )
     await server.start()
     try:
-        async with await AsyncAkashic.connect(str(server.endpoint)) as client:
+        async with await AsyncRoxy.connect(str(server.endpoint)) as client:
             thread = await client.thread_start()
             handle = await thread.turn(terminal_mode)
             if terminal_mode == "interrupted":
@@ -249,7 +256,7 @@ async def test_sync_sdk_has_turn_handle_and_thread_management_parity(tmp_path: P
     await server.start()
 
     def exercise() -> None:
-        with Akashic.connect(str(server.endpoint)) as client:
+        with Roxy.connect(str(server.endpoint)) as client:
             thread = client.thread_start()
             handle = thread.turn("hello")
             events = list(handle.events())

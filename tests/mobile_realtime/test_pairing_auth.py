@@ -24,6 +24,9 @@ from infra.mobile_realtime.key_protection import (
     LoadedKeyset,
 )
 from infra.mobile_realtime.pairing import (
+    _LEGACY_PAIRING_SECRET_DOMAIN,
+    _pair_claim_transcript,
+    _pairing_secret_hash,
     PairClaimPayload,
     PairingConfirmationError,
     PairingSecretError,
@@ -32,7 +35,11 @@ from infra.mobile_realtime.pairing import (
     pair_claim_signing_bytes,
     parse_device_public_key,
 )
-from infra.mobile_realtime.storage import MobileRealtimeStorage, PairingStateError
+from infra.mobile_realtime.storage import (
+    MobileRealtimeStorage,
+    PairingSessionRecord,
+    PairingStateError,
+)
 
 
 class _EphemeralMasterKeys:
@@ -97,12 +104,12 @@ def _services(
     keyset = KeysetManager(
         tmp_path / "keys",
         _EphemeralMasterKeys(),
-    ).initialize(lan_hostname="akashic.local")
+    ).initialize(lan_hostname="roxy.local")
     storage = MobileRealtimeStorage(tmp_path / "mobile.db")
     service = PairingService(
         storage,
         keyset,
-        lan_endpoints=("wss://akashic.local:6323/ws",),
+        lan_endpoints=("wss://roxy.local:6323/ws",),
         tunnel_endpoints=("wss://agent.example.com/ws",),
     )
     return storage, service, keyset
@@ -127,6 +134,49 @@ def test_pairing_requires_signed_claim_and_desktop_confirmation(tmp_path: Path) 
     assert service.pending_claim(payload.pairing_id) is None
     with pytest.raises(PairingStateError, match="不能 claim"):
         service.claim(payload)
+    storage.close()
+
+
+def test_claim_accepts_an_unexpired_legacy_pairing_session(tmp_path: Path) -> None:
+    """升级不会使两分钟窗口内、由旧 runtime 创建的 QR 立即失效。"""
+
+    storage, service, keyset = _services(tmp_path)
+    pairing_id = uuid4().hex
+    secret = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode("ascii").rstrip("=")
+    secret_hash = _pairing_secret_hash(secret, domain=_LEGACY_PAIRING_SECRET_DOMAIN)
+    storage.create_pairing_session(
+        PairingSessionRecord(
+            pairing_id=pairing_id,
+            secret_hash=secret_hash,
+            expires_at=datetime.now(timezone.utc) + timedelta(seconds=60),
+            status="pending",
+        )
+    )
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_key = _device_public_key(private_key)
+    client_nonce = base64.urlsafe_b64encode(secrets.token_bytes(18)).decode("ascii")
+    transcript = _pair_claim_transcript(
+        server_id=keyset.manifest.server_id,
+        pairing_id=pairing_id,
+        secret_hash=secret_hash,
+        device_public_key=public_key,
+        device_name="Legacy Android",
+        capabilities=["stream-v1"],
+        client_nonce=client_nonce,
+    )
+    payload = PairClaimPayload(
+        pairing_id=pairing_id,
+        one_time_secret=secret,
+        device_public_key=public_key,
+        device_name="Legacy Android",
+        capabilities=["stream-v1"],
+        client_nonce=client_nonce,
+        signature=base64.b64encode(
+            private_key.sign(transcript, ec.ECDSA(hashes.SHA256()))
+        ).decode("ascii"),
+    )
+
+    assert service.claim(payload).pairing_id == pairing_id
     storage.close()
 
 
@@ -241,12 +291,12 @@ def test_expired_pairing_secret_is_rejected(tmp_path: Path) -> None:
     keyset = KeysetManager(
         tmp_path / "keys",
         _EphemeralMasterKeys(),
-    ).initialize(lan_hostname="akashic.local")
+    ).initialize(lan_hostname="roxy.local")
     storage = MobileRealtimeStorage(tmp_path / "mobile.db")
     service = PairingService(
         storage,
         keyset,
-        lan_endpoints=("wss://akashic.local:6323/ws",),
+        lan_endpoints=("wss://roxy.local:6323/ws",),
         tunnel_endpoints=(),
         ttl=timedelta(seconds=1),
         clock=lambda: current[0],

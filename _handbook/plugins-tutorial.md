@@ -1,11 +1,11 @@
 # 插件系统
 
-Akashic 插件采用“全局只管启停，插件自己声明能力”的模型。插件仓库必须提供根目录 `plugin.py`，不再读取 `.aka-plugin/plugin.json`、`manifest.yaml`、`mcp/servers.json` 或 `registry.json`。
+Roxy 插件采用“全局只管启停，插件自己声明能力”的模型。插件仓库必须提供根目录 `plugin.py`，不再读取 `.aka-plugin/plugin.json`、`manifest.yaml`、`mcp/servers.json` 或 `registry.json`。
 
 ```text
-┌─ ~/.akashic-plugin/manifest.toml
+┌─ ~/.roxy-plugin/manifest.toml
 │  └─ 只记录 plugin_id 与 enabled
-├─ ~/.akashic-plugin/cache/<marketplace>/<plugin>/<version>/
+├─ ~/.roxy-plugin/cache/<marketplace>/<plugin>/<version>/
 │  └─ 从 Git 仓库安装的只读代码与 MCP 虚拟环境
 └─ <workspace>/plugin-data/<plugin>-<marketplace>/
    ├─ config.local.toml
@@ -32,22 +32,22 @@ Dashboard 插件的前端样式分为两层：主程序提供公共 preset，插
 ┌─ Host CSS
 │  └─ Dashboard 私有实现，插件不能依赖
 ├─ Dashboard UI SDK
-│  ├─ @akashic/dashboard-ui 组件
-│  ├─ ak-plugin-* 布局与 token preset
+│  ├─ @roxy/dashboard-ui 组件
+│  ├─ roxy-plugin-* 布局与 token preset
 │  └─ api、格式化器和共享 React 实例
 └─ Plugin CSS
    └─ 可选，放在 dashboard_panel.css，并限定在插件根节点内
 ```
 
-插件可以直接使用 `@akashic/dashboard-ui` 的 `Grid`、`Stack`、`Panel`、`Toolbar`、`Chip` 和图表组件，也可以使用 `window.AkashicDashboard.ui.cx` 返回的公共 class。插件不应依赖主程序内部的 Tailwind utility class；需要特殊布局或动画时，在自己的 `dashboard_panel.css` 中实现。
+插件可以直接使用 `@roxy/dashboard-ui` 的 `Grid`、`Stack`、`Panel`、`Toolbar`、`Chip` 和图表组件，也可以使用 `window.RoxyDashboard.ui.cx` 返回的公共 class。插件不应依赖主程序内部的 Tailwind utility class；需要特殊布局或动画时，在自己的 `dashboard_panel.css` 中实现。
 
 ### 插件颜色主题契约
 
-Dashboard、桌面 Web、6321 设置页和 Android 移动 WebUI 使用同一个扁平 theme ID。默认值是 `light`，当前内置 `light`、`dark` 和实验性的 `warm-paper`；不提供“跟随系统”。主题目录随 WebUI 构建发布为 `akashic-theme-catalog.json`。
+Dashboard、桌面 Web、6321 设置页和 Android 移动 WebUI 使用同一个扁平 theme ID。默认值是 `light`，当前内置 `light`、`dark` 和实验性的 `warm-paper`；不提供“跟随系统”。主题目录随 WebUI 构建发布为 `roxy-theme-catalog.json`。
 
 ```text
 ┌─ theme ID：light / dark / warm-paper / future-theme
-├─ Host：选择主题并在根节点发布 --ak-color-* 语义颜色
+├─ Host：选择主题并在根节点发布 --roxy-color-* 语义颜色
 ├─ 第一方插件：只消费语义颜色，保留自己的数据可视化色
 └─ 第三方插件：按插件原始 CSS 渲染，Host 不拦截、不反色、不判定兼容性
 ```
@@ -55,15 +55,15 @@ Dashboard、桌面 Web、6321 设置页和 Android 移动 WebUI 使用同一个�
 第一方插件必须使用下列语义颜色；不得继续发布 `--m-*`、`--color-*` 兼容别名，也不得读取 Dashboard 私有实现变量：
 
 ```css
-[data-akashic-plugin="demo"] {
-  color: var(--ak-color-text-primary);
-  background: var(--ak-color-bg-surface);
-  border-color: var(--ak-color-border-default);
+[data-roxy-plugin="demo"] {
+  color: var(--roxy-color-text-primary);
+  background: var(--roxy-color-bg-surface);
+  border-color: var(--roxy-color-border-default);
 }
 
-[data-akashic-plugin="demo"] .demo-action {
-  color: var(--ak-color-on-action-primary);
-  background: var(--ak-color-action-primary);
+[data-roxy-plugin="demo"] .demo-action {
+  color: var(--roxy-color-on-action-primary);
+  background: var(--roxy-color-action-primary);
 }
 ```
 
@@ -76,12 +76,12 @@ Dashboard、桌面 Web、6321 设置页和 Android 移动 WebUI 使用同一个�
 - 状态：`status-error`、`status-error-container`、`status-warning`、`status-success`、`status-trace`、`status-trace-text`、`status-trace-container`
 - 效果：`shadow`、`image-outline`
 
-CSS 变量名统一加 `--ak-color-` 前缀；需要透明度时使用对应的 `--ak-color-<role>-rgb` 通道，例如 `rgb(var(--ak-color-action-primary-rgb) / 0.2)`。插件自身的品牌色、图表序列色和二维码黑白等领域颜色可以保留，但不能拿它们代替页面背景、正文、边框、动作和通用状态色。
+CSS 变量名统一加 `--roxy-color-` 前缀；需要透明度时使用对应的 `--roxy-color-<role>-rgb` 通道，例如 `rgb(var(--roxy-color-action-primary-rgb) / 0.2)`。旧 `--ak-*` 变量仅为已有插件兼容保留；插件自身的品牌色、图表序列色和二维码黑白等领域颜色可以保留，但不能拿它们代替页面背景、正文、边框、动作和通用状态色。
 
 运行时会为每个插件面板提供根节点：
 
 ```html
-<div data-akashic-plugin="observe">
+<div data-roxy-plugin="observe">
   <!-- plugin panel -->
 </div>
 ```
@@ -89,7 +89,7 @@ CSS 变量名统一加 `--ak-color-` 前缀；需要透明度时使用对应的 
 插件 CSS 应以根节点限定范围：
 
 ```css
-[data-akashic-plugin="observe"] .observe-filter {
+[data-roxy-plugin="observe"] .observe-filter {
   display: flex;
   gap: 0.75rem;
 }
@@ -107,13 +107,13 @@ python main.py plugin-install --source https://github.com/akashic-plugins/<plugi
 
 安装完成后刷新 Dashboard；插件 CSS 会和面板 JS 一起按版本加载。插件自己的配置、数据库和日志仍然保存在独立 data 目录，不随前端资源替换。
 
-第一方插件发布必须从插件仓库的 canonical source 完成：提交并推送源码，再执行 `plugin-install` 安装该提交，等待插件 generation 发布完成，最后在 `light`、`dark` 和 `warm-paper` 下检查真实 Dashboard/移动面板。禁止直接修改 `~/.akashic-plugin/cache/`。旧颜色 token 不提供兼容层；未迁移的第一方插件应先迁移再发布。第三方插件不因缺少主题适配被拒绝，实际效果由插件作者负责。
+第一方插件发布必须从插件仓库的 canonical source 完成：提交并推送源码，再执行 `plugin-install` 安装该提交，等待插件 generation 发布完成，最后在 `light`、`dark` 和 `warm-paper` 下检查真实 Dashboard/移动面板。禁止直接修改 `~/.roxy-plugin/cache/`。旧颜色 token 与 DOM 属性作为兼容层保留；未迁移的第一方插件应先迁移再发布。第三方插件不因缺少主题适配被拒绝，实际效果由插件作者负责。
 
 目录名、`name` 与安装后的插件身份必须一致。安装到 `github` 市场后，插件 ID 是 `demo@github`。
 
 ## 全局启停清单
 
-`~/.akashic-plugin/manifest.toml` 只回答“插件是否启用”：
+`~/.roxy-plugin/manifest.toml` 只回答“插件是否启用”：
 
 ```toml
 [plugins."demo@github"]

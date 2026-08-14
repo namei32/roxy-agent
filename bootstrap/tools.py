@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 from agent.config_models import Config
+from agent.identity import roxy_env
 from agent.plugins.manifest import plugins_root
 from agent.context import ContextBuilder
 from agent.looping.core import AgentLoop
@@ -385,7 +386,7 @@ def build_registered_tools(
             always_on=False,
             preloadable=False,
             requires_turn_search=True,
-            search_hint="重启 akashic agent 服务 重新加载核心配置",
+            search_hint="重启 roxy agent 服务 重新加载核心配置",
         )
 
     return (
@@ -632,7 +633,7 @@ def build_core_runtime(
 def _resolve_plugin_dirs(workspace: Path) -> list[Path]:
     project_root = Path(__file__).resolve().parent.parent
     roots = [project_root / "plugins"]
-    extra = os.environ.get("AKASHIC_EXTRA_PLUGIN_DIRS", "")
+    extra = roxy_env("EXTRA_PLUGIN_DIRS")
     roots.extend(
         Path(item).expanduser()
         for item in extra.split(os.pathsep)

@@ -1,4 +1,4 @@
-# Akashic Agent 开发工作流
+# Roxy Agent 开发工作流
 
 `WORKFLOW.md` 是一份从接手任务到提交评审的执行手册。长期产品语义由 [`projectneed.md`](projectneed.md) 负责，当前未完成事项由 [`NOW.md`](NOW.md) 负责。
 
@@ -50,7 +50,7 @@
 |---|---|---|
 | Read | 每个新会话先读 [`INDEX.md`](INDEX.md)，再按索引读相关需求、NOW、决策、设计和真实实现 | 已确认事实、未知项和文档冲突已经列出 |
 | Ownership | 对跨仓库、客户端、插件和协议任务声明 `capability_owner`、`consumer_scope`、`runtime_patch`、`runtime_patch_reason`、`authoritative_state_owner` 与 `client_only_alternative` | 核心改动能引用已批准语义；“未来可能复用”没有被当作 owner 证据 |
-| Isolate | 核对目标分支、base commit、worktree、唯一 writer、用户未提交改动和恢复点 | 改动不会写进用户当前 checkout、其他 agent 的 worktree 或正式 Akashic workspace |
+| Isolate | 核对目标分支、base commit、worktree、唯一 writer、用户未提交改动和恢复点 | 改动不会写进用户当前 checkout、其他 agent 的 worktree 或正式 Roxy workspace |
 | Contract | 声明目标、成功标准、`change_type`、`semantic_delta`、受保护状态、允许副作用、验证和回滚 | 高风险歧义已获确认，或任务停止等待确认 |
 | Implement | 只改合同允许的路径和行为；持久化语义从数据库、文件、事件或外部边界观察 | Diff 没有新增未声明副作用 |
 | Verify | 运行相关测试、类型或前端检查，再运行 change-impact Gate | 测试与报告来自当前源码；未运行项有明确状态 |
@@ -66,12 +66,12 @@
 
 ```bash
 git fetch origin main
-git worktree add -b feature/<task> ../akasic-agent-worktrees/<task> origin/main
+git worktree add -b feature/<task> ../roxy-agent-worktrees/<task> origin/main
 ```
 
 每个 worktree 同一时刻只有一个 writer。并行 subagent 默认只读审查各自的 commit/diff；需要修复时，为每个 writer 分配独立 worktree 和分支，并按 Review 合同记录 `repository + worktree + branch + owner + base_head + allowed_paths + status`。产生修改的 writer 必须先提交允许范围内的修改，再记录 `handoff_head + dirty_state + next owner`；没有产生修改时只能交接已经核对的 clean HEAD。不得用 reset、checkout 或清理未跟踪文件制造 clean 状态。旧 writer 完成或被明确中断前不得转移 owner，交接后的旧后台任务不得继续写入或提交。
 
-Git worktree 保存源码、测试和项目文档。Akashic `<workspace>` 保存会话、记忆、附件、调度和 plugin-data。测试使用一次性 workspace、plugin home、config 和 HOME。修改持久化文件前创建名称清楚的备份。
+Git worktree 保存源码、测试和项目文档。Roxy `<workspace>` 保存会话、记忆、附件、调度和 plugin-data。测试使用一次性 workspace、plugin home、config 和 HOME。修改持久化文件前创建名称清楚的备份。
 
 ## 4. 最小任务合同
 

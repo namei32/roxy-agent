@@ -123,7 +123,7 @@ output_dimensionality = 1024
 
 [app_server]
 enabled = true
-listen = "/sandbox/akashic.sock"
+listen = "/sandbox/roxy.sock"
 max_connections = 8
 ingress_queue_size = 32
 outbound_queue_size = 64
@@ -160,10 +160,10 @@ def _inside_probe(report_dir: Path) -> int:
     report_dir.mkdir(parents=True, exist_ok=True)
     events_path = report_dir / "akasha-v2-events.jsonl"
     model_url = os.environ.get(
-        "AKASHIC_MODEL_GATE_URL",
+        "ROXY_MODEL_GATE_URL",
         "http://model-gate:8090",
     )
-    endpoint = Path("/sandbox/akashic.sock")
+    endpoint = Path("/sandbox/roxy.sock")
     memory_path = Path("/sandbox/workspace/memory/akasha.db")
     checks: list[CheckResult] = []
     client: JsonRpcSocketClient | None = None
@@ -354,7 +354,7 @@ def _run_controller(
     )
     report_dir.mkdir(parents=True)
     sandbox = Path(
-        tempfile.mkdtemp(prefix="akashic-akasha-v2-gate-", dir="/tmp")
+        tempfile.mkdtemp(prefix="roxy-akasha-v2-gate-", dir="/tmp")
     )
     _prepare_host_sandbox(sandbox, repo)
     _write_runtime_config(sandbox, source_config)
@@ -363,11 +363,11 @@ def _run_controller(
 
     env = {
         **os.environ,
-        "AKASHIC_CONTROL_SANDBOX": str(sandbox),
+        "ROXY_CONTROL_SANDBOX": str(sandbox),
         "UID": str(os.getuid()),
         "GID": str(os.getgid()),
     }
-    project = f"akashic-akasha-v2-{run_id.lower()}"
+    project = f"roxy-akasha-v2-{run_id.lower()}"
     compose = [
         "docker",
         "compose",
@@ -392,7 +392,7 @@ def _run_controller(
                 "up",
                 "-d",
                 "model-gate",
-                "akashic-control-gate",
+                "roxy-control-gate",
             ],
             cwd=repo,
             env=env,
@@ -430,7 +430,7 @@ def _run_controller(
 
         # 3. Stop online growth and replay the exact persisted source.
         subprocess.run(
-            [*compose, "stop", "-t", "15", "akashic-control-gate"],
+            [*compose, "stop", "-t", "15", "roxy-control-gate"],
             cwd=repo,
             env=env,
             check=True,
@@ -567,12 +567,12 @@ def main() -> int:
     parser.add_argument(
         "--source-config",
         type=Path,
-        default=Path("/mnt/data/coding/akasic-agent/config.toml"),
+        default=Path("/mnt/data/coding/roxy-agent/config.toml"),
     )
     parser.add_argument(
         "--formal-workspace",
         type=Path,
-        default=Path("/home/huashen/.akashic/workspace"),
+        default=Path("/home/huashen/.roxy/workspace"),
     )
     arguments = parser.parse_args()
     if arguments.inside_container:

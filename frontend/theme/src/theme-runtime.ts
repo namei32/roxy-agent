@@ -70,10 +70,12 @@ const LEGACY_COLOR_ALIASES = {
   imageOutline: ["material", "outlineVariant"],
 } as const satisfies Record<string, LegacyColorSource>;
 
-const THEME_COOKIE = "akashic_theme";
+const THEME_COOKIE = "roxy_theme";
+const LEGACY_THEME_COOKIE = "akashic_theme";
 const THEME_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i;
-const THEME_EVENT = "akashic-theme-change";
+const THEME_EVENT = "roxy-theme-change";
+const LEGACY_THEME_EVENT = "akashic-theme-change";
 
 /** Validate the bundled catalog once and expose immutable theme definitions. */
 function validateCatalog(value: unknown): { defaultThemeId: string; themes: ThemeDefinition[] } {
@@ -159,11 +161,15 @@ function rgbChannels(value: string): string {
 function themeCss(): string {
   return CATALOG.themes.map((theme) => {
     const declarations = MATERIAL_COLOR_ROLES.flatMap((role) => colorDeclarations("md-sys-color", role, theme.material[role]));
+    declarations.push(...DOMAIN_COLOR_ROLES.flatMap((role) => colorDeclarations("roxy-sys-color", role, theme.domain[role])));
+    // 已安装插件可能还引用旧的 --ak-* token；同一主题值双写，避免品牌升级
+    // 让旧 CSS 失去颜色。新源码一律使用 --roxy-*。
     declarations.push(...DOMAIN_COLOR_ROLES.flatMap((role) => colorDeclarations("ak-sys-color", role, theme.domain[role])));
     for (const [legacyRole, [group, role]] of Object.entries(LEGACY_COLOR_ALIASES)) {
       const value = group === "material"
         ? theme.material[role as MaterialColorRole]
         : theme.domain[role as DomainColorRole];
+      declarations.push(...colorDeclarations("roxy-color", legacyRole, value));
       declarations.push(...colorDeclarations("ak-color", legacyRole, value));
     }
     declarations.push(`color-scheme:${theme.colorScheme}`);
@@ -177,17 +183,23 @@ function colorDeclarations(namespace: string, role: string, value: string): stri
 }
 
 function installThemeCss(): void {
-  if (document.getElementById("akashic-theme-catalog")) return;
+  if (
+    document.getElementById("roxy-theme-catalog")
+    || document.getElementById("akashic-theme-catalog")
+  ) return;
   const style = document.createElement("style");
-  style.id = "akashic-theme-catalog";
+  style.id = "roxy-theme-catalog";
   style.textContent = themeCss();
   document.head.prepend(style);
 }
 
 function readCookieTheme(): string | null {
-  const entry = document.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${THEME_COOKIE}=`));
+  const entries = document.cookie.split(";").map((part) => part.trim());
+  const entry = entries.find((part) => part.startsWith(`${THEME_COOKIE}=`))
+    ?? entries.find((part) => part.startsWith(`${LEGACY_THEME_COOKIE}=`));
   if (!entry) return null;
-  const value = decodeURIComponent(entry.slice(THEME_COOKIE.length + 1));
+  const separator = entry.indexOf("=");
+  const value = decodeURIComponent(entry.slice(separator + 1));
   if (!THEME_ID_PATTERN.test(value)) {
     console.warn("[theme] 丢弃格式无效的主题偏好");
     return null;
@@ -212,6 +224,7 @@ function applySelection(next: ThemeSelection): void {
   document.documentElement.style.colorScheme = theme.colorScheme;
   document.querySelector('meta[name="color-scheme"]')?.setAttribute("content", theme.colorScheme);
   window.dispatchEvent(new CustomEvent(THEME_EVENT));
+  window.dispatchEvent(new CustomEvent(LEGACY_THEME_EVENT));
 }
 
 export function initializeTheme(): ThemeSelection {
@@ -226,6 +239,7 @@ export function setTheme(requestedThemeId: string, persist = true): ThemeSelecti
   applySelection(next);
   if (persist) {
     document.cookie = `${THEME_COOKIE}=${encodeURIComponent(requestedThemeId)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+    document.cookie = `${LEGACY_THEME_COOKIE}=${encodeURIComponent(requestedThemeId)}; Path=/; Max-Age=31536000; SameSite=Lax`;
   }
   return next;
 }

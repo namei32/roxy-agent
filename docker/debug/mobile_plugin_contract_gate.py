@@ -68,7 +68,7 @@ def main() -> None:
 
     # 2. 从公开仓库拉取精确提交并运行跨仓库合同
     evidence: list[PluginEvidence] = []
-    with tempfile.TemporaryDirectory(prefix="akashic-mobile-plugin-contract-") as raw_temp:
+    with tempfile.TemporaryDirectory(prefix="roxy-mobile-plugin-contract-") as raw_temp:
         temp_root = Path(raw_temp)
         for contract in contracts:
             checkout = temp_root / contract.id

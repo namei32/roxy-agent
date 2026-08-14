@@ -138,7 +138,7 @@ def test_workspace_oracle_rejects_official_path_mutant(tmp_path) -> None:
     with pytest.raises(AssertionError, match="逃逸 Gate sandbox"):
         assert_isolated_gate_paths(
             sandbox=sandbox,
-            workspace=tmp_path.parent / ".akashic" / "workspace",
+            workspace=tmp_path.parent / ".roxy" / "workspace",
             plugin_home=sandbox / "plugin-home",
             config=sandbox / "config.toml",
         )

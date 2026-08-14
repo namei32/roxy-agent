@@ -57,13 +57,13 @@ def test_runtime_manifest_and_compose_freeze_identity() -> None:
     manifest, _ = _manifest()
     volume_name = str(manifest["volume_name"])
 
-    assert volume_name.startswith("akasic-bench-runtime-v1-")
+    assert volume_name.startswith("roxy-bench-runtime-v1-")
     assert (
-        runtime_volume_labels(manifest)["akasic.benchmark.runtime.resolved_lock_digest"]
+        runtime_volume_labels(manifest)["roxy.benchmark.runtime.resolved_lock_digest"]
         == manifest["recipe"]["resolved_lock"]["digest"]
     )
     assert (
-        runtime_volume_labels(manifest)["akasic.benchmark.runtime.builder_glibc"]
+        runtime_volume_labels(manifest)["roxy.benchmark.runtime.builder_glibc"]
         == "glibc 2.31"
     )
     assert runtime_compose_overlay(volume_name) == {
@@ -72,7 +72,7 @@ def test_runtime_manifest_and_compose_freeze_identity() -> None:
                 "volumes": [
                     {
                         "type": "volume",
-                        "source": "akasic_runtime",
+                        "source": "roxy_runtime",
                         "target": RUNTIME_MOUNT_PATH,
                         "read_only": True,
                     }
@@ -80,7 +80,7 @@ def test_runtime_manifest_and_compose_freeze_identity() -> None:
             }
         },
         "volumes": {
-            "akasic_runtime": {
+            "roxy_runtime": {
                 "external": True,
                 "name": volume_name,
             }
@@ -91,7 +91,7 @@ def test_runtime_manifest_and_compose_freeze_identity() -> None:
         runtime_compose_overlay(
             volume_name,
             task_image_id="sha256:task-image",
-            git_volume_name="akasic-bench-git-v1-example",
+            git_volume_name="roxy-bench-git-v1-example",
         ),
     )
     assert overlay["services"]["main"] == {
@@ -100,14 +100,14 @@ def test_runtime_manifest_and_compose_freeze_identity() -> None:
         "volumes": [
             {
                 "type": "volume",
-                "source": "akasic_runtime",
+                "source": "roxy_runtime",
                 "target": RUNTIME_MOUNT_PATH,
                 "read_only": True,
             },
             {
                 "type": "volume",
-                "source": "akasic_git",
-                "target": "/opt/akashic-git",
+                "source": "roxy_git",
+                "target": "/opt/roxy-git",
                 "read_only": True,
             },
         ],
@@ -185,7 +185,7 @@ def test_inspect_runtime_volume_rejects_label_mismatch(
     manifest, _ = _manifest()
     volume_name = str(manifest["volume_name"])
     labels = runtime_volume_labels(manifest)
-    labels["akasic.benchmark.runtime.uv_version"] = "uv changed"
+    labels["roxy.benchmark.runtime.uv_version"] = "uv changed"
     monkeypatch.setattr(
         "benchmark.harbor_v4flash.runtime_volume._inspect_volume",
         lambda _: {"Labels": labels},

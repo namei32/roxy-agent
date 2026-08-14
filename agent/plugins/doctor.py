@@ -114,7 +114,7 @@ def _find_plugin_root(plugin_id: str, plugins_home: Path | None) -> Path | None:
 
 
 def _load_plugin_class(plugin_root: Path) -> type[Plugin]:
-    module_name = f"akasic_plugin_doctor_{uuid.uuid4().hex}"
+    module_name = f"roxy_plugin_doctor_{uuid.uuid4().hex}"
     path = plugin_root / "plugin.py"
     spec = importlib.util.spec_from_file_location(
         module_name,
