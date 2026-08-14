@@ -23,6 +23,8 @@ COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}")
 REPOSITORY_PATTERN = re.compile(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 RUNTIME_PHASES = ("atomic-reload", "all-plugins", "fitbit")
 HOST_CHANNEL_CONTRACT_PLUGIN_IDS = ("feishu", "qqbot")
+# 发布锁固定的外部 contract 仓库尚未改名；这是远端兼容边界，不是 Core 的 canonical 模块名。
+LEGACY_EXTERNAL_CONTRACT_MODULE = "akashic_plugin_contracts"
 EXPECTED_PLUGIN_IDS = {
     "calendar-mcp",
     "citation",
@@ -242,7 +244,7 @@ def _run_static_contract(
         [
             sys.executable,
             "-m",
-            "akashic_plugin_contracts",
+            LEGACY_EXTERNAL_CONTRACT_MODULE,
             "check",
             *(str(plugin_root / plugin.id / "plugin.py") for plugin in plugins),
         ],
