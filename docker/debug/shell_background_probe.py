@@ -56,7 +56,7 @@ class ProbePaths:
 
     @property
     def socket(self) -> Path:
-        return self.profile_dir / "akashic.sock"
+        return self.profile_dir / "roxy.sock"
 
     @property
     def sessions_db(self) -> Path:
@@ -78,7 +78,7 @@ def _run_compose(paths: ProbePaths, args: list[str]) -> None:
     _ = subprocess.run(
         ["docker", "compose", "-f", str(paths.debug_dir / "docker-compose.yml"), *args],
         cwd=paths.repo,
-        env={**dict(os.environ), "AKASHIC_DEBUG_PROFILE": paths.profile},
+        env={**dict(os.environ), "ROXY_DEBUG_PROFILE": paths.profile},
         check=True,
     )
 
@@ -366,7 +366,7 @@ async def _run_probe(args: argparse.Namespace) -> None:
     proc: subprocess.Popen[bytes] | None = None
     try:
         if args.reset_workspace:
-            _run_compose(paths, ["run", "--rm", "akashic-debug", "reset-workspace"])
+            _run_compose(paths, ["run", "--rm", "roxy-debug", "reset-workspace"])
 
         if args.start_agent:
             paths.socket.unlink(missing_ok=True)
@@ -377,10 +377,10 @@ async def _run_probe(args: argparse.Namespace) -> None:
                     "-f",
                     str(paths.debug_dir / "docker-compose.yml"),
                     "up",
-                    "akashic-debug",
+                    "roxy-debug",
                 ],
                 cwd=paths.repo,
-                env={**dict(os.environ), "AKASHIC_DEBUG_PROFILE": paths.profile},
+                env={**dict(os.environ), "ROXY_DEBUG_PROFILE": paths.profile},
                 stdout=subprocess.DEVNULL if args.quiet_agent else None,
                 stderr=subprocess.STDOUT if args.quiet_agent else None,
             )

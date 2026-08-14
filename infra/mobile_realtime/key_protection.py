@@ -38,6 +38,9 @@ _FINGERPRINT_PATTERN = re.compile(r"sha256/[A-Za-z0-9+/]{43}=")
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 _MAX_JSON_BYTES = 128 * 1024
 _MAX_BLOB_BYTES = 128 * 1024
+_RUNTIME_IDENTITY = "roxy"
+_CANONICAL_APPLICATION = "roxy-agent"
+_LEGACY_APPLICATION = "akasic-agent"
 
 
 class KeyProtectionError(RuntimeError):
@@ -113,7 +116,7 @@ class SecretServiceMasterKeyStore:
                 if list(collection.search_items(attributes)):
                     raise KeyProtectionError("Secret Service master key ID 冲突")
                 _ = collection.create_item(
-                    f"Akasic mobile realtime master key {master_key_id}",
+                    f"Roxy mobile realtime master key {master_key_id}",
                     attributes,
                     master_key,
                     replace=False,
@@ -137,7 +140,13 @@ class SecretServiceMasterKeyStore:
                 collection = secretstorage.get_default_collection(connection)
                 if collection.is_locked():
                     raise KeyProtectionError("Secret Service collection 已锁定")
-                items = list(collection.search_items(self._attributes(master_key_id)))
+                items = [
+                    item
+                    for application in (_CANONICAL_APPLICATION, _LEGACY_APPLICATION)
+                    for item in collection.search_items(
+                        self._attributes(master_key_id, application=application)
+                    )
+                ]
                 if len(items) != 1:
                     raise KeyProtectionError(
                         f"Secret Service master key 数量无效: {len(items)}"
@@ -151,9 +160,14 @@ class SecretServiceMasterKeyStore:
             raise KeyProtectionError("Secret Service master key 长度无效")
         return master_key
 
-    def _attributes(self, master_key_id: str) -> dict[str, str]:
+    def _attributes(
+        self,
+        master_key_id: str,
+        *,
+        application: str = _CANONICAL_APPLICATION,
+    ) -> dict[str, str]:
         return {
-            "application": "akasic-agent",
+            "application": application,
             "namespace": self._namespace,
             "kind": "mobile-realtime-master-key-v1",
             "master-key-id": master_key_id,
@@ -241,6 +255,7 @@ class KeysetManager:
     def __init__(self, keys_root: Path, master_keys: MasterKeyStore) -> None:
         self._keys_root = keys_root
         self._master_keys = master_keys
+        self._current_runtime_identity: str | None = None
 
     def initialize(self, *, lan_hostname: str) -> LoadedKeyset:
         """创建首个加密 keyset，并在完整回读验证后发布 current 指针。"""
@@ -279,9 +294,19 @@ class KeysetManager:
             self._keys_root / "current.json",
             max_bytes=_MAX_JSON_BYTES,
         )
-        _require_exact_keys(current, {"format_version", "keyset_version", "manifest"})
+        base_keys = {"format_version", "keyset_version", "manifest"}
+        allowed_keys = (base_keys, base_keys | {"runtime_identity"})
+        if set(current) not in allowed_keys:
+            missing = sorted(base_keys - current.keys())
+            extra = sorted(current.keys() - (base_keys | {"runtime_identity"}))
+            raise KeyProtectionError(
+                f"current.json 字段不匹配: missing={missing} extra={extra}"
+            )
         if current["format_version"] != _FORMAT_VERSION:
             raise KeyProtectionError("current.json format_version 无效")
+        runtime_identity = current.get("runtime_identity")
+        if runtime_identity is not None and runtime_identity != _RUNTIME_IDENTITY:
+            raise KeyProtectionError("current.json runtime_identity 无效")
         keyset_version = _require_positive_int(
             current["keyset_version"], "keyset_version"
         )
@@ -294,6 +319,9 @@ class KeysetManager:
             and loaded.server_fingerprint != expected_server_fingerprint
         ):
             raise KeyProtectionError("server identity fingerprint 与数据库不一致")
+        self._current_runtime_identity = (
+            _RUNTIME_IDENTITY if runtime_identity == _RUNTIME_IDENTITY else None
+        )
         return loaded
 
     def rotate_master_key(self) -> LoadedKeyset:
@@ -321,7 +349,10 @@ class KeysetManager:
             raise KeyProtectionError("master key 轮换改变了 LAN TLS 公钥")
 
         # 3. 只有验证成功才原子切换，旧版本继续保留供回滚
-        self._write_current(new_version)
+        self._write_current(
+            new_version,
+            runtime_identity=self._current_runtime_identity,
+        )
         return rotated
 
     def _write_keyset(
@@ -500,16 +531,22 @@ class KeysetManager:
             tls_certificate_path=certificate_path,
         )
 
-    def _write_current(self, keyset_version: int) -> None:
+    def _write_current(
+        self,
+        keyset_version: int,
+        *,
+        runtime_identity: str | None = _RUNTIME_IDENTITY,
+    ) -> None:
+        current: dict[str, object] = {
+            "format_version": _FORMAT_VERSION,
+            "keyset_version": keyset_version,
+            "manifest": f"keyset-v{keyset_version}/manifest.json",
+        }
+        if runtime_identity is not None:
+            current["runtime_identity"] = runtime_identity
         _atomic_write_private(
             self._keys_root / "current.json",
-            _canonical_json(
-                {
-                    "format_version": _FORMAT_VERSION,
-                    "keyset_version": keyset_version,
-                    "manifest": f"keyset-v{keyset_version}/manifest.json",
-                }
-            ),
+            _canonical_json(current),
         )
 
     @staticmethod
@@ -526,7 +563,7 @@ def create_server_ssl_context(keyset: LoadedKeyset) -> ssl.SSLContext:
     private_bytes = bytearray(_serialize_private_key(keyset.tls_private_key))
     fd = -1
     try:
-        fd = _create_memfd("akasic-mobile-tls-key")
+        fd = _create_memfd("roxy-mobile-tls-key")
         os.fchmod(fd, 0o600)
         with os.fdopen(os.dup(fd), "wb", closefd=True) as stream:
             _ = stream.write(private_bytes)
@@ -589,7 +626,7 @@ def _build_self_signed_certificate(
         raise ValueError("lan_hostname 格式无效")
     subject = x509.Name(
         [
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Akasic Agent"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Roxy Agent"),
             x509.NameAttribute(NameOID.COMMON_NAME, hostname),
         ]
     )

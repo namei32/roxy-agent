@@ -81,7 +81,7 @@ class ControlService:
             raise JsonRpcError(UNAUTHORIZED, "Invalid workspace token")
         return {
             "protocolVersion": "1.0",
-            "serverInfo": {"name": "akashic-agent", "version": "0.1.0"},
+            "serverInfo": {"name": "roxy-agent", "version": "0.1.0"},
             "workspace": str(self.workspace),
             "capabilities": {
                 "reasoningEvents": False,

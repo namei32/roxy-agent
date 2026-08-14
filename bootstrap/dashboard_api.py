@@ -579,6 +579,7 @@ def _run_esbuild(cmd: list[str], ts_path: Path, js_path: Path, name: str) -> Non
                 "--external:react-dom",
                 "--external:react-dom/client",
                 "--external:react/jsx-runtime",
+                "--external:@roxy/dashboard-ui",
                 "--external:@akashic/dashboard-ui",
             ],
             capture_output=True,
@@ -704,7 +705,7 @@ def _load_plugin_dashboard_module(plugin_dir: Path) -> ModuleType:
 def _dashboard_module_name(plugin_dir: Path) -> str:
     raw = str(plugin_dir.resolve(strict=False))
     normalized = "".join(ch if ch.isalnum() else "_" for ch in raw)
-    return f"akasic_dashboard_plugin_{normalized}"
+    return f"roxy_dashboard_plugin_{normalized}"
 
 
 def _dashboard_closeables(value: object) -> list[object]:
@@ -782,7 +783,7 @@ def create_dashboard_app(
                 ],
             )
 
-    app = FastAPI(title="Akashic Dashboard API", lifespan=lifespan)
+    app = FastAPI(title="Roxy Dashboard API", lifespan=lifespan)
     app.state.memory_admin = memory_admin
     app.state.memory_store = memory_store or MemoryStore(workspace)
     # Vite 构建产物被 gitignore，新 clone 或 CI 环境可能没有该目录。

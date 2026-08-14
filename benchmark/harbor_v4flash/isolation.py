@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, TypedDict
 
-BENCHMARK_PREFIX = "akasic-bench-v4flash-"
+BENCHMARK_PREFIX = "roxy-bench-v4flash-"
 BENCHMARK_NETWORK_POOL = ipaddress.IPv4Network("10.240.0.0/16")
 BENCHMARK_NETWORK_PREFIX = 28
 _IGNORED_TREE_PARTS = {
@@ -122,7 +122,7 @@ def cleanup_compose_project(
         item.get("Id") != network["id"]
         or item.get("Name") != network["name"]
         or labels.get("com.docker.compose.project") != project_name
-        or labels.get("akasic.benchmark.managed") != "true"
+        or labels.get("roxy.benchmark.managed") != "true"
     ):
         raise IsolationError("benchmark cleanup 的网络身份不匹配")
 
@@ -354,7 +354,7 @@ def reserve_compose_network(
                 "--label",
                 "com.docker.compose.network=default",
                 "--label",
-                "akasic.benchmark.managed=true",
+                "roxy.benchmark.managed=true",
                 network_name,
             ],
             check=False,
@@ -546,7 +546,7 @@ def validate_isolation(
 def online_process_snapshot() -> list[ProcessSnapshot]:
     """记录正式 workspace owner 的只读进程身份。"""
 
-    workspace = "/home/huashen/.akashic/workspace"
+    workspace = "/home/huashen/.roxy/workspace"
     rows: list[ProcessSnapshot] = []
     proc_root = Path("/proc")
     for entry in proc_root.iterdir():

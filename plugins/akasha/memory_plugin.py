@@ -1,4 +1,4 @@
-"""Akasic Agent MemoryPlugin factory for Akasha V2."""
+"""Roxy Agent MemoryPlugin factory for Akasha V2."""
 
 from __future__ import annotations
 

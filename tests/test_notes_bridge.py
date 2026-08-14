@@ -158,7 +158,7 @@ def _operation(
         create_folder_if_missing=True,
         document_key="interview:batch-1",
         title="Interview",
-        html=f"<p>{body}</p><p>AKASHIC_EXPORT:{operation_id}</p>",
+        html=f"<p>{body}</p><p>ROXY_EXPORT:{operation_id}</p>",
     )
 
 

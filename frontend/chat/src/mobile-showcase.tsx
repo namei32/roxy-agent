@@ -110,7 +110,7 @@ export function MobileShowcase() {
   return (
     <main className="mobile-showcase-page">
       <section className="mobile-showcase-copy" aria-labelledby="mobile-showcase-title">
-        <span className="mobile-showcase-eyebrow">AKASHIC · ANDROID</span>
+        <span className="mobile-showcase-eyebrow">ROXY · ANDROID</span>
         <h1 id="mobile-showcase-title">会话入口属于导航，<br />thinking 属于过程。</h1>
         <p>页面只为有明确结构或状态含义的内容增加容器，颜色用于区分连接、用户输入与执行过程。</p>
         <div className="mobile-showcase-guide" aria-label="设计说明">
@@ -121,7 +121,7 @@ export function MobileShowcase() {
         <p className="mobile-showcase-hint">可点击菜单、thinking 和发送按钮体验交互。</p>
       </section>
 
-      <section className="mobile-device" aria-label="Akashic Android 界面预览">
+      <section className="mobile-device" aria-label="Roxy Android 界面预览">
         <div className="mobile-device-screen">
           <header className="mobile-status-bar" aria-label="设备状态">
             <time>9:41</time>
@@ -174,7 +174,7 @@ export function MobileShowcase() {
               <div className="mobile-user-bubble">{submittedText}</div>
             </div>
 
-            <section className="mobile-assistant-turn" aria-label="Akashic 回复">
+            <section className="mobile-assistant-turn" aria-label="Roxy 回复">
               <button
                 className="mobile-thinking-trigger"
                 type="button"
@@ -242,7 +242,7 @@ export function MobileShowcase() {
             <motion.button className="mobile-composer-action" type="button" whileTap={{ scale: 0.96 }} aria-label="添加附件">
               <Plus size={21} />
             </motion.button>
-            <input value={draft} onChange={(event) => setDraft(event.target.value)} aria-label="消息" placeholder="给 Akashic 发消息" />
+            <input value={draft} onChange={(event) => setDraft(event.target.value)} aria-label="消息" placeholder="给 Roxy 发消息" />
             <motion.button className="mobile-send-button" type="submit" whileTap={{ scale: 0.96 }} aria-label="发送消息" disabled={!draft.trim()}>
               <AnimatePresence initial={false} mode="popLayout">
                 <motion.span

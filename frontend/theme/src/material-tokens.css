@@ -1,5 +1,5 @@
 :root {
-  /* Akashic owns these Material 3 system values; components only consume them. */
+  /* Roxy owns these Material 3 system values; components only consume them. */
   --md-ref-typeface-brand: "Roboto Flex", "Noto Sans SC", system-ui, sans-serif;
   --md-ref-typeface-plain: "Roboto", "Noto Sans SC", system-ui, sans-serif;
 
@@ -42,23 +42,37 @@
   --md-sys-shape-corner-extra-large: 1.75rem;
   --md-sys-shape-corner-full: 9999px;
 
-  --ak-sys-space-1: 0.25rem;
-  --ak-sys-space-2: 0.5rem;
-  --ak-sys-space-3: 0.75rem;
-  --ak-sys-space-4: 1rem;
-  --ak-sys-space-5: 1.5rem;
-  --ak-sys-space-6: 2rem;
-  --ak-sys-space-7: 3rem;
-  --ak-sys-motion-standard: cubic-bezier(0.2, 0, 0, 1);
-  --ak-sys-motion-emphasized: cubic-bezier(0.2, 0, 0, 1);
-  --ak-sys-duration-short: 150ms;
-  --ak-sys-duration-medium: 300ms;
+  --roxy-sys-space-1: 0.25rem;
+  --roxy-sys-space-2: 0.5rem;
+  --roxy-sys-space-3: 0.75rem;
+  --roxy-sys-space-4: 1rem;
+  --roxy-sys-space-5: 1.5rem;
+  --roxy-sys-space-6: 2rem;
+  --roxy-sys-space-7: 3rem;
+  --roxy-sys-motion-standard: cubic-bezier(0.2, 0, 0, 1);
+  --roxy-sys-motion-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --roxy-sys-duration-short: 150ms;
+  --roxy-sys-duration-medium: 300ms;
+
+  /* 旧插件仍可读取 Akashic token；新源码一律消费 Roxy token。 */
+  --ak-sys-space-1: var(--roxy-sys-space-1);
+  --ak-sys-space-2: var(--roxy-sys-space-2);
+  --ak-sys-space-3: var(--roxy-sys-space-3);
+  --ak-sys-space-4: var(--roxy-sys-space-4);
+  --ak-sys-space-5: var(--roxy-sys-space-5);
+  --ak-sys-space-6: var(--roxy-sys-space-6);
+  --ak-sys-space-7: var(--roxy-sys-space-7);
+  --ak-sys-motion-standard: var(--roxy-sys-motion-standard);
+  --ak-sys-motion-emphasized: var(--roxy-sys-motion-emphasized);
+  --ak-sys-duration-short: var(--roxy-sys-duration-short);
+  --ak-sys-duration-medium: var(--roxy-sys-duration-medium);
 
   --md-ripple-hover-color: var(--md-sys-color-on-surface);
   --md-ripple-pressed-color: var(--md-sys-color-on-surface);
   accent-color: var(--md-sys-color-primary);
 }
 
+.roxy-material-button,
 .ak-material-button {
   --md-filled-button-container-shape: var(--md-sys-shape-corner-full);
   --md-filled-tonal-button-container-shape: var(--md-sys-shape-corner-full);
@@ -68,6 +82,7 @@
   font-family: var(--md-ref-typeface-plain);
 }
 
+.roxy-material-button md-circular-progress,
 .ak-material-button md-circular-progress {
   inline-size: 1.125rem;
   block-size: 1.125rem;
@@ -75,6 +90,7 @@
   --md-circular-progress-active-indicator-color: currentColor;
 }
 
+.roxy-material-button--danger,
 .ak-material-button--danger {
   --md-filled-tonal-button-container-color: var(--md-sys-color-error-container);
   --md-filled-tonal-button-label-text-color: var(--md-sys-color-on-error-container);
@@ -82,16 +98,19 @@
   --md-filled-tonal-button-pressed-label-text-color: var(--md-sys-color-on-error-container);
 }
 
+.roxy-material-filter-chip,
 .ak-material-filter-chip {
   --md-filter-chip-container-shape: var(--md-sys-shape-corner-small);
   --md-filter-chip-label-text-font: var(--md-ref-typeface-plain);
 }
 
+.roxy-material-icon-button,
 .ak-material-icon-button {
   --md-filled-icon-button-container-shape: var(--md-sys-shape-corner-full);
   --md-filled-tonal-icon-button-container-shape: var(--md-sys-shape-corner-full);
 }
 
+.roxy-material-icon-button--danger,
 .ak-material-icon-button--danger {
   --md-filled-tonal-icon-button-container-color: var(--md-sys-color-error-container);
   --md-filled-tonal-icon-button-icon-color: var(--md-sys-color-on-error-container);
@@ -101,7 +120,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   :root {
-    --ak-sys-duration-short: 0ms;
-    --ak-sys-duration-medium: 0ms;
+    --roxy-sys-duration-short: 0ms;
+    --roxy-sys-duration-medium: 0ms;
   }
 }

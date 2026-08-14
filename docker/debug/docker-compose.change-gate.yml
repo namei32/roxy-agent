@@ -3,23 +3,23 @@ services:
     build:
       context: ../..
       dockerfile: docker/debug/Dockerfile
-    image: akashic-agent-change-gate:latest
+    image: roxy-agent-change-gate:latest
     working_dir: /app
     read_only: true
     environment:
-      AKASHIC_DEBUG_CONFIG: /sandbox/config.toml
-      AKASHIC_DEBUG_WORKSPACE: /sandbox/workspace
-      AKASHIC_HOST_GID: "${GID:?set by gate.py}"
-      AKASHIC_HOST_UID: "${UID:?set by gate.py}"
-      AKASHIC_GATE_INVENTORY: /sandbox/source-inventory.json
-      AKASHIC_PLUGIN_HOME: /sandbox/plugin-home
+      ROXY_DEBUG_CONFIG: /sandbox/config.toml
+      ROXY_DEBUG_WORKSPACE: /sandbox/workspace
+      ROXY_HOST_GID: "${GID:?set by gate.py}"
+      ROXY_HOST_UID: "${UID:?set by gate.py}"
+      ROXY_GATE_INVENTORY: /sandbox/source-inventory.json
+      ROXY_PLUGIN_HOME: /sandbox/plugin-home
       HOME: /sandbox/home
       npm_config_offline: "true"
       PYTEST_ADDOPTS: "-p no:cacheprovider"
       PYTHONUNBUFFERED: "1"
     volumes:
-      - ${AKASHIC_CHANGE_GATE_SANDBOX:?set by gate.py}/app:/app:ro
-      - ${AKASHIC_CHANGE_GATE_SANDBOX:?set by gate.py}:/sandbox
-      - ${AKASHIC_CHANGE_GATE_SANDBOX:?set by gate.py}/static:/app/static
+      - ${ROXY_CHANGE_GATE_SANDBOX:?set by gate.py}/app:/app:ro
+      - ${ROXY_CHANGE_GATE_SANDBOX:?set by gate.py}:/sandbox
+      - ${ROXY_CHANGE_GATE_SANDBOX:?set by gate.py}/static:/app/static
     tmpfs:
       - /tmp

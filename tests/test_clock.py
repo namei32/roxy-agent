@@ -48,5 +48,7 @@ def test_clock_from_env_selects_replay_clock(tmp_path) -> None:
     ReplayClock(path, datetime(2026, 1, 2, tzinfo=UTC))
 
     assert isinstance(clock_from_env({}), SystemClock)
-    selected = clock_from_env({"AKASHIC_REPLAY_CLOCK_FILE": str(path)})
+    selected = clock_from_env({"ROXY_REPLAY_CLOCK_FILE": str(path)})
     assert selected.now() == datetime(2026, 1, 2, tzinfo=UTC)
+    legacy = clock_from_env({"AKASHIC_REPLAY_CLOCK_FILE": str(path)})
+    assert legacy.now() == datetime(2026, 1, 2, tzinfo=UTC)

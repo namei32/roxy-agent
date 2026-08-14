@@ -1,6 +1,6 @@
 // Re-exports the host's React instance to plugin modules (resolved via the
 // import map). Keeps a single React so hooks work across host + plugins.
-const R = window.__akashicRuntime.React;
+const R = (window.__roxyRuntime ?? window.__akashicRuntime).React;
 export default R.default ?? R;
 export const {
   useState, useEffect, useRef, useMemo, useCallback, useContext, useReducer,

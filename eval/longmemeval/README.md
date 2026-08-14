@@ -16,12 +16,12 @@
 
 对应数据文件：
 
-- `eval/longmemeval/data/longmemeval_akashic.json`
+- `eval/longmemeval/data/longmemeval_roxy.json`
 
 ## 它在测什么
 
 这不是纯 retrieval benchmark。
-它测的是 `akashic-agent` 这套记忆系统在真实 AgentLoop 里的端到端效果：
+它测的是 `roxy-agent` 这套记忆系统在真实 AgentLoop 里的端到端效果：
 
 ```text
 ┌────────────────────┐
@@ -76,7 +76,7 @@
 ```bash
 python -m eval.longmemeval.run \
   --config eval/longmemeval/config.toml \
-  --data eval/longmemeval/data/longmemeval_akashic.json \
+  --data eval/longmemeval/data/longmemeval_roxy.json \
   --workspace /tmp/lme_bench \
   --workers 4 \
   --resume-auto
@@ -87,7 +87,7 @@ python -m eval.longmemeval.run \
 ```bash
 python -m eval.longmemeval.run \
   --config eval/longmemeval/config.toml \
-  --data eval/longmemeval/data/longmemeval_akashic.json \
+  --data eval/longmemeval/data/longmemeval_roxy.json \
   --workspace /tmp/lme_bench_user \
   --type single-session-user \
   --workers 4 \
@@ -99,7 +99,7 @@ python -m eval.longmemeval.run \
 ```bash
 python -m eval.longmemeval.run \
   --config eval/longmemeval/config.toml \
-  --data eval/longmemeval/data/longmemeval_akashic.json \
+  --data eval/longmemeval/data/longmemeval_roxy.json \
   --workspace /tmp/lme_bench_smoke \
   --limit 3 \
   --workers 1 \
@@ -111,7 +111,7 @@ python -m eval.longmemeval.run \
 ```bash
 python -m eval.longmemeval.run_one_qa \
   --config eval/longmemeval/config.toml \
-  --data eval/longmemeval/data/longmemeval_akashic.json \
+  --data eval/longmemeval/data/longmemeval_roxy.json \
   --workspace /tmp/lme_one_case \
   --question-id 94f70d80
 ```

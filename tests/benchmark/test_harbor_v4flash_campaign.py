@@ -39,7 +39,7 @@ def test_campaign_rejects_duplicate_task_instances(tmp_path: Path) -> None:
 def test_open_gate_requires_completed_stopped_isolated_smoke(
     tmp_path: Path,
 ) -> None:
-    trial = tmp_path / "akasic-bench-v4flash-smoke-one"
+    trial = tmp_path / "roxy-bench-v4flash-smoke-one"
     trial.mkdir()
     manifest = trial / "campaign-manifest.json"
     manifest.write_text(
@@ -74,7 +74,7 @@ def test_open_gate_fails_closed_without_smoke(tmp_path: Path) -> None:
 
 
 def test_open_gate_rejects_smoke_from_different_source(tmp_path: Path) -> None:
-    trial = tmp_path / "akasic-bench-v4flash-smoke-stale"
+    trial = tmp_path / "roxy-bench-v4flash-smoke-stale"
     trial.mkdir()
     (trial / "campaign-manifest.json").write_text(
         json.dumps(
@@ -100,7 +100,7 @@ def test_open_gate_rejects_smoke_from_different_source(tmp_path: Path) -> None:
 def test_open_gate_rejects_old_three_concurrent_authorization(
     tmp_path: Path,
 ) -> None:
-    trial = tmp_path / "akasic-bench-v4flash-smoke-old-limit"
+    trial = tmp_path / "roxy-bench-v4flash-smoke-old-limit"
     trial.mkdir()
     (trial / "campaign-manifest.json").write_text(
         json.dumps(

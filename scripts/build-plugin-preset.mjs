@@ -11,8 +11,10 @@ const output = resolve(projectRoot, "frontend/dashboard/public/sdk/preset.css");
 const sourceRoots = [
   resolve(projectRoot, "frontend/dashboard/src"),
   resolve(projectRoot, "plugins"),
-  resolve(projectRoot, "..", "akashic-plugin"),
-  resolve(process.env.HOME ?? tmpdir(), ".akashic-plugin/cache"),
+  resolve(projectRoot, "..", "roxy-plugin"),
+  resolve(projectRoot, "..", "akashic-plugin"), // legacy source checkout
+  resolve(process.env.HOME ?? tmpdir(), ".roxy-plugin/cache"),
+  resolve(process.env.HOME ?? tmpdir(), ".akashic-plugin/cache"), // legacy cache
 ].filter(existsSync);
 
 function sourceFiles(root) {
@@ -28,7 +30,7 @@ if (!existsSync(tailwind)) {
 }
 
 mkdirSync(dirname(output), { recursive: true });
-const contentFile = join(tmpdir(), `akasic-plugin-preset-${process.pid}.tsx`);
+const contentFile = join(tmpdir(), `roxy-plugin-preset-${process.pid}.tsx`);
 writeFileSync(contentFile, sourceRoots.flatMap(sourceFiles).map((path) => readFileSync(path, "utf8")).join("\n"));
 try {
   const args = [

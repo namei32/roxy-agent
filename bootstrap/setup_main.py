@@ -38,7 +38,7 @@ def run_main_model_setup(config_path: Path, workspace: Path) -> None:
     # 1. 只收集主模型答案和对应凭据。
     if not config_path.is_file():
         raise click.ClickException(f"配置文件不存在: {config_path}")
-    click.echo(click.style("\n══ akashic 主模型切换 ══\n", bold=True))
+    click.echo(click.style("\n══ Roxy 主模型切换 ══\n", bold=True))
     answers = WizardAnswers()
     _phase_main_llm(
         answers,

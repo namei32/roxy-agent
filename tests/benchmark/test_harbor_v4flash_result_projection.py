@@ -28,7 +28,7 @@ def test_project_agent_context_initializes_optional_harbor_metadata() -> None:
     project_agent_context(
         context,
         result,
-        harness_name="akasic-v4flash",
+        harness_name="roxy-v4flash",
         harness_version="0.1.0",
         source_digest="sha256:test",
     )
@@ -60,7 +60,7 @@ def test_project_agent_context_allows_failed_turn_without_usage() -> None:
     project_agent_context(
         context,
         result,
-        harness_name="akasic-v4flash",
+        harness_name="roxy-v4flash",
         harness_version="0.1.0",
         source_digest="sha256:test",
     )

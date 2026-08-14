@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent.identity import roxy_env
 from agent.plugins.mobile_ui import (
     MobileUiPluginUnavailable,
     MobileUiProvider,
@@ -69,7 +70,7 @@ def create_chat_app(
     plugin_ui_provider: MobileUiProvider | None = None,
 ) -> FastAPI:
     channel.bind_attachment_store(AttachmentStore(workspace / "uploads"))
-    app = FastAPI(title="Akashic Chat API")
+    app = FastAPI(title="Roxy Chat API")
     app.state.workspace = workspace
     app.state.channel = channel
     project_root = Path(__file__).resolve().parent.parent
@@ -386,15 +387,15 @@ def _can_read_media(channel: WebChatChannel, path: Path) -> bool:
 
 
 def _public_dashboard_port() -> int:
-    raw_port = os.environ.get("AKASHIC_DASHBOARD_PUBLIC_PORT", "2236")
+    raw_port = roxy_env("DASHBOARD_PUBLIC_PORT", "2236")
     try:
         port = int(raw_port)
     except ValueError as error:
         raise RuntimeError(
-            "AKASHIC_DASHBOARD_PUBLIC_PORT 必须是 1 到 65535 的整数"
+            "ROXY_DASHBOARD_PUBLIC_PORT 必须是 1 到 65535 的整数"
         ) from error
     if not 1 <= port <= 65535:
         raise RuntimeError(
-            "AKASHIC_DASHBOARD_PUBLIC_PORT 必须是 1 到 65535 的整数"
+            "ROXY_DASHBOARD_PUBLIC_PORT 必须是 1 到 65535 的整数"
         )
     return port

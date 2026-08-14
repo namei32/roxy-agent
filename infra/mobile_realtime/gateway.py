@@ -2048,7 +2048,7 @@ def create_mobile_gateway_app(runtime: MobileGatewayRuntime) -> FastAPI:
         finally:
             await runtime.stop()
 
-    app = FastAPI(title="Akasic Mobile Realtime Gateway", docs_url=None, redoc_url=None, lifespan=lifespan)
+    app = FastAPI(title="Roxy Mobile Realtime Gateway", docs_url=None, redoc_url=None, lifespan=lifespan)
     app.add_middleware(GZipMiddleware, minimum_size=1024)
 
     @app.websocket("/ws")

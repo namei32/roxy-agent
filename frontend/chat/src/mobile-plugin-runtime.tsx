@@ -487,10 +487,10 @@ function MountedPlugin({
               const request = pendingQueries.get(requestId);
               if (!request) return;
               request.abort?.abort();
-              window.AkashicNative?.cancelPluginUiOwner(request.ownerId);
+              window.RoxyNative?.cancelPluginUiOwner(request.ownerId);
               rejectOwnerPending(request.ownerId, "插件请求超时");
             }, 30_000);
-            const abort = window.AkashicNative ? undefined : new AbortController();
+            const abort = window.RoxyNative ? undefined : new AbortController();
             const request = {
               resolve,
               reject,
@@ -501,8 +501,8 @@ function MountedPlugin({
               started: false,
               abort,
               send: () => {
-                if (window.AkashicNative) {
-                  window.AkashicNative.queryPluginUi(
+                if (window.RoxyNative) {
+                  window.RoxyNative.queryPluginUi(
                     requestId,
                     ownerId,
                     slot,
@@ -550,7 +550,7 @@ function MountedPlugin({
       host.classList.add("mobile-plugin-host--error");
     }
     return () => {
-      window.AkashicNative?.cancelPluginUiOwner(ownerId);
+      window.RoxyNative?.cancelPluginUiOwner(ownerId);
       rejectOwnerPending(ownerId, "插件界面已卸载");
       try {
         cleanup?.();

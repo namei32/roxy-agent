@@ -1069,7 +1069,7 @@ async def test_message_send_resolves_reply_into_agent_context_and_metadata(
 
     assert reply.type == "message.send.ok"
     inbound = bus.inbound[0]
-    assert f"被回复消息（来自 Akashic）：\n{target_content}" in inbound.content
+    assert f"被回复消息（来自 Roxy）：\n{target_content}" in inbound.content
     assert inbound.content.endswith("【你当前新消息】\n你好")
     assert inbound.metadata["display_content"] == "你好"
     assert inbound.metadata["reply_to_message_id"] == target["id"]
@@ -1137,7 +1137,7 @@ async def test_message_send_resolves_reply_into_agent_context_and_metadata(
     assert fourth.type == "message.send.ok"
     assert bus.inbound[3].metadata["reply_to_message_id"] == proactive_target["id"]
     assert (
-        "被回复消息（来自 Akashic）：\n尚未同步历史的主动消息" in bus.inbound[3].content
+        "被回复消息（来自 Roxy）：\n尚未同步历史的主动消息" in bus.inbound[3].content
     )
     manager.close()
     storage.close()

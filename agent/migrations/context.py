@@ -14,7 +14,7 @@ class MigrationContext:
 
 
 _CURRENT_CONTEXT: ContextVar[MigrationContext | None] = ContextVar(
-    "akashic_migration_context",
+    "roxy_migration_context",
     default=None,
 )
 
@@ -38,5 +38,5 @@ def bind_migration_context(
 def current_migration_context() -> MigrationContext:
     context = _CURRENT_CONTEXT.get()
     if context is None:
-        raise RuntimeError("migration callback 缺少 Akashic installation context")
+        raise RuntimeError("migration callback 缺少 Roxy installation context")
     return context

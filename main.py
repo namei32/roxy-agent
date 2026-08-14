@@ -8,6 +8,7 @@
   python main.py app-server --stdio 启动父进程托管控制面
   python main.py exec ...           非交互执行一个 turn
   python main.py veda-reset         重建 workspace 默认人格
+  python main.py roxy-migrate ...   显式复制旧 workspace 到新名称空间
 """
 
 from __future__ import annotations
@@ -23,12 +24,18 @@ from pathlib import Path
 from typing import cast
 from uuid import uuid4
 
-_DEFAULT_WORKSPACE = "~/.akashic/workspace"
-_DEFER_PLUGIN_UNINSTALL_ENV = "AKASHIC_DEFER_PLUGIN_UNINSTALL"
+from agent.identity import (
+    default_workspace_path,
+    roxy_env,
+    set_roxy_env,
+)
+
+
+_DEFER_PLUGIN_UNINSTALL_ENV = "DEFER_PLUGIN_UNINSTALL"
 
 
 def _supervisor_readiness_timeout() -> float:
-    return float(os.environ.get("AKASHIC_READINESS_TIMEOUT_S", "300"))
+    return float(roxy_env("READINESS_TIMEOUT_S", "300"))
 
 
 def _supervisor_supported(platform: str | None = None) -> bool:
@@ -64,14 +71,14 @@ def _workspace_from_args(
             raise ValueError("参数 --workspace 缺少值")
         value = args[index + 1]
     else:
-        value = os.environ.get("AKASHIC_WORKSPACE", "")
+        value = roxy_env("WORKSPACE")
 
     # 2. 环境变量为空时读取 config.toml；首次初始化使用可移植默认值
     if not value.strip():
         if config_path.exists():
             value = _workspace_from_config(config_path)
         elif allow_default:
-            value = _DEFAULT_WORKSPACE
+            value = str(default_workspace_path())
         else:
             raise ValueError(
                 f"找不到配置文件 {config_path!s}，且未指定 --workspace PATH"
@@ -83,9 +90,41 @@ def _workspace_from_args(
 def _run_lightweight_command() -> bool:
     """在加载 Agent runtime 依赖前分发恢复与纯配置命令。"""
     args = sys.argv[1:]
-    if not args or args[0] not in {"setup-main", "veda-reset"}:
+    if not args or args[0] not in {"setup-main", "veda-reset", "roxy-migrate"}:
         return False
     command = args[0]
+
+    if command == "roxy-migrate":
+        import argparse
+
+        from agent.migrations import migrate_legacy_workspace
+
+        parser = argparse.ArgumentParser(
+            prog="python main.py roxy-migrate",
+            description="复制并原子发布 workspace；源目录始终保留。",
+        )
+        parser.add_argument("--from-workspace", required=True, type=Path)
+        parser.add_argument("--to-workspace", required=True, type=Path)
+        parser.add_argument("--dry-run", action="store_true")
+        parsed = parser.parse_args(args[1:])
+        try:
+            result = migrate_legacy_workspace(
+                source=parsed.from_workspace,
+                destination=parsed.to_workspace,
+                dry_run=parsed.dry_run,
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise SystemExit(f"Roxy workspace 迁移失败: {exc}") from exc
+        if result.state == "planned":
+            print(f"迁移计划有效: {result.source} -> {result.destination}")
+        else:
+            print(f"Roxy workspace 已迁移: {result.source} -> {result.destination}")
+            print("旧 workspace 未被删除；确认新实例正常后，再单独决定是否清理旧目录。")
+        if result.skipped_runtime_entries:
+            skipped = ", ".join(result.skipped_runtime_entries)
+            print(f"未复制仅运行期条目: {skipped}")
+        return True
+
     config_path = "config.toml"
     if "--config" in args:
         index = args.index("--config")
@@ -175,6 +214,7 @@ _HELP = """\
   setup-main                    仅切换主模型并保留其他配置
   init                          非交互初始化配置和工作区
   veda-reset                    备份并重建 workspace 默认人格
+  roxy-migrate                  显式迁移旧 workspace 到 Roxy 路径
   gateway                       启动未托管 Agent 服务（调试）
   supervise                     显式进入 supervisor（兼容别名）
   app-server --stdio            在 stdio 上运行程序化控制面
@@ -192,6 +232,8 @@ _HELP = """\
 通用选项:
   --config PATH                 配置文件，默认 config.toml
   --workspace PATH              覆盖 config.toml 中的 runtime.workspace
+  roxy-migrate --from-workspace OLD --to-workspace NEW [--dry-run]
+                                复制并原子发布 workspace；源目录保留
   -h, --help                    显示帮助
 
 无命令时启动 Agent 服务。
@@ -261,7 +303,7 @@ def _prepare_startup_migrations(
         "dashboard",
     }:
         return None
-    if command == "gateway" and os.environ.get("AKASHIC_SUPERVISED") == "1":
+    if command == "gateway" and roxy_env("SUPERVISED") == "1":
         return None
     outcome = migrate_installation(config_path, workspace)
     if outcome.state == "migrated":
@@ -305,7 +347,7 @@ def _uninstall_via_runtime(
         config.app_server.listen,
         workspace,
     )
-    wait = os.environ.get(_DEFER_PLUGIN_UNINSTALL_ENV) != "1"
+    wait = roxy_env(_DEFER_PLUGIN_UNINSTALL_ENV) != "1"
     return asyncio.run(
         _request_plugin_uninstall(
             endpoint,
@@ -683,7 +725,7 @@ if __name__ == "__main__":
         print(str(exc))
         sys.exit(1)
 
-    os.environ["AKASHIC_WORKSPACE"] = str(workspace)
+    set_roxy_env("WORKSPACE", str(workspace))
     if args and args[0] == "supervise" and not _supervisor_supported():
         print("supervise 仅支持 Linux", file=sys.stderr)
         sys.exit(2)

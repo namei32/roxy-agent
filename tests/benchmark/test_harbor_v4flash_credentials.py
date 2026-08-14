@@ -59,7 +59,7 @@ api_key = "dashscope-sentinel"
     )
     monkeypatch.setattr(asyncio, "create_subprocess_exec", create_subprocess_exec)
     environment = SimpleNamespace(
-        session_id="akasic-bench-v4flash-secret__env",
+        session_id="roxy-bench-v4flash-secret__env",
         default_user="root",
         task_env_config=SimpleNamespace(workdir="/app"),
     )
@@ -90,7 +90,7 @@ api_key = "dashscope-sentinel"
 
 def test_secure_exec_fails_loud_without_credential_scope() -> None:
     environment = SimpleNamespace(
-        session_id="akasic-bench-v4flash-secret__env",
+        session_id="roxy-bench-v4flash-secret__env",
         default_user=None,
         task_env_config=SimpleNamespace(workdir="/app"),
     )

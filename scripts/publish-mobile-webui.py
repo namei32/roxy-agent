@@ -664,7 +664,7 @@ def _effective_build_environment(
     values: dict[str, str] = {}
     for key in sorted(environment, key=lambda value: value.encode("utf-8")):
         value = environment[key]
-        if key == "AKASHIC_MOBILE_WEB_OUT_DIR":
+        if key in {"ROXY_MOBILE_WEB_OUT_DIR", "AKASHIC_MOBILE_WEB_OUT_DIR"}:
             value = "<OUTPUT_DIR>"
         value = _normalise_context_paths(value, workspace=workspace, output_dir=output_dir)
         values[key] = value
@@ -731,7 +731,10 @@ def _build_environment(output_dir: Path) -> dict[str, str]:
     }
     if "PATH" not in environment:
         raise RuntimeError("构建环境缺少 PATH")
-    environment["AKASHIC_MOBILE_WEB_OUT_DIR"] = str(output_dir.resolve())
+    output_path = str(output_dir.resolve())
+    environment["ROXY_MOBILE_WEB_OUT_DIR"] = output_path
+    # 已发布的外部构建脚本可能尚未读取 Roxy 变量。
+    environment["AKASHIC_MOBILE_WEB_OUT_DIR"] = output_path
     return environment
 
 

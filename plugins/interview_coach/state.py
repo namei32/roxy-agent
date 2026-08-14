@@ -28,10 +28,16 @@ class InterviewBatch:
     note_status: str
     pending_operation: str
     question_count: int
-    akashic_related_count: int
+    roxy_related_count: int
     general_count: int
     created_at: str
     updated_at: str
+
+    @property
+    def akashic_related_count(self) -> int:
+        """旧插件调用方读取的兼容别名。"""
+
+        return self.roxy_related_count
 
     @property
     def current_question(self) -> str:
@@ -63,7 +69,7 @@ class InterviewStateStore:
         topic_summary: str,
         follow_up_questions: list[str],
         question_count: int,
-        akashic_related_count: int,
+        roxy_related_count: int,
         general_count: int,
     ) -> tuple[InterviewBatch, bool]:
         """幂等创建一个 prepared 批次，正文仍由 Session 与 Notes 拥有。"""
@@ -116,7 +122,7 @@ class InterviewStateStore:
                 "note_status": "pending",
                 "pending_operation": "create",
                 "question_count": question_count,
-                "akashic_related_count": akashic_related_count,
+                "roxy_related_count": roxy_related_count,
                 "general_count": general_count,
                 "created_at": now,
                 "updated_at": now,
@@ -324,7 +330,12 @@ def _parse_batch(value: object, *, batch_id: str) -> InterviewBatch:
         note_status=note_status,
         pending_operation=pending,
         question_count=_required_int(raw, "question_count"),
-        akashic_related_count=_required_int(raw, "akashic_related_count"),
+        roxy_related_count=_required_int(
+            raw,
+            "roxy_related_count"
+            if "roxy_related_count" in raw
+            else "akashic_related_count",
+        ),
         general_count=_required_int(raw, "general_count"),
         created_at=_required_string(raw, "created_at"),
         updated_at=_required_string(raw, "updated_at"),

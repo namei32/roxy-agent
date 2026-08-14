@@ -6,19 +6,24 @@ import tomllib
 from pathlib import Path
 from typing import Mapping, cast
 
+from agent.identity import (
+    default_plugin_home_path,
+    roxy_env,
+    roxy_env_is_set,
+)
 from infra.persistence.json_store import atomic_write_text
 
 
 def plugins_root(plugins_home: Path | None = None) -> Path:
     if plugins_home is not None:
         return plugins_home
-    configured = os.environ.get("AKASHIC_PLUGIN_HOME")
-    if configured is not None:
+    if roxy_env_is_set("PLUGIN_HOME"):
+        configured = roxy_env("PLUGIN_HOME")
         configured = configured.strip()
         if not configured:
-            raise ValueError("AKASHIC_PLUGIN_HOME 不能为空")
+            raise ValueError("ROXY_PLUGIN_HOME 不能为空")
         return Path(configured).expanduser().resolve(strict=False)
-    return Path.home() / ".akashic-plugin"
+    return default_plugin_home_path()
 
 
 def manifest_path(plugins_home: Path | None = None) -> Path:

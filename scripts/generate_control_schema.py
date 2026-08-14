@@ -24,7 +24,7 @@ def build_schema() -> dict[str, object]:
     }
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "title": "Akashic App Server Protocol v1",
+        "title": "Roxy App Server Protocol v1",
         "protocolVersion": "1.0",
         "transport": "JSON-RPC 2.0 NDJSON",
         "methods": methods,

@@ -290,7 +290,7 @@ def test_config_load_reads_memory_window_and_app_server(tmp_path: Path):
                 },
             },
             "app_server": {
-                "listen": "/tmp/dev-akashic.sock",
+                "listen": "/tmp/dev-roxy.sock",
             },
         },
     )
@@ -298,7 +298,7 @@ def test_config_load_reads_memory_window_and_app_server(tmp_path: Path):
     cfg = Config.load(cfg_path, workspace=tmp_path)
 
     assert cfg.memory_window == 20
-    assert cfg.app_server.listen == "/tmp/dev-akashic.sock"
+    assert cfg.app_server.listen == "/tmp/dev-roxy.sock"
 
 
 def test_config_load_reads_agent_dev_mode(tmp_path: Path):
@@ -405,7 +405,7 @@ max_tokens = 256
 memory_window = 12
 
 [app_server]
-listen = "/tmp/toml-akashic.sock"
+listen = "/tmp/toml-roxy.sock"
 
 """.strip()
         + "\n",
@@ -419,10 +419,10 @@ listen = "/tmp/toml-akashic.sock"
     assert cfg.max_tokens == 256
     assert cfg.memory_window == 12
     if sys.platform == "win32":
-        assert cfg.app_server.listen != "/tmp/toml-akashic.sock"
+        assert cfg.app_server.listen != "/tmp/toml-roxy.sock"
         assert cfg.app_server.listen.startswith("127.0.0.1:")
     else:
-        assert cfg.app_server.listen == "/tmp/toml-akashic.sock"
+        assert cfg.app_server.listen == "/tmp/toml-roxy.sock"
 
 
 def test_config_rejects_legacy_cli_socket(tmp_path: Path):

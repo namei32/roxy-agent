@@ -15,6 +15,7 @@ from agent.control.runtime import ConversationRuntime
 from agent.control.service import ControlService
 from agent.restart import RestartCoordinator
 from agent.config_models import Config
+from agent.identity import roxy_env
 from bootstrap.channel_host import ChannelHost
 from bootstrap.channels import start_channels
 from bootstrap.chat_api import build_chat_server
@@ -53,7 +54,7 @@ logging.basicConfig(
     force=True,
 )
 logging.getLogger("agent.plugins.manager").setLevel(
-    os.environ.get("AKASHIC_PLUGIN_LOG_LEVEL", "INFO").upper()
+    roxy_env("PLUGIN_LOG_LEVEL", "INFO").upper()
 )
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("telegram").setLevel(logging.WARNING)
@@ -202,18 +203,18 @@ def _dashboard_bind_address() -> tuple[str, int]:
     """Resolve and validate the dashboard listener from environment config."""
 
     # 1. Normalize the process boundary before any runtime service starts.
-    host = os.environ.get("AKASHIC_DASHBOARD_HOST", "0.0.0.0").strip()
+    host = roxy_env("DASHBOARD_HOST", "0.0.0.0").strip()
     if not host:
-        raise ValueError("AKASHIC_DASHBOARD_HOST 不能为空")
+        raise ValueError("ROXY_DASHBOARD_HOST 不能为空")
 
     # 2. Reject invalid ports instead of falling back to the formal listener.
-    raw_port = os.environ.get("AKASHIC_DASHBOARD_PORT", "2236")
+    raw_port = roxy_env("DASHBOARD_PORT", "2236")
     try:
         port = int(raw_port)
     except ValueError as error:
-        raise ValueError("AKASHIC_DASHBOARD_PORT 必须是 1 到 65535 的整数") from error
+        raise ValueError("ROXY_DASHBOARD_PORT 必须是 1 到 65535 的整数") from error
     if not 1 <= port <= 65_535:
-        raise ValueError("AKASHIC_DASHBOARD_PORT 必须是 1 到 65535 的整数")
+        raise ValueError("ROXY_DASHBOARD_PORT 必须是 1 到 65535 的整数")
     return host, port
 
 

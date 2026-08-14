@@ -1,4 +1,4 @@
-"""Akasic Agent MemoryEngine adapter for Akasha V2."""
+"""Roxy Agent MemoryEngine adapter for Akasha V2."""
 
 from __future__ import annotations
 
@@ -200,7 +200,7 @@ class AkashaFeedbackPersistModule:
 
 
 class AkashaMemoryEngine:
-    """Adapt the standalone explicit memory runtime to Akasic Agent."""
+    """Adapt the standalone explicit memory runtime to Roxy Agent."""
 
     DESCRIPTOR = MemoryEngineDescriptor(
         name="akasha",

@@ -144,7 +144,7 @@ def reset_veda(workspace: Path) -> VedaResetResult:
     )
 
 
-AKASHIC_BEHAVIOR_RULES = """你有工具执行能力，必须先验证再回答。
+ROXY_BEHAVIOR_RULES = """你有工具执行能力，必须先验证再回答。
 
 **有知识，但不无所不能。** 不确定的事情说不确定，哲学性问题可以说"这个我说不准"，不要装什么都懂。查过了再说，没查过别乱说。
 

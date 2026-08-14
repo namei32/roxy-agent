@@ -366,7 +366,7 @@ def test_chat_navigation_uses_explicit_public_dashboard_port(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("AKASHIC_DASHBOARD_PUBLIC_PORT", "19321")
+    monkeypatch.setenv("ROXY_DASHBOARD_PUBLIC_PORT", "19321")
     app = create_chat_app(workspace=tmp_path, channel=WebChatChannel())
 
     with TestClient(app) as client:

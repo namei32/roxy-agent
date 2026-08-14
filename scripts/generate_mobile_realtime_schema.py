@@ -40,7 +40,7 @@ def build_schema() -> dict[str, object]:
     """从服务端帧模型生成确定性的移动协议 schema。"""
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "title": "Akashic Mobile Realtime Protocol v1",
+        "title": "Roxy Mobile Realtime Protocol v1",
         "protocolVersion": PROTOCOL_VERSION,
         "transport": "WebSocket JSON text frames and attachment binary chunks",
         "maxJsonFrameBytes": MAX_JSON_FRAME_BYTES,

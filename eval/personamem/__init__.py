@@ -1,1 +1,1 @@
-"""PersonaMem benchmark runner for akashic-agent."""
+"""PersonaMem benchmark runner for roxy-agent."""

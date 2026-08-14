@@ -63,7 +63,7 @@ export function Tile({
 }
 
 export function Stack({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn("ak-plugin-stack", className)}>{children}</div>;
+  return <div className={cn("roxy-plugin-stack ak-plugin-stack", className)}>{children}</div>;
 }
 
 export function Grid({
@@ -75,19 +75,19 @@ export function Grid({
   columns?: 2 | 3 | 4;
   className?: string;
 }) {
-  return <div className={cn("ak-plugin-grid", `ak-plugin-grid-${columns}`, className)}>{children}</div>;
+  return <div className={cn("roxy-plugin-grid ak-plugin-grid", `roxy-plugin-grid-${columns}`, `ak-plugin-grid-${columns}`, className)}>{children}</div>;
 }
 
 export function Panel({ children, className }: { children: ReactNode; className?: string }) {
-  return <section className={cn("ak-plugin-panel", className)}>{children}</section>;
+  return <section className={cn("roxy-plugin-panel ak-plugin-panel", className)}>{children}</section>;
 }
 
 export function Toolbar({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn("ak-plugin-toolbar", className)}>{children}</div>;
+  return <div className={cn("roxy-plugin-toolbar ak-plugin-toolbar", className)}>{children}</div>;
 }
 
 export function Markdown({ children, className }: { children: unknown; className?: string }) {
-  return <div className={cn("ak-markdown", className)} dangerouslySetInnerHTML={{ __html: renderMarkdown(children) }} />;
+  return <div className={cn("roxy-markdown ak-markdown", className)} dangerouslySetInnerHTML={{ __html: renderMarkdown(children) }} />;
 }
 
 function parseMaybeJson(value: unknown): unknown {
@@ -186,7 +186,7 @@ export function Btn({
       disabled={disabled}
       loading={loading}
       variant={BTN_VARIANTS[variant]}
-      className={cn(`ak-material-button--${size}`, className)}
+      className={cn(`roxy-material-button--${size}`, `ak-material-button--${size}`, className)}
     >
       {children}
     </MaterialButton>
@@ -200,12 +200,12 @@ export function Btn({
 export type ChipTone = "neutral" | "success" | "warning" | "danger" | "muted" | "accent";
 
 const CHIP_TONES: Record<ChipTone, string> = {
-  neutral: "ak-chip--neutral",
-  success: "ak-chip--success",
-  warning: "ak-chip--warning",
-  danger: "ak-chip--danger",
-  muted: "ak-chip--muted",
-  accent: "ak-chip--accent",
+  neutral: "roxy-chip--neutral",
+  success: "roxy-chip--success",
+  warning: "roxy-chip--warning",
+  danger: "roxy-chip--danger",
+  muted: "roxy-chip--muted",
+  accent: "roxy-chip--accent",
 };
 
 const CHIP_DOTS: Record<ChipTone, string> = {
@@ -231,7 +231,7 @@ export function Chip({
   return (
     <span
       className={cn(
-        "ak-chip inline-flex items-center gap-1.5 px-2.5 py-1 font-sans text-[11px] tabular-nums",
+        "roxy-chip inline-flex items-center gap-1.5 px-2.5 py-1 font-sans text-[11px] tabular-nums",
         CHIP_TONES[tone],
         className,
       )}

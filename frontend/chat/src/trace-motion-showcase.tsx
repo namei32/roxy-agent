@@ -81,7 +81,7 @@ export function TraceMotionShowcase() {
     <main className="trace-motion-showcase" data-phase={phase}>
       <header className="trace-motion-header">
         <div className="trace-motion-heading">
-          <span className="trace-motion-eyebrow">AKASHIC · PROCESS TRACE MOTION STUDY</span>
+          <span className="trace-motion-eyebrow">ROXY · PROCESS TRACE MOTION STUDY</span>
           <h1>让思考轨迹真正“呼吸”</h1>
           <p>
             融合方案与原五个候选共享同一段 <b>thinking → 工具调用 → thinking → 工具调用</b>，

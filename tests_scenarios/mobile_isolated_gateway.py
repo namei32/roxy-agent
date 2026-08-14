@@ -525,7 +525,7 @@ async def run_harness(args: argparse.Namespace) -> None:
     # 1. 构造与真实 runtime 完全分离的目录和确定性数据
     generated_root = args.root is None
     root = (
-        Path(tempfile.mkdtemp(prefix="akashic-mobile-e2e-"))
+        Path(tempfile.mkdtemp(prefix="roxy-mobile-e2e-"))
         if generated_root
         else args.root.resolve()
     )

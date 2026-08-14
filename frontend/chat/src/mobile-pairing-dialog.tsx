@@ -242,7 +242,7 @@ function WaitingStage({ state, secondsLeft }: { state: Extract<PairingState, { s
       <div className="mobile-pairing-instructions">
         <div className="mobile-pairing-step active">
           <span className="mobile-pairing-step-node"><ScanLine size={16} /></span>
-          <div><strong>用手机扫描二维码</strong><span>打开 Akashic Android 客户端并选择“扫描电脑”。</span></div>
+          <div><strong>用手机扫描二维码</strong><span>打开 Roxy Android 客户端并选择“扫描电脑”。</span></div>
         </div>
         <div className="mobile-pairing-step">
           <span className="mobile-pairing-step-node"><ShieldCheck size={16} /></span>

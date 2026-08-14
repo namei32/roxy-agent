@@ -293,7 +293,7 @@ test("multiple selection copies only copyable messages in conversation order", (
 
   assert.equal(
     formatMobileSelectionCopyText(messages, () => "昨天 11:02"),
-    "你 · 昨天 11:02\n问题\n\nAkashic · 昨天 11:02\n回答",
+    "你 · 昨天 11:02\n问题\n\nRoxy · 昨天 11:02\n回答",
   );
 });
 
@@ -322,7 +322,7 @@ test("reply navigation announces user and assistant identity with message time",
   );
   assert.equal(
     formatMobileReplyNavigationAnnouncement(selectableMessage("answer", "assistant", "回答"), () => "10:22"),
-    "已跳到Akashic 10:22 的消息",
+    "已跳到Roxy 10:22 的消息",
   );
 });
 

@@ -21,7 +21,7 @@ class AppleNotesPlugin(Plugin):
     name = "apple_notes"
     version = "0.1.0"
     desc = "把用户明确指定的重要内容安全地保存到 Apple 备忘录"
-    author = "Akashic Agent"
+    author = "Roxy Agent"
     ConfigModel = AppleNotesConfig
 
     def __init__(self) -> None:
@@ -149,7 +149,7 @@ class AppleNotesPlugin(Plugin):
         always_on=False,
         search_hint=(
             "append a new section to an Apple Note previously created by "
-            "Akashic after an explicit request or active Interview Coach turn"
+            "Roxy after an explicit request or active Interview Coach turn"
         ),
     )
     async def append_note(

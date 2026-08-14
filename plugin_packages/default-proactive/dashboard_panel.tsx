@@ -1,6 +1,6 @@
-/// <reference path="../../types/akashic-dashboard.d.ts" />
+/// <reference path="../../types/roxy-dashboard.d.ts" />
 import { type ReactElement } from "react";
-import { Chip, JsonView, Markdown, Panel, Stack, api } from "@akashic/dashboard-ui";
+import { Chip, JsonView, Markdown, Panel, Stack, api } from "@roxy/dashboard-ui";
 
 interface Page {
   items: Record<string, unknown>[];
@@ -23,7 +23,7 @@ function Detail({ item }: { item: Record<string, unknown> | null }): ReactElemen
   </Stack>;
 }
 
-window.AkashicDashboard.registerPlugin({
+window.RoxyDashboard.registerPlugin({
   id: "default-proactive",
   label: "Default Tick",
   viewLabel: "default proactive",

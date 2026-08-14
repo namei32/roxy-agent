@@ -7,6 +7,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Mapping, Protocol
 
+from agent.identity import roxy_env_from
+
 
 class Clock(Protocol):
     def now(self) -> datetime: ...
@@ -62,7 +64,7 @@ class ReplayClock:
 
 def clock_from_env(env: Mapping[str, str] | None = None) -> Clock:
     values = os.environ if env is None else env
-    path = str(values.get("AKASHIC_REPLAY_CLOCK_FILE") or "").strip()
+    path = roxy_env_from(values, "REPLAY_CLOCK_FILE").strip()
     return ReplayClock(Path(path)) if path else SystemClock()
 
 

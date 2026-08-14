@@ -21,19 +21,19 @@ description: Analyze an authorized Telegram image batch as interview material, a
 2. 整批只有在 `is_interview_material=true`、置信度不低于提示阈值且至少识别出一道题时才是面经。
    不确定或不是面经时，明确回复“未保存到备忘录”，不得调用 `interview_prepare` 或 Apple Notes。
 3. 对每道题独立分类：
-   - `AKASHIC_RELATED`：直接涉及 Agent、Memory、MCP、生命周期、Scheduler、Subagent、Proactive、
-     Delivery、插件，或当前 Akashic repository 中确有实现可作为项目案例；
-   - `GENERAL`：只回答通用原理，不增加 Akashic 项目段；
+   - `ROXY_RELATED`：直接涉及 Agent、Memory、MCP、生命周期、Scheduler、Subagent、Proactive、
+     Delivery、插件，或当前 Roxy repository 中确有实现可作为项目案例；
+   - `GENERAL`：只回答通用原理，不增加 Roxy 项目段；
    - `UNCERTAIN`：证据不足时按通用题回答，不猜测项目实现。
-4. 对 `AKASHIC_RELATED` 题，先通过 `tool_search` 解锁 `akashic_project_search` 与
-   `akashic_project_read`，再检索真实证据。没有 repository 相对路径与 Git revision 的事实不得
+4. 对 `ROXY_RELATED` 题，先通过 `tool_search` 解锁 `roxy_project_search` 与
+   `roxy_project_read`，再检索真实证据。没有 repository 相对路径与 Git revision 的事实不得
    写成项目实现。对 `GENERAL` 题禁止为了展示项目而调用项目检索。
 5. 每道题按下列结构生成忠实、可复习的 Markdown：
    - 原题；
    - 分类；
    - 30 秒面试回答；
    - 深入解释；
-   - Akashic 项目落地（仅 `AKASHIC_RELATED`）；
+   - Roxy 项目落地（仅 `ROXY_RELATED`）；
    - 权衡、边界与常见误区；
    - 面试官可能追问。
 6. 根据本批主题生成 3-5 道递进模拟追问，但初次回复和 Note 只展示第一道。后续问题交给插件

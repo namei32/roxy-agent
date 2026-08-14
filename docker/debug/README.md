@@ -8,7 +8,7 @@
 python docker/debug/gate.py run --base origin/main
 ```
 
-Gate 先用 `tests_scenarios/contracts/impact.toml` 解释 Git diff，再运行所选公开语义场景。每个场景都使用新的 `/tmp/akashic-change-gate-*` sandbox，容器只读挂载候选源码，只允许写本次 `/sandbox` 与 tmpfs `/tmp`。`workspace`、`plugin-home`、`HOME` 和 config 都从空目录建立；Gate 不接收正式运行路径。
+Gate 先用 `tests_scenarios/contracts/impact.toml` 解释 Git diff，再运行所选公开语义场景。每个场景都使用新的 `/tmp/roxy-change-gate-*` sandbox，容器只读挂载候选源码，只允许写本次 `/sandbox` 与 tmpfs `/tmp`。`workspace`、`plugin-home`、`HOME` 和 config 都从空目录建立；Gate 不接收正式运行路径。
 
 ```text
 Git diff
@@ -164,12 +164,12 @@ double-fork 后代；未知 PID 和不属于当前 boot 的端口不构成 kill 
 }
 ```
 
-这个目录用于临时调试真实入口，例如 Telegram 图片、多模态链路、独立 bot 配置。调试容器基于 Arch Linux，沙盒不会挂载宿主机 `HOME`，也不会挂载正式 `~/.akashic/workspace`。
+这个目录用于临时调试真实入口，例如 Telegram 图片、多模态链路、独立 bot 配置。调试容器基于 Arch Linux，沙盒不会挂载宿主机 `HOME`，也不会挂载正式 `~/.roxy/workspace`。
 
 ```
 host
   |
-  +-- akashic-agent
+  +-- roxy-agent
       |
       +-- docker/debug
           |
@@ -183,7 +183,7 @@ host
                   +-- config.toml
                   +-- workspace
                   +-- home
-                  +-- akashic.sock
+                  +-- roxy.sock
 
 container
   |
@@ -203,21 +203,21 @@ container
 
 ## 插件变更 Gate
 
-`akashic-plugin-gate` 用于在真实 Runtime 中验证插件系统改动。它不会复用普通调试容器的可写源码挂载或宿主插件缓存。
+`roxy-plugin-gate` 用于在真实 Runtime 中验证插件系统改动。它不会复用普通调试容器的可写源码挂载或宿主插件缓存。
 
 ```text
 ┌─ 宿主
-│  ├─ akasic-agent             只读挂载到 /app
-│  └─ akashic-plugin/*         只读挂载到 /fixtures/plugins
+│  ├─ roxy-agent               只读挂载到 /app
+│  └─ roxy-plugin/*         只读挂载到 /fixtures/plugins
 ├─ 容器
 │  ├─ root filesystem          只读
 │  ├─ /tmp                     tmpfs
 │  └─ /sandbox                 唯一持久可写目录
-│     ├─ home/.akashic-plugin/cache
+│     ├─ home/.roxy-plugin/cache
 │     ├─ workspace
 │     └─ reports
 └─ Compose project
-   └─ akashic-plugin-reload-gate
+   └─ roxy-plugin-reload-gate
 ```
 
 从宿主运行完整性 Gate：
@@ -249,6 +249,12 @@ python docker/debug/plugin_hot_reload_probe.py \
 `plugin-api-v2.lock.json` 固定合同检查器与 21 个外部插件的完整 commit SHA。Gate 只从公开
 GitHub HTTPS 地址获取这些对象，不读取宿主插件 cache、正式 workspace 或正式配置。
 
+锁定的 `plugin-contracts` 仓库仍导出历史的 `akashic_plugin_contracts` Python 模块；Gate 在
+这个外部边界保留该模块名，不把它当作 Roxy Core 的新 API。
+
+同样，锁定的 Feishu/QQBot 测试 bootstrap 仍读取 `AKASHIC_AGENT_ROOT`；Gate 会同时注入
+`ROXY_AGENT_ROOT` 与该兼容变量，Core 自身只使用 Roxy 名称。
+
 ```text
 ┌─ 静态合同
 │  ├─ 拒绝 API v1 / initialize
@@ -275,7 +281,7 @@ SHA 不可获取、静态合同失败、容器退出异常、源码挂载被修�
 ### 移动插件发布组合 Gate
 
 `mobile-plugin-release.lock.json` 固定核心仓库这次发布实际配套的公开插件提交。协作者不需要
-安装插件，也不会读取宿主的 `~/.akashic-plugin`：Gate 在 `/tmp` 创建全新 Git checkout，
+安装插件，也不会读取宿主的 `~/.roxy-plugin`：Gate 在 `/tmp` 创建全新 Git checkout，
 从锁内的 GitHub HTTPS 地址只取精确 SHA。
 
 ```text
@@ -307,7 +313,7 @@ CI 额外使用 `--require-clean-core`，防止报告对应的不是可复核源
 ## 第一次配置
 
 ```bash
-docker compose -f docker/debug/docker-compose.yml run --rm akashic-debug setup
+docker compose -f docker/debug/docker-compose.yml run --rm roxy-debug setup
 ```
 
 这里填写专用 Telegram bot、模型 key 和多模态配置。不要填正式 bot。
@@ -315,7 +321,7 @@ docker compose -f docker/debug/docker-compose.yml run --rm akashic-debug setup
 ## 启动调试 Agent
 
 ```bash
-docker compose -f docker/debug/docker-compose.yml up akashic-debug
+docker compose -f docker/debug/docker-compose.yml up roxy-debug
 ```
 
 此时向调试 Telegram bot 发消息或图片，所有会话和记忆都会进入 `docker/debug/profiles/default/workspace`。
@@ -342,8 +348,8 @@ python main.py --config /absolute/config.toml --workspace /absolute/workspace
 不同功能可以用不同 profile 保存配置和 workspace：
 
 ```bash
-AKASHIC_DEBUG_PROFILE=multimodal docker compose -f docker/debug/docker-compose.yml run --rm akashic-debug setup
-AKASHIC_DEBUG_PROFILE=multimodal docker compose -f docker/debug/docker-compose.yml up akashic-debug
+ROXY_DEBUG_PROFILE=multimodal docker compose -f docker/debug/docker-compose.yml run --rm roxy-debug setup
+ROXY_DEBUG_PROFILE=multimodal docker compose -f docker/debug/docker-compose.yml up roxy-debug
 ```
 
 对应目录是 `docker/debug/profiles/multimodal/`。
@@ -351,15 +357,15 @@ AKASHIC_DEBUG_PROFILE=multimodal docker compose -f docker/debug/docker-compose.y
 ## 调用调试实例
 
 ```bash
-docker compose -f docker/debug/docker-compose.yml run --rm akashic-debug exec --new "测试消息"
+docker compose -f docker/debug/docker-compose.yml run --rm roxy-debug exec --new "测试消息"
 ```
 
-app-server socket 固定为 `/sandbox/akashic.sock`，不会连接正式实例。
+app-server socket 固定为 `/sandbox/roxy.sock`，不会连接正式实例。
 
 ## 打开调试 Dashboard
 
 ```bash
-docker compose -f docker/debug/docker-compose.yml run --rm --service-ports akashic-debug dashboard
+docker compose -f docker/debug/docker-compose.yml run --rm --service-ports roxy-debug dashboard
 ```
 
 宿主机访问 `http://127.0.0.1:2237`。
@@ -375,7 +381,7 @@ docker compose -f docker/debug/docker-compose.yml down
 ## 清空调试 workspace
 
 ```bash
-docker compose -f docker/debug/docker-compose.yml run --rm akashic-debug reset-workspace
+docker compose -f docker/debug/docker-compose.yml run --rm roxy-debug reset-workspace
 ```
 
 这个命令只删除并重建当前 profile 下的 `workspace`，会保留当前 profile 下的 `config.toml`。
@@ -517,25 +523,25 @@ docker/debug/scenarios/
 运行全部场景：
 
 ```bash
-docker compose -f docker/debug/docker-compose.yml run --rm akashic-debug \
+docker compose -f docker/debug/docker-compose.yml run --rm roxy-debug \
   python docker/debug/runtime_race_probe.py --scenario all
 ```
 
 运行单个场景：
 
 ```bash
-docker compose -f docker/debug/docker-compose.yml run --rm akashic-debug \
+docker compose -f docker/debug/docker-compose.yml run --rm roxy-debug \
   python docker/debug/runtime_race_probe.py --scenario a1-drift-before-push
 ```
 
 可用控制开关：
 
 ```text
-AKASHIC_RACE_SCENARIO  选择单个场景，默认 all
-AKASHIC_RACE_TIMEOUT   每个等待点的超时秒数，默认 2
-AKASHIC_RACE_TRACE     写出 JSON 结果的路径
-AKASHIC_RACE_CONFIG    指定 config.toml；不指定时生成无外部 channel 的最小配置
-AKASHIC_RACE_WORKSPACE 指定临时 workspace；不指定时使用临时目录
+ROXY_RACE_SCENARIO  选择单个场景，默认 all
+ROXY_RACE_TIMEOUT   每个等待点的超时秒数，默认 2
+ROXY_RACE_TRACE     写出 JSON 结果的路径
+ROXY_RACE_CONFIG    指定 config.toml；不指定时生成无外部 channel 的最小配置
+ROXY_RACE_WORKSPACE 指定临时 workspace；不指定时使用临时目录
 ```
 
 ## 主动链路操作沙盒
@@ -566,45 +572,45 @@ AKASHIC_RACE_WORKSPACE 指定临时 workspace；不指定时使用临时目录
 完整验证：
 
 ```bash
-docker compose -f docker/debug/docker-compose.yml build akashic-debug
-docker compose -f docker/debug/docker-compose.yml run --rm akashic-debug \
+docker compose -f docker/debug/docker-compose.yml build roxy-debug
+docker compose -f docker/debug/docker-compose.yml run --rm roxy-debug \
   python docker/debug/proactive_sandbox.py run-all
 ```
 
 Wake package 已启用的 profile 使用：
 
 ```bash
-AKASHIC_DEBUG_PROFILE=wake-profile \
-  docker compose -f docker/debug/docker-compose.yml run --rm akashic-debug \
+ROXY_DEBUG_PROFILE=wake-profile \
+  docker compose -f docker/debug/docker-compose.yml run --rm roxy-debug \
   python docker/debug/proactive_sandbox.py run-all --lifecycle wake
 ```
 
 使用当前 profile 的真实模型配置：
 
 ```bash
-AKASHIC_DEBUG_PROFILE=dev_verify \
-docker compose -f docker/debug/docker-compose.yml run --rm akashic-debug \
+ROXY_DEBUG_PROFILE=dev_verify \
+docker compose -f docker/debug/docker-compose.yml run --rm roxy-debug \
   python docker/debug/proactive_sandbox.py run-all --config /sandbox/config.toml
 ```
 
 手动控制：
 
 ```bash
-docker compose -f docker/debug/docker-compose.yml run --rm akashic-debug \
+docker compose -f docker/debug/docker-compose.yml run --rm roxy-debug \
   python docker/debug/proactive_sandbox.py reset
-docker compose -f docker/debug/docker-compose.yml run --rm akashic-debug \
+docker compose -f docker/debug/docker-compose.yml run --rm roxy-debug \
   python docker/debug/proactive_sandbox.py inject-content
-docker compose -f docker/debug/docker-compose.yml run --rm akashic-debug \
+docker compose -f docker/debug/docker-compose.yml run --rm roxy-debug \
   python docker/debug/proactive_sandbox.py tick-content
-docker compose -f docker/debug/docker-compose.yml run --rm akashic-debug \
+docker compose -f docker/debug/docker-compose.yml run --rm roxy-debug \
   python docker/debug/proactive_sandbox.py status
 ```
 
 验证 paused skill 能从已有计划的停点继续，而不是重新执行说明书前置步骤：
 
 ```bash
-AKASHIC_DEBUG_PROFILE=drift-current-runtime \
-docker compose -f docker/debug/docker-compose.yml run --rm akashic-debug \
+ROXY_DEBUG_PROFILE=drift-current-runtime \
+docker compose -f docker/debug/docker-compose.yml run --rm roxy-debug \
   python docker/debug/proactive_sandbox.py verify-paused-resume \
   --config /sandbox/config.toml
 ```
@@ -639,8 +645,8 @@ python docker/debug/replay_controller.py \
 该 profile 仍需要自己的 `config.toml`。可以运行 `setup`，或复制另一份专用调试配置。启动前应关闭 Telegram、QQ 等外部渠道，并将待测发送目标设为 `channel = "replay"`。
 
 ```bash
-AKASHIC_DEBUG_PROFILE=wake-replay \
-docker compose -f docker/debug/docker-compose.yml up akashic-debug
+ROXY_DEBUG_PROFILE=wake-replay \
+docker compose -f docker/debug/docker-compose.yml up roxy-debug
 ```
 
 注入单条历史事件：
@@ -694,7 +700,7 @@ python docker/debug/replay_controller.py \
 `config-runtime-llm` 场景会读取真实 `config.toml` 并调用其中配置的 LLM。它通过 `build_core_runtime()` 构建真实 runtime，加载真实 provider、memory、tool、plugin、scheduler 接线，但不启动 Telegram / QQ / CLI server；外部 channel sender 用 fake 记录发送顺序，proactive / drift 生成也用 fake 直接提交到 `message_push(_commit_role="non_passive")`。
 
 ```bash
-docker compose -f docker/debug/docker-compose.yml run --rm akashic-debug \
+docker compose -f docker/debug/docker-compose.yml run --rm roxy-debug \
   python docker/debug/runtime_race_probe.py \
     --scenario config-runtime-llm \
     --config config.toml \

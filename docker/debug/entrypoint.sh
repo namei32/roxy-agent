@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CONFIG="${AKASHIC_DEBUG_CONFIG:-/sandbox/config.toml}"
-WORKSPACE="${AKASHIC_DEBUG_WORKSPACE:-/sandbox/workspace}"
-SOCKET="/sandbox/akashic.sock"
-DASHBOARD_HOST="${AKASHIC_DASHBOARD_HOST:-0.0.0.0}"
-DASHBOARD_PORT="${AKASHIC_DASHBOARD_PORT:-2236}"
-HOST_UID="${AKASHIC_HOST_UID:-1000}"
-HOST_GID="${AKASHIC_HOST_GID:-1000}"
+CONFIG="${ROXY_DEBUG_CONFIG:-/sandbox/config.toml}"
+WORKSPACE="${ROXY_DEBUG_WORKSPACE:-/sandbox/workspace}"
+SOCKET="/sandbox/roxy.sock"
+DASHBOARD_HOST="${ROXY_DASHBOARD_HOST:-0.0.0.0}"
+DASHBOARD_PORT="${ROXY_DASHBOARD_PORT:-2236}"
+HOST_UID="${ROXY_HOST_UID:-1000}"
+HOST_GID="${ROXY_HOST_GID:-1000}"
 
 as_host() {
     setpriv --reuid "$HOST_UID" --regid "$HOST_GID" --clear-groups "$@"
@@ -50,16 +50,16 @@ PY
 ensure_sandbox_path "$CONFIG"
 ensure_sandbox_path "$WORKSPACE"
 ensure_sandbox_path "$SOCKET"
-mkdir -p /sandbox "$WORKSPACE" /sandbox/home/.akashic-plugin
+mkdir -p /sandbox "$WORKSPACE" /sandbox/home/.roxy-plugin
 chown "$HOST_UID:$HOST_GID" \
     /sandbox \
     /sandbox/home \
-    /sandbox/home/.akashic-plugin
+    /sandbox/home/.roxy-plugin
 chown -R "$HOST_UID:$HOST_GID" "$WORKSPACE"
 if [ -f "$WORKSPACE/replay/clock.json" ]; then
-    export AKASHIC_REPLAY_CLOCK_FILE="$WORKSPACE/replay/clock.json"
-    export AKASHIC_REPLAY_EVENTS_FILE="$WORKSPACE/replay/events.jsonl"
-    export AKASHIC_REPLAY_OUTBOX_FILE="$WORKSPACE/replay/outbox.jsonl"
+    export ROXY_REPLAY_CLOCK_FILE="$WORKSPACE/replay/clock.json"
+    export ROXY_REPLAY_EVENTS_FILE="$WORKSPACE/replay/events.jsonl"
+    export ROXY_REPLAY_OUTBOX_FILE="$WORKSPACE/replay/outbox.jsonl"
 fi
 cd /app
 

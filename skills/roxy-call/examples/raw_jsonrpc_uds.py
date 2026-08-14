@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""通过 Unix socket 调用已运行的 Akashic app-server。"""
+"""通过 Unix socket 调用已运行的 Roxy app-server。"""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ class JsonRpcConnection:
     def read(self) -> dict[str, Any]:
         line = self._stream.readline()
         if not line:
-            raise ConnectionError("Akashic app-server closed the connection")
+            raise ConnectionError("Roxy app-server closed the connection")
         payload = json.loads(line)
         if not isinstance(payload, dict):
             raise ValueError("JSON-RPC frame must be an object")
@@ -76,9 +76,9 @@ class JsonRpcConnection:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Call an already-running Akashic gateway over its Unix socket.",
+        description="Call an already-running Roxy gateway over its Unix socket.",
     )
-    _ = parser.add_argument("endpoint", help="固定 workspace 的 akashic.sock 路径")
+    _ = parser.add_argument("endpoint", help="固定 workspace 的 roxy.sock 路径")
     thread = parser.add_mutually_exclusive_group(required=True)
     _ = thread.add_argument("--new", action="store_true", help="创建并打印新 thread ID")
     _ = thread.add_argument("--thread", help="复用明确的 thread ID")

@@ -28,7 +28,7 @@ test("offline showcase preserves the P0 boundary fixtures", () => {
   const gif = Buffer.from(gifMatch[1], "base64");
   assert.equal(gif.subarray(0, 6).toString("ascii"), "GIF89a");
   assert.equal(gif.includes(Buffer.from("NETSCAPE2.0")), true);
-  assert.match(showcaseSource, /https:\/\/preview\.akashic\.local\/validation\/shared-webui/);
+  assert.match(showcaseSource, /https:\/\/preview\.roxy\.local\/validation\/shared-webui/);
   assert.match(showcaseSource, /<ChatMessageView message=\{message\} \/>/);
   assert.match(showcaseSource, /mediaType: "image\/gif"/);
   assert.match(showcaseSource, /data-preview-state=/);

@@ -30,7 +30,7 @@ from harbor.trial.trial import Trial
 from benchmark.harbor_v4flash import HARNESS_VERSION
 from benchmark.harbor_v4flash.agent import (
     _VERIFIER_PREPARE_TIMEOUT_SEC,
-    AkashicHarborAgent,
+    RoxyHarborAgent,
     _prepare_verifier_runtime,
 )
 from benchmark.harbor_v4flash.campaign import (
@@ -73,9 +73,9 @@ from benchmark.harbor_v4flash.runtime_volume import (
 )
 
 DEFAULT_FORBIDDEN_PATHS = (
-    Path("/mnt/data/coding/akasic-agent"),
-    Path("/home/huashen/.akashic/workspace"),
-    Path("/home/huashen/.akashic-plugin/cache"),
+    Path("/mnt/data/coding/roxy-agent"),
+    Path("/home/huashen/.roxy/workspace"),
+    Path("/home/huashen/.roxy-plugin/cache"),
 )
 HARNESS_CLEANUP_RESERVE_SEC = 120.0
 _VERIFIER_CONCURRENCY = 1
@@ -105,7 +105,7 @@ class _SerializedVerifierTrial(SingleStepTrial):
             atomic_json(
                 self.paths.agent_dir / "verifier-skipped.json",
                 {
-                    "schema": "akasic.verifier-skipped.v1",
+                    "schema": "roxy.verifier-skipped.v1",
                     "reason": driver_status,
                     "official_verifier_timeout_started": False,
                 },
@@ -168,7 +168,7 @@ async def _capture_candidate_digest(
     atomic_json(
         trial_dir / "agent" / "candidate-identity.json",
         {
-            "schema": "akasic.verifier-candidate.v1",
+            "schema": "roxy.verifier-candidate.v1",
             "root": root,
             "digest": f"sha256:{digest}",
         },
@@ -307,7 +307,7 @@ async def _replay_timed_out_verifier(
             )
         (replay_dir / "test-stdout.txt").write_text(output, encoding="utf-8")
         replay: dict[str, object] = {
-            "schema": "akasic.verifier-replay.v1",
+            "schema": "roxy.verifier-replay.v1",
             "candidate": candidate,
             "container_id": container_id,
             "official_timeout_sec": verifier_timeout_sec,
@@ -457,7 +457,7 @@ def _write_campaign_results(
     atomic_json(
         path,
         {
-            "schema": "akasic.harbor-campaign-results.v1",
+            "schema": "roxy.harbor-campaign-results.v1",
             "accepted": len(outcomes),
             "expected": len(task_dirs),
             "score": {
@@ -710,7 +710,7 @@ async def run_trial(
         "bundle": source_bundle,
     }
     initial_manifest: dict[str, object] = {
-        "schema": "akasic.harbor-trial.v1",
+        "schema": "roxy.harbor-trial.v1",
         "state": "prepared",
         "harness_version": HARNESS_VERSION,
         "trial_name": trial_name,
@@ -764,7 +764,7 @@ async def run_trial(
         trial_name=trial_name,
         trials_dir=runs_root,
         agent=AgentConfig(
-            import_path=AkashicHarborAgent.import_path(),
+            import_path=RoxyHarborAgent.import_path(),
             model_name="deepseek/deepseek-v4-flash",
             override_setup_timeout_sec=900,
             override_timeout_sec=(task_agent_timeout_sec + HARNESS_CLEANUP_RESERVE_SEC),
@@ -1052,7 +1052,7 @@ async def run_campaign(
             selected_task_dirs,
         )
     initial = {
-        "schema": "akasic.harbor-campaign.v1",
+        "schema": "roxy.harbor-campaign.v1",
         "state": "running",
         "campaign_id": campaign_id,
         "max_concurrent": args.max_concurrent,
@@ -1270,15 +1270,15 @@ def main() -> int:
     parser.add_argument(
         "--uv-binary",
         type=Path,
-        default=Path(os.environ.get("AKASIC_BENCH_UV", "/home/huashen/.local/bin/uv")),
+        default=Path(os.environ.get("ROXY_BENCH_UV", "/home/huashen/.local/bin/uv")),
     )
     parser.add_argument(
         "--runtime-volume",
-        default=os.environ.get("AKASIC_BENCH_RUNTIME_VOLUME"),
+        default=os.environ.get("ROXY_BENCH_RUNTIME_VOLUME"),
     )
     parser.add_argument(
         "--git-volume",
-        default=os.environ.get("AKASIC_BENCH_GIT_VOLUME"),
+        default=os.environ.get("ROXY_BENCH_GIT_VOLUME"),
     )
     args = parser.parse_args()
     if args.resume_campaign_dir is not None and args.seed_campaign_dir is not None:
@@ -1297,12 +1297,12 @@ def main() -> int:
             parser.error(f"dataset-dir 没有发现 task.toml：{dataset_dir}")
     if not args.runtime_volume:
         parser.error(
-            "--runtime-volume 或 AKASIC_BENCH_RUNTIME_VOLUME 是必填项；"
+            "--runtime-volume 或 ROXY_BENCH_RUNTIME_VOLUME 是必填项；"
             "harness 不会在 trial 内冷安装"
         )
     if not args.git_volume:
         parser.error(
-            "--git-volume 或 AKASIC_BENCH_GIT_VOLUME 是必填项；"
+            "--git-volume 或 ROXY_BENCH_GIT_VOLUME 是必填项；"
             "harness 不会在 trial 内安装 Git"
         )
     with credential_scope(args.credential_profile.resolve()) as credential_names:

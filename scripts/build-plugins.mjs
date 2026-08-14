@@ -68,6 +68,7 @@ function buildArgs(command, panel, { watch = false } = {}) {
     "--external:react-dom",
     "--external:react-dom/client",
     "--external:react/jsx-runtime",
+    "--external:@roxy/dashboard-ui",
     "--external:@akashic/dashboard-ui",
     ...(watch ? ["--watch"] : []),
   ];

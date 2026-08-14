@@ -6,7 +6,8 @@ export type MobileSurface =
   | { kind: "dashboard"; pluginId: string };
 
 interface MobileSurfaceHistoryState {
-  akashicMobileSurface: true;
+  roxyMobileSurface?: true;
+  akashicMobileSurface?: true;
   surface: MobileSurface;
 }
 
@@ -16,13 +17,17 @@ interface HistoryWriter {
 }
 
 export function mobileSurfaceHistoryState(surface: MobileSurface): MobileSurfaceHistoryState {
-  return { akashicMobileSurface: true, surface };
+  return { roxyMobileSurface: true, surface };
 }
 
 export function readMobileSurfaceHistoryState(value: unknown): MobileSurface {
   if (!value || typeof value !== "object") return { kind: "chat" };
   const state = value as Partial<MobileSurfaceHistoryState>;
-  if (state.akashicMobileSurface !== true || !state.surface) return { kind: "chat" };
+  if (
+    state.roxyMobileSurface !== true
+    && state.akashicMobileSurface !== true
+  ) return { kind: "chat" };
+  if (!state.surface) return { kind: "chat" };
   if (
     state.surface.kind === "chat" ||
     state.surface.kind === "plugins" ||

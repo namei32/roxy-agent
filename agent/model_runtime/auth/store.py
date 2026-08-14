@@ -12,6 +12,7 @@ from typing import Iterator
 import fcntl
 
 from agent.model_runtime.errors import AuthenticationError
+from agent.identity import legacy_akashic_auth_path, roxy_auth_path
 
 
 @dataclass(frozen=True)
@@ -28,7 +29,8 @@ class CredentialStore:
     """安全地读取和原子更新用户凭据。"""
 
     def __init__(self, path: Path | None = None) -> None:
-        self.path = path or Path.home() / ".akashic" / "auth.json"
+        self.path = path or roxy_auth_path()
+        self.legacy_path = None if path is not None else legacy_akashic_auth_path()
         self.lock_path = self.path.with_suffix(".lock")
 
     def get(self, credential_id: str) -> Credential:
@@ -91,20 +93,30 @@ class CredentialStore:
             lock_file.close()
 
     def _read_document(self) -> dict:
-        if not self.path.exists():
+        read_path = self._read_path()
+        if read_path is None:
             return {"version": 1, "credentials": {}}
-        self._validate_permissions()
+        self._validate_permissions(read_path)
         try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
+            raw = json.loads(read_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
-            raise AuthenticationError(f"凭据文件 JSON 损坏: {self.path}") from exc
+            raise AuthenticationError(f"凭据文件 JSON 损坏: {read_path}") from exc
         if (
             not isinstance(raw, dict)
             or raw.get("version") != 1
             or not isinstance(raw.get("credentials"), dict)
         ):
-            raise AuthenticationError(f"凭据文件结构或版本无效: {self.path}")
+            raise AuthenticationError(f"凭据文件结构或版本无效: {read_path}")
         return raw
+
+    def _read_path(self) -> Path | None:
+        """新凭据优先；只有默认路径允许读取旧 Akashic 兼容文件。"""
+
+        if self.path.exists():
+            return self.path
+        if self.legacy_path is not None and self.legacy_path.exists():
+            return self.legacy_path
+        return None
 
     def _write_document(self, data: dict) -> None:
         """fsync 后原子替换凭据文件。"""
@@ -124,9 +136,9 @@ class CredentialStore:
             if os.path.exists(temp_name):
                 os.unlink(temp_name)
 
-    def _validate_permissions(self) -> None:
-        parent_mode = self.path.parent.stat().st_mode & 0o777
-        file_mode = self.path.stat().st_mode & 0o777
+    def _validate_permissions(self, path: Path) -> None:
+        parent_mode = path.parent.stat().st_mode & 0o777
+        file_mode = path.stat().st_mode & 0o777
         if parent_mode & 0o077:
             raise AuthenticationError("auth.json 父目录权限过宽，必须为 0700")
         if file_mode & 0o077:

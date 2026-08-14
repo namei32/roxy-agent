@@ -1,14 +1,17 @@
 [![欢迎加入交流群](https://img.shields.io/badge/QQ%E4%BA%A4%E6%B5%81%E7%BE%A4-%E6%AC%A2%E8%BF%8E%E5%8A%A0%E5%85%A5-2ea44f?style=for-the-badge)](./COMMUNICATION.md)
 
-# akashic Agent
+# Roxy Agent
 
 一个**会主动找你**的 AI 伙伴——不只是被动回答问题，还能根据你订阅的信息源主动判断"现在该不该发消息、发什么"，在空闲时自主执行后台任务。
+
+> 本仓库的运行时与技术名称已迁移为 **Roxy**。新配置、路径、Socket、SDK 和 Skill
+> 一律使用 Roxy；旧 `Akashic` 名称只保留为已有安装的兼容入口，不会自动移动或删除你的数据。
 
 ---
 
 ## 先装常用插件
 
-如果你想让自己的 Akashic 具备和作者差不多的扩展能力，先看社区插件组织：
+如果你想让自己的 Roxy 具备和作者差不多的扩展能力，先看社区插件组织：
 
 - <https://github.com/orgs/akashic-plugins/repositories>
 
@@ -18,7 +21,8 @@
 - `feed-mcp`
 - `huayue-skills`
 
-如果 Akashic 已经在运行，你通常可以直接像聊天一样让它安装：
+这个 GitHub 组织仍沿用历史名称 `akashic-plugins`，链接无需替换。Roxy 已经在运行时，
+你通常可以直接像聊天一样让它安装：
 
 ```text
 帮我安装这个插件试试看：
@@ -32,7 +36,7 @@ steam mcp 我想用插件方式加载，你帮我把这个插件装一下看看�
 https://github.com/akashic-plugins/steam-mcp
 ```
 
-Akashic 理想上的动作应该是：
+Roxy 理想上的动作应该是：
 
 ```text
 ┌─ 安装插件
@@ -54,8 +58,8 @@ Akashic 理想上的动作应该是：
 需要 Python 3.12。
 
 ```bash
-git clone <this-repo>
-cd akashic-agent
+git clone https://github.com/namei32/roxy-agent.git
+cd roxy-agent
 uv venv && uv pip install -r requirements.txt
 ```
 
@@ -93,7 +97,7 @@ API Key 会直接写入本机 `config.toml`，文件权限为 `0600`；设置 AP
 已经保存的密钥。切换 Provider 时，旧 runtime 会保留，切回来无需重新输入密钥。
 
 OpenCode Go 会动态读取订阅当前提供的模型，隐藏已知走 Messages API 的型号，其余型号
-默认按 Chat Completions 验证。因此新增 Chat Completions 型号通常不需要更新 Akashic。
+默认按 Chat Completions 验证。因此新增 Chat Completions 型号通常不需要更新 Roxy。
 
 **2. 可选：使用终端初始化或手动配置**
 
@@ -108,7 +112,7 @@ uv run python main.py init     # 非交互，CI/自动化用
 
 ```toml
 [runtime]
-workspace = "~/.akashic/workspace"
+workspace = "~/.roxy/workspace"
 
 [llm]
 main = "deepseek_main"
@@ -163,8 +167,9 @@ channel_name = "web"
 新增迁移前请阅读 [Yoyo 迁移维护手册](./docs/design/git-migration-authoring.md)。已注册脚本
 只追加不修改；修正错误时新增 migration ID。
 
-`workspace` 默认是 `~/.akashic/workspace`。临时切换隔离环境时传
-`--workspace PATH`；它的优先级高于 `AKASHIC_WORKSPACE` 和 `config.toml`。
+`workspace` 默认是 `~/.roxy/workspace`。临时切换隔离环境时传
+`--workspace PATH`；它的优先级高于 `ROXY_WORKSPACE` 和 `config.toml`。
+旧 `AKASHIC_WORKSPACE` 仍可读取，但与新变量同时存在时由 `ROXY_WORKSPACE` 优先。
 
 **个人推荐**：主模型使用 DeepSeek，轻量和视觉任务使用 Qwen。通信渠道推荐
 Telegram；只想先本机试用时，完成 6321 设置后直接打开 6322 即可。
@@ -186,7 +191,7 @@ Telegram；只想先本机试用时，完成 6321 设置后直接打开 6322 即
 ./scripts/stop-runtime.sh
 ```
 
-脚本遵循 `--workspace`、`AKASHIC_WORKSPACE`、`config.toml` 的 workspace
+脚本遵循 `--workspace`、`ROXY_WORKSPACE`、`config.toml` 的 workspace
 优先级，优先停止 supervisor，并等待 runtime 真正释放实例锁。它不会删除锁文件，
 也不会在超时后自动强制终止进程。PyCharm 仍直接运行 `main.py`，默认同样进入
 supervisor；需要直接调试 child 时把程序参数设为 `gateway`。也可以把
@@ -198,16 +203,16 @@ supervisor；需要直接调试 child 时把程序参数设为 `gateway`。也�
 
 ## 用 Android 手机接入
 
-Akashic Mobile 是一个通过独立实时网关连接 Akashic Agent 的 Android 客户端。远程接入推荐使用 Cloudflare Tunnel：Web Chat 和配对管理页继续留在本机 `127.0.0.1:6322`，Tunnel 只转发由 Akashic 设备认证保护的 `6323` 端口。
+Roxy Mobile 是一个通过独立实时网关连接 Roxy Agent 的 Android 客户端。远程接入推荐使用 Cloudflare Tunnel：Web Chat 和配对管理页继续留在本机 `127.0.0.1:6322`，Tunnel 只转发由 Roxy 设备认证保护的 `6323` 端口。
 
 ```text
 1. 在 config.toml 启用 [mobile_realtime]
 2. 用 Cloudflare Tunnel 把一个公共域名转到 https://127.0.0.1:6323
-3. 在本机 Web Chat 点击“连接手机”，用 Akashic Mobile 扫描二维码
+3. 在本机 Web Chat 点击“连接手机”，用 Roxy Mobile 扫描二维码
 4. 两端核对六位确认码，在电脑上批准设备
 ```
 
-- Android 安装包：<https://github.com/kachofugetsu09/akashic-mobile/releases/latest>
+- Android 安装包仍从历史发布地址获取：<https://github.com/kachofugetsu09/akashic-mobile/releases/latest>
 - 配置、Cloudflare、验证与排障：[移动端接入手册](./_handbook/mobile-access.md)
 
 首次配对成功后，手机会保存设备密钥，正常升级应用或重连无需再次扫码。
@@ -222,14 +227,14 @@ Android 的对话界面与 Web Chat 共用 `frontend/chat/src`。只修改 React
 先从发布仓读取当前服务身份，并为指针和可达资源创建恢复点：
 
 ```bash
-AKASHIC_WEBUI_SERVER_ID="$(sqlite3 -readonly \
-  ~/.akashic/workspace/mobile-webui/publication.sqlite3 \
+ROXY_WEBUI_SERVER_ID="$(sqlite3 -readonly \
+  ~/.roxy/workspace/mobile-webui/publication.sqlite3 \
   "SELECT value FROM webui_meta WHERE key = 'server_id'")"
 
 .venv/bin/python scripts/publish-mobile-webui.py backup \
-  --workspace ~/.akashic/workspace \
-  --server-id "$AKASHIC_WEBUI_SERVER_ID" \
-  --destination ~/.akashic/backups/mobile-webui-"$(date +%Y%m%d-%H%M%S)"
+  --workspace ~/.roxy/workspace \
+  --server-id "$ROXY_WEBUI_SERVER_ID" \
+  --destination ~/.roxy/backups/mobile-webui-"$(date +%Y%m%d-%H%M%S)"
 ```
 
 开发中的 dirty 前端只能发布到 Preview，适合在配置为 Preview 频道的真机上验收：
@@ -237,8 +242,8 @@ AKASHIC_WEBUI_SERVER_ID="$(sqlite3 -readonly \
 ```bash
 .venv/bin/python scripts/publish-mobile-webui.py publish \
   --source-repository "$PWD" \
-  --workspace ~/.akashic/workspace \
-  --server-id "$AKASHIC_WEBUI_SERVER_ID" \
+  --workspace ~/.roxy/workspace \
+  --server-id "$ROXY_WEBUI_SERVER_ID" \
   --allow-dirty \
   --actor local-preview
 ```
@@ -251,12 +256,12 @@ git checkout main
 git pull --ff-only origin main
 test -z "$(git status --porcelain)"
 
-AKASHIC_WEBUI_SOURCE_COMMIT="$(git rev-parse HEAD)"
+ROXY_WEBUI_SOURCE_COMMIT="$(git rev-parse HEAD)"
 .venv/bin/python scripts/publish-mobile-webui.py publish \
   --source-repository "$PWD" \
-  --workspace ~/.akashic/workspace \
-  --server-id "$AKASHIC_WEBUI_SERVER_ID" \
-  --source-commit "$AKASHIC_WEBUI_SOURCE_COMMIT" \
+  --workspace ~/.roxy/workspace \
+  --server-id "$ROXY_WEBUI_SERVER_ID" \
+  --source-commit "$ROXY_WEBUI_SOURCE_COMMIT" \
   --stable \
   --actor local-stable
 ```
@@ -332,27 +337,59 @@ uv run python main.py dashboard # 打开 Dashboard（默认 :2236）
 uv run python main.py --help    # 查看全部子命令
 
 pytest tests/
-akashic_RUN_SCENARIOS=1 pytest -c pytest-scenarios.ini tests_scenarios/
+ROXY_RUN_SCENARIOS=1 pytest -c pytest-scenarios.ini tests_scenarios/
 ```
 
 ## 工作区
 
-所有运行时数据都在 `[runtime].workspace` 指定的目录下。默认值是
-`~/.akashic/workspace`；可设置 `AKASHIC_WORKSPACE`，也可以为单条命令传入
-`--workspace /absolute/path`。优先级为 `--workspace`、`AKASHIC_WORKSPACE`、
+所有运行时数据都在 `[runtime].workspace` 指定的目录下。新安装默认值是
+`~/.roxy/workspace`；可设置 `ROXY_WORKSPACE`，也可以为单条命令传入
+`--workspace /absolute/path`。优先级为 `--workspace`、`ROXY_WORKSPACE`、
 `config.toml`。不同测试环境使用不同目录，不共享会话、记忆、附件或插件数据。
-插件代码缓存和启停清单默认仍位于 `$HOME/.akashic-plugin`；需要完整隔离插件安装状态时，
-额外设置 `AKASHIC_PLUGIN_HOME=/absolute/test/plugin-home`。
+插件代码缓存和启停清单的新默认目录是 `$HOME/.roxy-plugin`；需要完整隔离插件安装状态时，
+额外设置 `ROXY_PLUGIN_HOME=/absolute/test/plugin-home`。
 
-从旧版升级时，第一次重启前显式复制旧插件数据；命令保留旧目录，目标已存在时拒绝覆盖：
+### 从 Akashic 显式迁移到 Roxy
+
+升级不会扫描、移动、合并或删除旧数据。先在旧实例停止后执行预检，再执行一次明确的复制：
+
+```bash
+uv run python main.py roxy-migrate \
+  --from-workspace "$HOME/.akashic/workspace" \
+  --to-workspace "$HOME/.roxy/workspace" \
+  --dry-run
+
+uv run python main.py roxy-migrate \
+  --from-workspace "$HOME/.akashic/workspace" \
+  --to-workspace "$HOME/.roxy/workspace"
+```
+
+该命令锁住旧 runtime、复制到唯一 staging、逐文件校验后原子发布。目标已经存在时会拒绝，
+源 workspace 始终保留；只有 `.instance.lock`、supervisor runtime 文件和旧/新 Socket 不会
+复制。若源目录从未有 `.instance.lock`，命令可能创建一个空锁文件以协调运行态，但绝不改写
+已有 owner 内容。`VEDA.md`、`SELF.md`、会话、记忆、附件和 `plugin-data` 保持原字节内容，
+不会因为品牌升级被重写。完成后，把 `config.toml` 的 `[runtime].workspace` 改为新路径，或显式设置
+`ROXY_WORKSPACE`；确认新实例正常后再由你自行决定是否保留旧目录。
+
+已有 `$HOME/.akashic-plugin` 会在 `$HOME/.roxy-plugin` 尚不存在时继续作为现有兼容根；
+旧 `~/.akashic/auth.json` 可被读取，下一次明确保存凭据会写到新的 `~/.roxy/auth.json`。
+这两个兼容路径都不会被自动复制、重命名或删除。旧 `AKASHIC_*` 环境变量和 `akashic.sock`
+同样只用于兼容，新的脚本、部署和 SDK 应使用 `ROXY_*` 与 `roxy.sock`。
+
+Apple Notes 是外部用户数据，绝不会自动迁移笔记文件夹。若现有插件配置仍为
+`folder = "Akashic"`，它会继续写入原文件夹；只有你显式改为 `folder = "Roxy"` 后才会使用
+新的文件夹。
+
+如果你的旧全局插件目录还保存了尚未归入 workspace 的 `data/`，可在新 workspace
+第一次启动前显式复制它；命令保留旧目录，目标已存在时拒绝覆盖：
 
 ```bash
 uv run python scripts/migrate_plugin_data.py \
-  --workspace "$HOME/.akashic/workspace" \
+  --workspace "$HOME/.roxy/workspace" \
   --plugins-home "$HOME/.akashic-plugin"
 ```
 
-程序化客户端连接 workspace 下的 `akashic.sock`，先完成 JSON-RPC
+程序化客户端连接 workspace 下的 `roxy.sock`，先完成 JSON-RPC
 `initialize`/`initialized`，再使用 `thread/start`、`turn/start`、`turn/read` 和
 `turn/interrupt`。Python SDK 位于 `sdk/python/`；旧 TUI 和无 request id 的 IPC payload
 已删除，不提供兼容 fallback。

@@ -4,7 +4,7 @@ Usage:
   # Full run:
   python -m eval.longmemeval.run \\
       --config eval/longmemeval/config.toml \\
-      --data eval/longmemeval/data/longmemeval_akashic.json \\
+      --data eval/longmemeval/data/longmemeval_roxy.json \\
       --workspace /tmp/lme_bench
 
   # 2 concurrent workers:
@@ -56,11 +56,11 @@ logger = logging.getLogger("eval.longmemeval")
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Run LongMemEval benchmark against the akashic agent runtime."
+        description="Run LongMemEval benchmark against the roxy agent runtime."
     )
     p.add_argument("--config", required=True, type=Path, help="Path to config.toml")
     p.add_argument("--data", required=True, type=Path,
-                   help="Path to longmemeval_akashic.json")
+                   help="Path to longmemeval_roxy.json")
     p.add_argument("--workspace", type=Path, default=Path("/tmp/lme_bench"),
                    help="Workspace directory (created on first run)")
     p.add_argument("--output", type=Path, default=None,

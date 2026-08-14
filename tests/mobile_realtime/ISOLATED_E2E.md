@@ -34,9 +34,9 @@ uv run pytest -q tests/mobile_realtime/test_isolated_e2e.py
 终端一启动隔离 Gateway；显式 `--root` 便于验收后检查数据库：
 
 ```bash
-rm -rf /tmp/akashic-mobile-device-e2e
+rm -rf /tmp/roxy-mobile-device-e2e
 uv run python -m tests_scenarios.mobile_isolated_gateway \
-  --root /tmp/akashic-mobile-device-e2e \
+  --root /tmp/roxy-mobile-device-e2e \
   --port 16323
 ```
 
@@ -55,12 +55,12 @@ adb install clients/android/app/build/outputs/apk/debug/app-debug.apk
 
 ```bash
 uv run python -m tests_scenarios.mobile_isolated_gateway \
-  --root /tmp/akashic-mobile-device-e2e \
+  --root /tmp/roxy-mobile-device-e2e \
   --port 16323 \
   --fault-mode stall_before_challenge
 
 uv run python -m tests_scenarios.mobile_isolated_gateway \
-  --root /tmp/akashic-mobile-device-e2e \
+  --root /tmp/roxy-mobile-device-e2e \
   --port 16323 \
   --fault-mode stall_after_auth
 ```
@@ -83,12 +83,12 @@ uv run python -m tests_scenarios.mobile_isolated_gateway \
 6. 结束后检查隔离目录；不得出现任何指向真实 workspace 的符号链接：
 
    ```bash
-   find /tmp/akashic-mobile-device-e2e -type l -print
-   find /tmp/akashic-mobile-device-e2e -maxdepth 3 -type f -print
+   find /tmp/roxy-mobile-device-e2e -type l -print
+   find /tmp/roxy-mobile-device-e2e -maxdepth 3 -type f -print
    ```
 
 停止 Gateway 后，显式删除隔离根目录：
 
 ```bash
-rm -rf /tmp/akashic-mobile-device-e2e
+rm -rf /tmp/roxy-mobile-device-e2e
 ```

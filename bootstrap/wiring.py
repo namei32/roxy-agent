@@ -102,7 +102,7 @@ def _load_memory_plugin_from_dir(name: str) -> MemoryPlugin | None:
     plugin_path = _PROJECT_ROOT / "plugins" / name / "memory_plugin.py"
     if not plugin_path.exists():
         return None
-    package_name = f"_akasic_memory_plugins.{name}"
+    package_name = f"_roxy_memory_plugins.{name}"
     _ensure_memory_plugin_package(package_name, plugin_path.parent)
     module_name = f"{package_name}.memory_plugin"
     spec = importlib.util.spec_from_file_location(module_name, plugin_path)

@@ -8,13 +8,13 @@ import subprocess
 import uuid
 from typing import Any
 
-GIT_VOLUME_PREFIX = "akasic-bench-git-v1-"
-GIT_VOLUME_SCHEMA = "akasic.benchmark-git.v1"
-GIT_MOUNT_PATH = "/opt/akashic-git"
+GIT_VOLUME_PREFIX = "roxy-bench-git-v1-"
+GIT_VOLUME_SCHEMA = "roxy.benchmark-git.v1"
+GIT_MOUNT_PATH = "/opt/roxy-git"
 GIT_BIN_PATH = f"{GIT_MOUNT_PATH}/bin/git"
 DEFAULT_GIT_BUILDER_IMAGE = "debian:bullseye-slim"
 GIT_TOP_LEVEL = ("bin", "manifest.json", "metadata.json", "root")
-_LABEL_PREFIX = "akasic.benchmark.git"
+_LABEL_PREFIX = "roxy.benchmark.git"
 _VOLUME_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
 
@@ -337,7 +337,7 @@ def build_git_volume(
 
     # 2. staging 保留真实包版本和依赖内容，最终身份不依赖浮动 apt 元数据。
     image_id = str(builder["id"])
-    staging = f"akasic-bench-git-staging-{uuid.uuid4().hex}"
+    staging = f"roxy-bench-git-staging-{uuid.uuid4().hex}"
     _run(["docker", "volume", "create", staging])
     build_script = f"""
 apt-get update
@@ -365,7 +365,7 @@ printf '{{"git_version":"%s","git_package":"%s","ca_certificates_package":"%s"}}
     "$git_version" "$git_package" "$ca_package" > {GIT_MOUNT_PATH}/metadata.json
 cat > {GIT_BIN_PATH} <<'EOF'
 #!/bin/sh
-root=/opt/akashic-git/root
+root=/opt/roxy-git/root
 export GIT_EXEC_PATH="$root/usr/lib/git-core"
 export GIT_TEMPLATE_DIR="$root/usr/share/git-core/templates"
 export LD_LIBRARY_PATH="$root/libdeps"

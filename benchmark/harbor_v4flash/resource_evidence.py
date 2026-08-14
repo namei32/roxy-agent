@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, cast
 
 RESOURCE_EVIDENCE_FILENAME = "container-resource.json"
-RESOURCE_EVIDENCE_SCHEMA = "akasic.container-resource.v1"
+RESOURCE_EVIDENCE_SCHEMA = "roxy.container-resource.v1"
 
 _CGROUP_ROOT = "/sys/fs/cgroup"
 _REQUIRED_FILES = ("memory.max", "memory.current", "memory.events")

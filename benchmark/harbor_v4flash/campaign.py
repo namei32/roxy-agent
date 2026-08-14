@@ -48,7 +48,7 @@ def find_open_concurrency_gate(
     """读取当前源码已完成 smoke 的并发授权证据。"""
 
     candidates: list[tuple[float, Path, dict[str, Any]]] = []
-    for path in runs_root.glob("akasic-bench-v4flash-*/campaign-manifest.json"):
+    for path in runs_root.glob("roxy-bench-v4flash-*/campaign-manifest.json"):
         payload = json.loads(path.read_text(encoding="utf-8"))
         gate = payload.get("concurrency_gate")
         online = payload.get("online")

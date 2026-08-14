@@ -136,7 +136,7 @@ def _commit_gate_candidate(app: Path) -> None:
         [
             "git",
             "-c",
-            "user.name=Akashic Plugin Gate",
+            "user.name=Roxy Plugin Gate",
             "-c",
             "user.email=plugin-gate@invalid",
             "commit",
@@ -298,7 +298,7 @@ def _sandbox_integrity() -> GateResult:
     }
 
     sandbox = Path("/sandbox")
-    cache = Path.home() / ".akashic-plugin" / "cache"
+    cache = Path.home() / ".roxy-plugin" / "cache"
     test_plugin = cache / "gate" / "integrity" / "1.0.0" / "plugin.py"
     test_plugin.parent.mkdir(parents=True, exist_ok=True)
     _ = test_plugin.write_text("REVISION = 1\n", encoding="utf-8")
@@ -327,17 +327,17 @@ def _sandbox_integrity() -> GateResult:
         _path_check("home_isolated", Path.home(), Path("/sandbox/home")),
         _path_check(
             "workspace_isolated",
-            Path(os.environ["AKASHIC_DEBUG_WORKSPACE"]),
+            Path(os.environ["ROXY_DEBUG_WORKSPACE"]),
             Path("/sandbox/workspace"),
         ),
         _path_check(
             "config_isolated",
-            Path(os.environ["AKASHIC_DEBUG_CONFIG"]),
+            Path(os.environ["ROXY_DEBUG_CONFIG"]),
             Path("/sandbox/config.toml"),
         ),
         CheckResult(
             "plugin_cache_isolated",
-            cache.resolve() == Path("/sandbox/home/.akashic-plugin/cache"),
+            cache.resolve() == Path("/sandbox/home/.roxy-plugin/cache"),
             str(cache.resolve()),
         ),
         CheckResult(
@@ -370,12 +370,25 @@ def _sandbox_integrity() -> GateResult:
 
 def _run_controller(*, scenario: str, phase: str) -> int:
     repo = Path(__file__).resolve().parents[2]
-    plugin_root = Path(
-        os.environ.get("AKASHIC_PLUGIN_SOURCE", "/mnt/data/coding/akashic-plugin")
-    ).resolve()
-    host_cache = (Path.home() / ".akashic-plugin" / "cache").resolve()
+    source_value = os.environ.get("ROXY_PLUGIN_SOURCE") or os.environ.get(
+        "AKASHIC_PLUGIN_SOURCE"
+    )
+    if source_value:
+        plugin_root = Path(source_value)
+    else:
+        canonical_root = Path("/mnt/data/coding/roxy-plugin")
+        legacy_root = Path("/mnt/data/coding/akashic-plugin")
+        # New invocations use Roxy.  Keep an existing historical source checkout
+        # usable until its owner elects to rename or move it.
+        plugin_root = (
+            legacy_root
+            if legacy_root.exists() and not canonical_root.exists()
+            else canonical_root
+        )
+    plugin_root = plugin_root.resolve()
+    host_cache = (Path.home() / ".roxy-plugin" / "cache").resolve()
     sandbox = Path(
-        tempfile.mkdtemp(prefix="akashic-plugin-gate-", dir="/tmp")
+        tempfile.mkdtemp(prefix="roxy-plugin-gate-", dir="/tmp")
     ).resolve()
     protected = [repo.resolve(), plugin_root, host_cache]
     if _sandbox_is_protected(sandbox, protected):
@@ -387,8 +400,8 @@ def _run_controller(*, scenario: str, phase: str) -> int:
     before = {str(path): _repository_digest(path) for path in repositories}
     env = {
         **os.environ,
-        "AKASHIC_GATE_SANDBOX": str(sandbox),
-        "AKASHIC_PLUGIN_SOURCE": str(plugin_root),
+        "ROXY_GATE_SANDBOX": str(sandbox),
+        "ROXY_PLUGIN_SOURCE": str(plugin_root),
         "UID": str(os.getuid()),
         "GID": str(os.getgid()),
     }
@@ -405,7 +418,7 @@ def _run_controller(*, scenario: str, phase: str) -> int:
         *compose,
         "run",
         "--rm",
-        "akashic-plugin-gate",
+        "roxy-plugin-gate",
         "python",
         "docker/debug/plugin_hot_reload_probe.py",
         "--scenario",
@@ -420,7 +433,7 @@ def _run_controller(*, scenario: str, phase: str) -> int:
     controller_error = ""
     try:
         build = subprocess.run(
-            [*compose, "build", "akashic-plugin-gate"],
+            [*compose, "build", "roxy-plugin-gate"],
             cwd=repo,
             env=env,
             check=False,
@@ -516,7 +529,7 @@ def _write_smoke_config(
         "",
         "[app_server]",
         "enabled = true",
-        'listen = "/sandbox/akashic.sock"',
+        'listen = "/sandbox/roxy.sock"',
         "max_connections = 8",
         "ingress_queue_size = 32",
         "outbound_queue_size = 64",
@@ -564,7 +577,7 @@ def _write_smoke_package_selection(
 ) -> None:
     """把 Gate 所需的 proactive 实现写成显式插件包选择。"""
 
-    manifest = sandbox / "home/.akashic-plugin/manifest.toml"
+    manifest = sandbox / "home/.roxy-plugin/manifest.toml"
     manifest.parent.mkdir(parents=True, exist_ok=True)
     content = manifest.read_text(encoding="utf-8") if manifest.exists() else "[plugins]\n"
     content = content.rstrip() + "\n\n"
@@ -578,7 +591,7 @@ def _write_smoke_package_selection(
 
 
 def _install_scope_plugin(sandbox: Path) -> Path:
-    plugin_dir = sandbox / "home/.akashic-plugin/cache/gate/scope_gate/1.0.0"
+    plugin_dir = sandbox / "home/.roxy-plugin/cache/gate/scope_gate/1.0.0"
     plugin_dir.mkdir(parents=True, exist_ok=True)
     _ = (plugin_dir / "plugin.py").write_text(
         "from __future__ import annotations\n"
@@ -647,7 +660,7 @@ def _install_scope_plugin(sandbox: Path) -> Path:
 
 def _install_fitbit_plugin(sandbox: Path, plugin_root: Path) -> Path:
     source = plugin_root / "fitbit-mcp"
-    target = sandbox / "home/.akashic-plugin/cache/gate/fitbit/1.1.0"
+    target = sandbox / "home/.roxy-plugin/cache/gate/fitbit/1.1.0"
     shutil.copytree(
         source,
         target,
@@ -657,9 +670,9 @@ def _install_fitbit_plugin(sandbox: Path, plugin_root: Path) -> Path:
 
 
 def _install_management_plugin(sandbox: Path) -> tuple[Path, Path, Path]:
-    cache = sandbox / "home/.akashic-plugin/cache/gate/management/1.0.0"
+    cache = sandbox / "home/.roxy-plugin/cache/gate/management/1.0.0"
     data = sandbox / "workspace/plugin-data/management-gate"
-    manifest = sandbox / "home/.akashic-plugin/manifest.toml"
+    manifest = sandbox / "home/.roxy-plugin/manifest.toml"
     cache.mkdir(parents=True, exist_ok=True)
     data.mkdir(parents=True, exist_ok=True)
     _ = (cache / "plugin.py").write_text(
@@ -702,9 +715,9 @@ def _install_management_plugin(sandbox: Path) -> tuple[Path, Path, Path]:
 
 
 def _install_proactive_fetch_plugin(sandbox: Path) -> Path:
-    cache = sandbox / "home/.akashic-plugin/cache/gate/proactive_fetch/1.0.0"
+    cache = sandbox / "home/.roxy-plugin/cache/gate/proactive_fetch/1.0.0"
     data = sandbox / "workspace/plugin-data/proactive_fetch-gate"
-    manifest = sandbox / "home/.akashic-plugin/manifest.toml"
+    manifest = sandbox / "home/.roxy-plugin/manifest.toml"
     cache.mkdir(parents=True, exist_ok=True)
     data.mkdir(parents=True, exist_ok=True)
     _ = (cache / "plugin.py").write_text(
@@ -744,7 +757,7 @@ def _install_proactive_fetch_plugin(sandbox: Path) -> Path:
 
 
 def _install_migrated_plugins(sandbox: Path, plugin_root: Path) -> Path:
-    cache = sandbox / "home/.akashic-plugin/cache/gate"
+    cache = sandbox / "home/.roxy-plugin/cache/gate"
     entries: list[str] = []
     observe_source = Path()
     for source_name, plugin_name in (
@@ -766,7 +779,7 @@ def _install_migrated_plugins(sandbox: Path, plugin_root: Path) -> Path:
         entries.append(f'[plugins."{plugin_name}@gate"]\nenabled = true\n')
         if plugin_name == "observe":
             observe_source = target / "plugin.py"
-    manifest = sandbox / "home/.akashic-plugin/manifest.toml"
+    manifest = sandbox / "home/.roxy-plugin/manifest.toml"
     manifest.parent.mkdir(parents=True, exist_ok=True)
     driver = cache / "zz_gate_driver" / "1.0.0"
     driver.mkdir(parents=True)
@@ -852,7 +865,7 @@ def _install_all_plugins(
     sandbox: Path,
     plugin_root: Path,
 ) -> tuple[dict[str, Path], Path]:
-    cache = sandbox / "home/.akashic-plugin/cache/gate"
+    cache = sandbox / "home/.roxy-plugin/cache/gate"
     sources: dict[str, Path] = {}
     entries: list[str] = []
     for source_name, plugin_name in (
@@ -891,7 +904,7 @@ def _install_all_plugins(
         plugin_id = f"{plugin_name}@gate"
         sources[plugin_id] = target / "plugin.py"
         entries.append(f'[plugins."{plugin_id}"]\nenabled = true\n')
-    manifest = sandbox / "home/.akashic-plugin/manifest.toml"
+    manifest = sandbox / "home/.roxy-plugin/manifest.toml"
     manifest.parent.mkdir(parents=True, exist_ok=True)
     _ = manifest.write_text("\n".join(entries), encoding="utf-8")
     return sources, manifest
@@ -900,7 +913,7 @@ def _install_all_plugins(
 def _install_candidate_plugins(
     sandbox: Path,
 ) -> tuple[Path, Path, Path, Path, Path, Path]:
-    cache = sandbox / "home/.akashic-plugin/cache/gate"
+    cache = sandbox / "home/.roxy-plugin/cache/gate"
     valid = cache / "candidate_valid/1.0.0"
     invalid = cache / "candidate_invalid/1.0.0"
     failed = cache / "candidate_failed/1.0.0"
@@ -1406,7 +1419,7 @@ def _exercise_migrated_plugins(
     sandbox: Path,
 ) -> dict[str, object]:
     status_response = _control_roundtrip(
-        sandbox / "akashic.sock",
+        sandbox / "roxy.sock",
         "/memorystatus 被回复消息：这是一条用于验证主动反馈工作链路的提醒消息"
         "【你当前新消息】谢谢",
     )
@@ -1800,7 +1813,7 @@ def _exercise_topology_watch(
     sandbox: Path,
     state_path: Path,
 ) -> dict[str, object]:
-    manifest = sandbox / "home/.akashic-plugin/manifest.toml"
+    manifest = sandbox / "home/.roxy-plugin/manifest.toml"
     initial = _read_json_object(state_path)
     initial_generation = initial.get("active_generation")
 
@@ -1841,7 +1854,7 @@ def _exercise_topology_watch(
         publication_state="committed",
     )
 
-    added_root = sandbox / "home/.akashic-plugin/cache/gate/topology_added/1.0.0"
+    added_root = sandbox / "home/.roxy-plugin/cache/gate/topology_added/1.0.0"
     added_root.mkdir(parents=True)
     _ = (added_root / "plugin.py").write_text(
         "from agent.plugins import Plugin\n"
@@ -2393,7 +2406,7 @@ def _install_all_plugin_dependencies(
             f"{os.getuid()}:{os.getgid()}",
             "--entrypoint",
             "python",
-            "akashic-plugin-gate",
+            "roxy-plugin-gate",
             "-m",
             "pip",
             "install",
@@ -2431,12 +2444,12 @@ def _run_runtime_smoke(
         fast_tick=phase == "proactive-fetch",
     )
     shutil.rmtree(
-        sandbox / "home/.akashic-plugin/cache/gate",
+        sandbox / "home/.roxy-plugin/cache/gate",
         ignore_errors=True,
     )
     scope_state = _install_scope_plugin(sandbox) if phase == "scope" else None
     fitbit_data = (
-        _install_fitbit_plugin(sandbox, Path(env["AKASHIC_PLUGIN_SOURCE"]))
+        _install_fitbit_plugin(sandbox, Path(env["ROXY_PLUGIN_SOURCE"]))
         if phase == "fitbit"
         else None
     )
@@ -2447,7 +2460,7 @@ def _run_runtime_smoke(
     migrated_observe = (
         _install_migrated_plugins(
             sandbox,
-            Path(env["AKASHIC_PLUGIN_SOURCE"]),
+            Path(env["ROXY_PLUGIN_SOURCE"]),
         )
         if phase == "plugins"
         else None
@@ -2455,7 +2468,7 @@ def _run_runtime_smoke(
     all_plugins = (
         _install_all_plugins(
             sandbox,
-            Path(env["AKASHIC_PLUGIN_SOURCE"]),
+            Path(env["ROXY_PLUGIN_SOURCE"]),
         )
         if phase == "all-plugins"
         else None
@@ -2487,7 +2500,7 @@ def _run_runtime_smoke(
     )
     if dependency_setup is None or dependency_setup.returncode == 0:
         started = subprocess.run(
-            [*compose, "up", "-d", "--no-build", "akashic-plugin-gate"],
+            [*compose, "up", "-d", "--no-build", "roxy-plugin-gate"],
             cwd=repo,
             env=env,
             check=False,
@@ -2501,7 +2514,7 @@ def _run_runtime_smoke(
             returncode=dependency_setup.returncode,
             stdout=dependency_setup.stdout,
         )
-    socket = sandbox / "akashic.sock"
+    socket = sandbox / "roxy.sock"
     container_id = ""
     control_ready = False
     dashboard_ready = False
@@ -2509,7 +2522,7 @@ def _run_runtime_smoke(
     deadline = time.monotonic() + 30
     while started.returncode == 0 and time.monotonic() < deadline:
         container_id = subprocess.run(
-            [*compose, "ps", "-a", "-q", "akashic-plugin-gate"],
+            [*compose, "ps", "-a", "-q", "roxy-plugin-gate"],
             cwd=repo,
             env=env,
             check=False,
@@ -2578,7 +2591,7 @@ def _run_runtime_smoke(
         fitbit_processes = _container_process_count(container_id, "monitor/server.py")
         before = _snapshot_statuses(container_id)
         fitbit_source = (
-            sandbox / "home/.akashic-plugin/cache/gate/fitbit/1.1.0/plugin.py"
+            sandbox / "home/.roxy-plugin/cache/gate/fitbit/1.1.0/plugin.py"
         )
         _ = fitbit_source.write_text(
             fitbit_source.read_text(encoding="utf-8") + "\n",
@@ -2597,7 +2610,7 @@ def _run_runtime_smoke(
         )
         fitbit_probe = _fitbit_runtime_probe(container_id)
         before = _snapshot_statuses(container_id)
-        manifest = sandbox / "home/.akashic-plugin/manifest.toml"
+        manifest = sandbox / "home/.roxy-plugin/manifest.toml"
         manifest.parent.mkdir(parents=True, exist_ok=True)
         _ = manifest.write_text(
             '[plugins."fitbit@gate"]\nenabled = false\n\n'
@@ -2676,7 +2689,7 @@ def _run_runtime_smoke(
         else {}
     )
     logs = subprocess.run(
-        [*compose, "logs", "--no-color", "--tail", "200", "akashic-plugin-gate"],
+        [*compose, "logs", "--no-color", "--tail", "200", "roxy-plugin-gate"],
         cwd=repo,
         env=env,
         check=False,
@@ -2685,7 +2698,7 @@ def _run_runtime_smoke(
         text=True,
     ).stdout
     stopped = subprocess.run(
-        [*compose, "stop", "-t", "15", "akashic-plugin-gate"],
+        [*compose, "stop", "-t", "15", "roxy-plugin-gate"],
         cwd=repo,
         env=env,
         check=False,

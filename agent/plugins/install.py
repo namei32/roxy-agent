@@ -565,7 +565,7 @@ def _load_plugin_class(plugin_root: Path) -> type:
     plugin_path = plugin_root / "plugin.py"
     if not plugin_path.exists():
         raise ValueError("插件缺少 plugin.py")
-    module_name = f"akasic_plugin_install_{uuid.uuid4().hex}"
+    module_name = f"roxy_plugin_install_{uuid.uuid4().hex}"
     spec = importlib.util.spec_from_file_location(
         module_name,
         plugin_path,

@@ -28,7 +28,7 @@ def test_git_manifest_freezes_builder_packages_and_content() -> None:
         content_digest="sha256:content",
     )
 
-    assert manifest["volume_name"].startswith("akasic-bench-git-v1-")
+    assert manifest["volume_name"].startswith("roxy-bench-git-v1-")
     assert manifest["contents"] == {
         "mount_path": GIT_MOUNT_PATH,
         "git_path": "bin/git",
@@ -39,8 +39,8 @@ def test_git_manifest_freezes_builder_packages_and_content() -> None:
         "contains_secrets": False,
     }
     labels = git_volume_labels(manifest)
-    assert labels["akasic.benchmark.git.content_digest"] == "sha256:content"
-    assert labels["akasic.benchmark.git.git_version"] == "git version 2.30.2"
+    assert labels["roxy.benchmark.git.content_digest"] == "sha256:content"
+    assert labels["roxy.benchmark.git.git_version"] == "git version 2.30.2"
 
 
 def test_git_volume_cache_reuses_valid_local_volume(
@@ -51,11 +51,11 @@ def test_git_volume_cache_reuses_valid_local_volume(
         lambda _: subprocess.CompletedProcess(
             args=[],
             returncode=0,
-            stdout="akasic-bench-git-v1-valid\n",
+            stdout="roxy-bench-git-v1-valid\n",
             stderr="",
         ),
     )
-    expected = {"name": "akasic-bench-git-v1-valid"}
+    expected = {"name": "roxy-bench-git-v1-valid"}
     monkeypatch.setattr(
         "benchmark.harbor_v4flash.git_volume.inspect_git_volume",
         lambda _: expected,
@@ -72,7 +72,7 @@ def test_git_volume_cache_exposes_corrupt_local_volume(
         lambda _: subprocess.CompletedProcess(
             args=[],
             returncode=0,
-            stdout="akasic-bench-git-v1-corrupt\n",
+            stdout="roxy-bench-git-v1-corrupt\n",
             stderr="",
         ),
     )

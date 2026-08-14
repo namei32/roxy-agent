@@ -14,8 +14,8 @@
   border: 0;
   border-radius: 9999px;
   padding: 0;
-  color: var(--ak-color-on-action-primary);
-  background: var(--ak-color-action-primary);
+  color: var(--roxy-color-on-action-primary);
+  background: var(--roxy-color-action-primary);
   cursor: pointer;
   appearance: none;
   transition-property: scale, color, background-color, opacity;
@@ -36,12 +36,12 @@
 }
 
 .composer-action-button[data-mode="stop"] {
-  color: var(--ak-color-status-error);
-  background: var(--ak-color-bg-surface-high);
+  color: var(--roxy-color-status-error);
+  background: var(--roxy-color-bg-surface-high);
 }
 
 .composer-action-button:hover:not(:disabled) {
-  background: var(--ak-color-action-hover);
+  background: var(--roxy-color-action-hover);
 }
 
 .composer-action-button[data-mode="stop"]:hover:not(:disabled) {
@@ -54,13 +54,13 @@
 }
 
 .composer-action-button:focus-visible {
-  outline: 2px solid var(--ak-color-action-primary);
+  outline: 2px solid var(--roxy-color-action-primary);
   outline-offset: 2px;
 }
 
 .composer-action-button:disabled {
-  color: var(--ak-color-border-strong);
-  background: var(--ak-color-bg-surface-high);
+  color: var(--roxy-color-border-strong);
+  background: var(--roxy-color-bg-surface-high);
   cursor: default;
   opacity: 0.62;
 }

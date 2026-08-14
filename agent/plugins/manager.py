@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import secrets
+import shutil
 import sys
 import tomllib
 from dataclasses import dataclass, field, replace
@@ -19,6 +20,7 @@ from typing import Any, Literal, TypeVar, cast
 
 from pydantic import BaseModel, ValidationError
 
+from agent.identity import set_roxy_env_in
 from agent.plugins.manifest import (
     ensure_workspace_plugin_data_dir,
     load_package_manifest,
@@ -760,7 +762,7 @@ class PluginManager:
                 "name": name,
                 "plugin_root": str(source.plugin_root),
                 "module_path": str(module_path) if module_path is not None else "",
-                "import_path": f"akasic_plugin_{import_source}_{import_suffix}",
+                "import_path": f"roxy_plugin_{import_source}_{import_suffix}",
                 "marketplace": source.marketplace,
                 "source_type": source.source_type,
                 "package_id": package_id,
@@ -4180,14 +4182,16 @@ def _resolve_managed_services(
                 venv_python = _venv_python(runtime_root / ".venv")
                 if venv_python.exists():
                     command[0] = str(venv_python)
+        service_env = {
+            **spec.env,
+            "AKA_PLUGIN_DATA_DIR": str(data_dir),
+        }
+        set_roxy_env_in(service_env, "WORKSPACE", str(workspace))
+        _fall_back_to_current_python(command, service_env)
         services[spec.id] = {
             "command": command,
             "cwd": cwd,
-            "env": {
-                **spec.env,
-                "AKA_PLUGIN_DATA_DIR": str(data_dir),
-                "AKASHIC_WORKSPACE": str(workspace),
-            },
+            "env": service_env,
             "readiness_url": spec.readiness_url,
             "startup_timeout_seconds": spec.startup_timeout_seconds,
             "revision": source_revision,
@@ -4230,14 +4234,15 @@ def _resolve_mcp_servers(
         env = {
             **spec.env,
             "AKA_PLUGIN_DATA_DIR": str(data_dir),
-            "AKASHIC_WORKSPACE": str(workspace),
         }
+        set_roxy_env_in(env, "WORKSPACE", str(workspace))
         if _is_python_command(command[0]):
             runtime_root = _resolve_mcp_runtime_root(plugin_dir, cwd, command)
             if runtime_root is not None:
                 venv_python = _venv_python(runtime_root / ".venv")
                 if venv_python.exists():
                     command[0] = str(venv_python)
+        _fall_back_to_current_python(command, env)
         servers[spec.name] = {"command": command, "env": env, "cwd": cwd}
     return servers
 
@@ -4271,6 +4276,21 @@ def _require_plugin_path(plugin_dir: Path, path: Path, label: str) -> None:
 
 def _is_python_command(value: str) -> bool:
     return Path(value).name.lower() in {"python", "python3", "python.exe"}
+
+
+def _fall_back_to_current_python(
+    command: list[str],
+    environment: Mapping[str, str],
+) -> None:
+    """让未提供 ``python`` 命令的开发机仍能运行声明为 Python 的插件。"""
+
+    executable = command[0]
+    if not _is_python_command(executable):
+        return
+    search_path = environment.get("PATH", os.environ.get("PATH"))
+    if Path(executable).is_absolute() or shutil.which(executable, path=search_path) is not None:
+        return
+    command[0] = sys.executable
 
 
 def _resolve_mcp_runtime_root(
