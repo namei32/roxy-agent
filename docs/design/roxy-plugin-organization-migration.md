@@ -1,6 +1,6 @@
 # Roxy 插件 GitHub 组织全量迁移
 
-- 状态：accepted；Git/ref 与 canonical 引用已完成，Bangumi 规范化远端发布待授权
+- 状态：accepted；迁移候选 Gate/CI 已通过，待 Core PR 合入与 Bangumi 远端授权
 - 日期：2026-08-18
 - 决策：[0029 · roxy-plugins 是插件源码的 canonical GitHub 组织](../decisions/0029-roxy-plugins-is-canonical-plugin-organization.md)
 - 关联条款：GOV-005、PLG-009、WSP-004～WSP-005、TST-006～TST-007
@@ -204,8 +204,12 @@ namei32/roxy-observe ──mirror strict superset─┤
   恢复根的 `gates/core-5954102/plugin-api-v2/`；报告 SHA-256 为
   `587866b82869b391fa131a2a88918a7980f1f6e532e6a38c9a52fdd8d1eb8118`。
 - macOS arm64 复跑在 `archlinux:latest` 没有匹配 manifest 处停止，没有进入 runtime oracle；
-  这是单独保留的环境失败，不能冒充通过。最终 change-impact Gate 和 Core PR checks 由最终
-  clean commit 继续执行并记录在 PR。
+  这是单独保留的环境失败，不能冒充通过。
+- 最终 clean Core `c8996c42b8f99982669b5b7b691358c059b5340e` 的 change-impact Gate 为
+  24/24 passed、0 failed、0 skipped、0 residual resource；`sourceDigest` 为
+  `72dfa6ae0a442042f25aa288d514a4b84f1f166b188042d552f70695b84de96f`，`planDigest` 为
+  `4cd6c18ab5737d8b483a08c3c8e358b503fe96234cb24568f8c34c36b12aeaf4`。Core PR #7
+  在同一 head 上的七项 checks 全绿；后续仅文档验收勘误仍由 PR merge gate 复核。
 
 ### 8.4 受保护状态
 

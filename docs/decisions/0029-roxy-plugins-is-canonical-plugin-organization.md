@@ -59,11 +59,12 @@ GitHub 仓库源码、正式 workspace、全局插件安装根、插件数据和
 - [x] 每个目标仓库可以从公开 HTTPS 获取 Core 锁固定的完整 SHA。
 - [x] Core 的 canonical 引用不再指向 `akashic-plugins` 或个人 Observe 仓库；历史事实引用
   明确保留旧 URL。
-- [ ] Plugin API v2、Mobile 插件发布与 change-impact Gate 对新的不可变组合通过。
+- [x] Plugin API v2、Mobile 插件发布与 change-impact Gate 对新的不可变组合通过。
 
-前三项和 Plugin API v2、Mobile 子 Gate 已在
-[迁移验收记录](../design/roxy-plugin-organization-migration.md#8-验收记录)中固定；最后一项等待最终
-clean Core commit 的 change-impact Gate 与 PR checks，不能用中间提交的成功替代。
+验收证据已在
+[迁移验收记录](../design/roxy-plugin-organization-migration.md#8-验收记录)中固定。Core PR #7 的
+`c8996c42b8f99982669b5b7b691358c059b5340e` 首轮 checks 全绿；其后的验收状态勘误只改本文档，
+仍必须由 PR merge gate 对最终 head 复核，不能用旧 check 替代。
 
 ## 未决问题
 
