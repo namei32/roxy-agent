@@ -64,7 +64,7 @@
     {
       "id": "observe",
       "repository": "https://github.com/namei32/roxy-observe",
-      "commit": "d8f5c274134061c8a0f449a1ce7db61cdbef79f9"
+      "commit": "ecb6c8b6c24531ef729f9eb27871a10c507722ac"
     },
     {
       "id": "plugin_undo",
