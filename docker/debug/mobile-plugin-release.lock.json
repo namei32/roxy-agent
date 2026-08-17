@@ -3,8 +3,8 @@
   "plugins": [
     {
       "id": "observe",
-      "repository": "https://github.com/akashic-plugins/observe",
-      "commit": "b434fa74b370fafcd0c64129fe1f641f73f0dbcf",
+      "repository": "https://github.com/namei32/roxy-observe",
+      "commit": "d8f5c274134061c8a0f449a1ce7db61cdbef79f9",
       "plugin_class": "ObservePlugin",
       "module": "mobile_panel.js",
       "stylesheet": "mobile_panel.css",

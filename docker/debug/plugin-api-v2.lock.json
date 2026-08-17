@@ -63,8 +63,8 @@
     },
     {
       "id": "observe",
-      "repository": "https://github.com/akashic-plugins/observe",
-      "commit": "9556b317c04afc8874bf6f0116f76001e0394cbb"
+      "repository": "https://github.com/namei32/roxy-observe",
+      "commit": "d8f5c274134061c8a0f449a1ce7db61cdbef79f9"
     },
     {
       "id": "plugin_undo",
