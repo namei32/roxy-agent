@@ -102,7 +102,7 @@ CSS 变量名统一加 `--roxy-color-` 前缀；需要透明度时使用对应�
 ```bash
 npm run build:plugin-preset
 npm run build:dashboard
-python main.py plugin-install --source https://github.com/akashic-plugins/<plugin> --marketplace github
+python main.py plugin-install --source https://github.com/roxy-plugins/<plugin> --marketplace github
 ```
 
 安装完成后刷新 Dashboard；插件 CSS 会和面板 JS 一起按版本加载。插件自己的配置、数据库和日志仍然保存在独立 data 目录，不随前端资源替换。

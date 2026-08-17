@@ -23,7 +23,7 @@ COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}")
 REPOSITORY_PATTERN = re.compile(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 RUNTIME_PHASES = ("atomic-reload", "all-plugins", "fitbit")
 HOST_CHANNEL_CONTRACT_PLUGIN_IDS = ("feishu", "qqbot")
-# 发布锁固定的外部 contract 仓库尚未改名；这是远端兼容边界，不是 Core 的 canonical 模块名。
+# contract 仓库已迁入 Roxy 组织；历史 Python 模块名仍是外部兼容边界。
 LEGACY_EXTERNAL_CONTRACT_MODULE = "akashic_plugin_contracts"
 EXPECTED_PLUGIN_IDS = {
     "calendar-mcp",

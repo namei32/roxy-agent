@@ -453,6 +453,11 @@ Deliver
 
 ## 10. 当前实施边界
 
+> 2026-08-18 owner 说明：本节下方的 `akashic-plugins` URL、PR 与 SHA 是冻结的历史 Gate
+> 组合证据，不改写。新的插件 canonical source 已由
+> [0029](../decisions/0029-roxy-plugins-is-canonical-plugin-organization.md) 迁到
+> `roxy-plugins`；当前发布组合由 Core lock 重新固定并重新运行 Gate。
+
 **F：** 公开 Gate 已有 diff 选择、一次性 Docker sandbox 和报告入口。private companion `cac9582e41de45446374a85d06311f33dc4bad0e` 已为当前 catalog 的 20/20 provider 固定完整远端 branch ref，并把每个 `repository/requestedRef/resolvedCommit` 纳入计划摘要；它只接受 public plan 的 `planned`/`not_affected` 终态，并在 `unmappedChanges` 或 `touchedBaselineGaps` 非空时 fail-loud。只有 Feed/Observe 已有固定 SHA 安装和独立语义 scenario，它们仍是 G2 pilot，不等于统一 controller 或完整 required check。Mobile Lab 的隔离实现只存在于上文固定的 PR #129 revision，不是当前 main 事实。
 
 **F（本次跨仓库审计）：** Gate 开跑前解析并冻结的插件身份如下。`change_source_pr_head` 只说明变更从哪里进入 canonical branch，不能代替 `requested_ref` 当时解析出的 `resolved_sha`。
