@@ -12,7 +12,8 @@
 
 完成必须同时满足：
 
-1. 目标组织的 23 个仓库均能公开读取，默认分支与全部可迁移 refs 和源 mirror 一致。
+1. 目标组织的 23 个仓库均能公开读取；初始复制的默认分支与全部可迁移 refs 和源 mirror
+   一致，之后的默认分支变化只通过目标仓库可审阅 PR 发生。
 2. `roxy-agent` 中的 canonical 安装、CI 与发布锁全部改用 `roxy-plugins`。
 3. 锁中的每个 SHA 都能从目标仓库 fetch，Plugin API v2、Mobile 和 change-impact Gate 通过。
 4. 旧仓库、本地 mirror、正式 workspace、插件数据、插件安装根、凭据与网络配置没有减少或改写。
@@ -28,8 +29,9 @@ consumer_scope:
   - Core Plugin API v2 release lock
   - Mobile plugin release lock
   - cross-repository CI
+  - Observe metrics v2 plugin candidate
 runtime_patch: none
-runtime_patch_reason: "只改变外部 Git owner 与源码引用，不改变 runtime 行为。"
+runtime_patch_reason: "Core runtime 路径不变；Observe 行为由外部插件候选拥有并单独验证。"
 authoritative_state_owner: "roxy-plugins GitHub organization；Core lock files"
 client_only_alternative: "not_applicable"
 invariants:
@@ -100,10 +102,10 @@ Observe 的目标还必须包含候选提交
 
 | 对象 | 正常增加 | 允许原位或逻辑变化 | 物理减少条件 | owner 与恢复证据 |
 |---|---|---|---|---|
-| 目标 GitHub 仓库 | 创建 23 个空 public repo，再复制 refs | 设置 description、homepage、默认分支与源一致；旧组织从 canonical 逻辑退役但保持可读 | 本次不允许删除；以后必须由组织 owner 发起名称明确的删除操作 | `roxy-plugins` owner；GitHub API、逐 ref 对比、本地 mirror |
-| Git refs | 从 mirror 增加 `heads/tags/notes` | commit 对象不改写；默认分支只选择既有 head | 本次不允许 force-delete；失败仓库保持未被 Core 引用 | 源/目标 `ls-remote` 与 object ID 清单 |
+| 目标 GitHub 仓库 | 创建 23 个空 public repo，再复制 refs | 初始设置与源一致；品牌元数据和默认分支后续只经可审阅规范化变化；旧组织保持可读 | 本次不允许删除；以后必须由组织 owner 发起名称明确的删除操作 | `roxy-plugins` owner；GitHub API、逐 ref 对比、本地 mirror |
+| Git refs | 从 mirror 增加 `heads/tags/notes` | commit 对象不改写；初始默认分支选择源 head，后续规范化只经 PR 移动 | 本次不允许 force-delete；失败仓库保持未被 Core 引用 | 源/目标 `ls-remote` 与 object ID 清单 |
 | 旧 PR 与 `refs/pull/*` | 不增加到目标 | 继续由旧 GitHub 仓库展示；本地 mirror 保存 reserved refs | 本次不减少 | 旧 URL、本地 bare mirror 与 `git fsck` |
-| Core 发布锁 | Git 提交中把 repository URL 原位改为新组织 | 完整 SHA、插件 ID 与验证字段保持不变 | 只允许后续 Git revert | Core Git history、Gate source/plan digest |
+| Core 发布锁 | Git 提交中把 repository URL 原位改为新组织 | 插件 ID 与验证字段保持不变；除已单独验证的 Observe 候选外保留原 SHA | 只允许后续 Git revert | Core Git history、Gate source/plan digest |
 | workspace 与插件运行数据 | 不增加 | 不更新、不失效 | 本次禁止物理减少 | 正式路径不进入 write set；Gate 使用一次性 workspace |
 
 ## 5. 迁移链路

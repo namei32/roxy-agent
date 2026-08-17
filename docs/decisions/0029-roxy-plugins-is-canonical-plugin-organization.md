@@ -37,15 +37,17 @@ GitHub 仓库源码、正式 workspace、全局插件安装根、插件数据和
 
 ## 理由
 
-统一组织消除新 Roxy 代码继续扩散历史品牌地址的问题，同时保留原始 Git object ID，使既有
-发布锁与跨仓库证据可以只换 owner 地址而不换内容身份。把旧仓库保留为历史系统，避免用普通
-Git push 伪造 GitHub PR 元数据已经迁移，也给每个目标仓库提供独立回滚来源。
+统一组织消除新 Roxy 代码继续扩散历史品牌地址的问题，同时保留原始 Git object ID，使迁移
+本身可以只换 owner 地址而不换内容身份。Observe 指标候选是独立验证的插件版本推进，不把它
+伪装成 URL 迁移。把旧仓库保留为历史系统，避免用普通 Git push 伪造 GitHub PR 元数据已经
+迁移，也给每个目标仓库提供独立回滚来源。
 
 ## 影响
 
 - 正面影响：23 个插件与合同仓库拥有统一、可发现的 Roxy canonical source。
-- 兼容性：插件 ID、Python/Node 模块名、默认分支和 commit SHA 保持不变；历史 PR 链接继续
-  指向旧组织。
+- 兼容性：插件 ID、Python/Node 模块名和初始迁移的 Git object 保持不变；默认分支后续只通过
+  可审阅 PR 接受 Roxy 规范化提交。Core release lock 除已单独验证的 Observe 指标候选外保留
+  原有 SHA；历史 PR 链接继续指向旧组织。
 - 数据和迁移：目标组织只增加仓库、Git refs 和仓库元数据；旧组织与正式运行数据不减少。
 - 失败与回滚：任何仓库 ref 校验失败时 Core 不切换该引用。已经创建的目标仓库保留为可审阅
   证据，不自动删除；Core 可以通过 revert 恢复旧 URL。
