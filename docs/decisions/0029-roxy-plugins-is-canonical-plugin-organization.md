@@ -52,12 +52,16 @@ Git push 伪造 GitHub PR 元数据已经迁移，也给每个目标仓库提供
 
 ## 验收
 
-- [ ] `roxy-plugins` 下存在迁移清单中的全部 23 个仓库，visibility、默认分支与可迁移 Git
+- [x] `roxy-plugins` 下存在迁移清单中的全部 23 个仓库，visibility、默认分支与可迁移 Git
   refs 已逐项核验。
-- [ ] 每个目标仓库可以从公开 HTTPS 获取 Core 锁固定的完整 SHA。
-- [ ] Core 的 canonical 引用不再指向 `akashic-plugins` 或个人 Observe 仓库；历史事实引用
+- [x] 每个目标仓库可以从公开 HTTPS 获取 Core 锁固定的完整 SHA。
+- [x] Core 的 canonical 引用不再指向 `akashic-plugins` 或个人 Observe 仓库；历史事实引用
   明确保留旧 URL。
 - [ ] Plugin API v2、Mobile 插件发布与 change-impact Gate 对新的不可变组合通过。
+
+前三项和 Plugin API v2、Mobile 子 Gate 已在
+[迁移验收记录](../design/roxy-plugin-organization-migration.md#8-验收记录)中固定；最后一项等待最终
+clean Core commit 的 change-impact Gate 与 PR checks，不能用中间提交的成功替代。
 
 ## 未决问题
 

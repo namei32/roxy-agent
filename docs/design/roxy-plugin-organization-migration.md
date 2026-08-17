@@ -1,6 +1,6 @@
 # Roxy 插件 GitHub 组织全量迁移
 
-- 状态：accepted；执行中
+- 状态：accepted；Git/ref 与 canonical 引用已完成，Bangumi 规范化远端发布待授权
 - 日期：2026-08-18
 - 决策：[0029 · roxy-plugins 是插件源码的 canonical GitHub 组织](../decisions/0029-roxy-plugins-is-canonical-plugin-organization.md)
 - 关联条款：GOV-005、PLG-009、WSP-004～WSP-005、TST-006～TST-007
@@ -148,5 +148,66 @@ namei32/roxy-observe ──mirror strict superset─┤
 
 ## 8. 验收记录
 
-执行完成后在本节记录：组织 API 身份、23 个目标仓库的 ref parity、公开 SHA fetch、Actions
-状态、Core 提交、PR 与 Gate 报告。未通过项必须保留明确状态，不能用迁移计划代替结果。
+### 8.1 组织、仓库与恢复点
+
+- GitHub API 返回 `roxy-plugins`、free plan、23 个 public repo；`namei32` 是 active admin，
+  没有 private 或 archived repo。
+- 初始复制得到 98 个普通 head：旧组织 97 个 head，加 Observe strict-superset 源中的
+  `feat/roxy-metrics-v2`；源与目标都没有 tag、note、LFS object 或 submodule。默认分支保持
+  `feed-mcp=master`、其余仓库为 `main`。
+- Issues、Projects、Wiki、merge policy、自动删分支和 visibility 等可比较仓库设置与旧组织一致；
+  description、homepage 与 topic 中没有新增 `Akashic` 品牌引用。23 个仓库的 Actions 均已恢复
+  enabled。
+- 恢复根为 `/Users/namei/idea/roxy-plugins-migration-recovery-20260818/`。23 个旧组织 bare
+  mirror 与个人 Observe mirror 共 24 份，复核时仍全部通过 `git fsck --full --strict`。
+- 旧 `akashic-plugins` 仍有 23 个 public、非 archived 仓库；没有删除、转移或归档。旧组织的
+  65 个 PR 对象继续由旧 URL 保存。
+
+### 8.2 规范化与发布引用
+
+- `plugin-contracts` 和 21 个可直接执行远端操作的插件仓库已各通过 PR #1 合入 Roxy 品牌、
+  `ROXY_*` 优先配置和 Dashboard 接口规范化；GitHub 搜索结果为 22 个 merged PR、0 个 open
+  PR。21 个插件默认分支的 `plugin-api-v2` workflow 与合同仓库的 `contract` workflow 均为
+  `completed/success`。
+- Bangumi 的规范化候选已在本地 clean commit
+  `e40fe592d44477b0d8508132aac0ff2d50c4ce7d` 完成。该仓库自己的 `AGENTS.md` 要求维护者在
+  当前消息中分别授权 push、创建 PR 和 merge；没有这份当前授权前不执行远端写入。
+- Core 的 Plugin API v2 与 Mobile lock、CI checkout、README 和安装示例均改用
+  `https://github.com/roxy-plugins/*`。Plugin API v2 lock SHA-256 是
+  `e277f5167a935ce4174745fb4d9a6692351799a71665ca3bedc4a2732bf6c9f7`；Observe 固定
+  `ff1508771fa1a33708ffcfd5458e5c90e0ae7b72`。
+- 发布锁保留已经验证的行为组合，不因默认分支完成品牌规范化就自动升级全部插件版本。
+  Fitbit 默认分支当前使用比 Core 更新的候选字段；其仓库 Python suite 为 37 passed、1 个
+  既有兼容失败，不能通过删除端口隔离或只读工具声明来伪造全绿。Core 继续固定已验证的
+  Fitbit commit `9df248985c68049b938e349d0e135216b10ab25f`。
+- `akashic_plugin_contracts` 仍是外部 Python ABI；Feishu/QQBot CI 中的旧公开 Core commit 仍是
+  明确注释的 frozen host fixture。canonical Core 是 private，本次没有把它改为 public，也没有
+  创建跨仓库 token。
+
+### 8.3 验证证据
+
+- Core targeted tests：`tests/test_plugin_api_v2_gate.py`、`tests/test_roxy_identity.py` 与
+  `tests/semantic/test_change_gate.py` 共 31 passed；慢速 Dashboard 探针修正后对应 Gate 单测
+  6 passed。
+- 22 个插件入口的静态合同全部通过。各仓库 Python/Node targeted tests、Huayue 八个 Skill
+  加载和 `git diff --check` 已通过；`computer-use-linux` 在 WSL2 x86_64 上为 5 passed。
+- Mobile contract Gate 在 clean Core `cfaa34d6477161e17400e8a75d18990b640b3264` 上通过，
+  固定 5 个公开插件；报告保存在恢复根的 `gates/core-5954102/mobile/mobile.json`。
+- 第一次 WSL Plugin API v2 run 的 static、Host、atomic-reload 与 all-plugins 均通过，但 Fitbit
+  的 Dashboard 单次 1 秒 HTTP 探针在慢速 Docker 环境中重复超时。Core commit
+  `5954102dc37d1f12cdca34cde1229609079a3601` 只把单次探针放宽到 5 秒，总体 30 秒截止、
+  HTTP 成功条件和只读挂载不变；同环境单独 Fitbit 和完整发布组合随后都通过。
+- 完整 WSL 报告状态为 `passed`：21 个锁定插件均从目标公开 HTTPS 精确 fetch，static=0、
+  Feishu/QQBot Host=0，`atomic-reload=0`、`all-plugins=0`、`fitbit=0`。报告和各阶段日志保存于
+  恢复根的 `gates/core-5954102/plugin-api-v2/`；报告 SHA-256 为
+  `587866b82869b391fa131a2a88918a7980f1f6e532e6a38c9a52fdd8d1eb8118`。
+- macOS arm64 复跑在 `archlinux:latest` 没有匹配 manifest 处停止，没有进入 runtime oracle；
+  这是单独保留的环境失败，不能冒充通过。最终 change-impact Gate 和 Core PR checks 由最终
+  clean commit 继续执行并记录在 PR。
+
+### 8.4 受保护状态
+
+本次没有安装、promote 或切换正式插件，没有写入正式 workspace、`plugin-data`、会话、记忆、
+附件、全局 manifest/cache 或凭据。SSH 只使用临时 known-hosts 与反向 SOCKS，未修改正式 SSH
+或 Tailscale 配置；验证结束后关闭临时隧道。Core URL 可以通过 Git revert 恢复，Git 对象还可
+从旧仓库和命名 mirror 取回。
