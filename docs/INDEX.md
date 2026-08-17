@@ -107,6 +107,7 @@
 | 容器、云主机运行适配、Host Bridge、hua-home迁移 | `projectneed` RUN-013～RUN-015、WSP-005、SH-001～SH-003 → [0032](decisions/0032-host-bridge-preserves-host-equivalent-execution.md) → [容器与 Linux 主机运行适配设计](design/akashic-container-cloud-runtime-adaptation.md) → [Core 与 Host Bridge 安装设计](design/akashic-core-bridge-installer.md) → [非迁移实验合同](design/akashic-container-host-bridge-experiment-contract.md) → [Unified Shell Execution 设计](design/unified-shell-execution.md) → [持久化状态地图](design/persistence-state-map.md) | exact-commit 安装、执行后端、runtime identity、插件安装链、Supervisor 与隔离实验；正式迁移前先运行 plan-only 清单并取得独立批准 |
 | Provider、模型角色、运行时切换、usage、首次配置 | `projectneed` RUN-005～RUN-012、ONB-001、CTX-001 → [0027](decisions/0027-runtime-models-use-generation-leases.md) → [0028](decisions/0028-model-credentials-live-with-workspace-connections.md) → [运行时模型注册表与 Onboarding](design/runtime-model-registry-and-onboarding.md) → [持久化状态地图](design/persistence-state-map.md) | `agent/model_runtime/`、`bootstrap/providers.py`、`bootstrap/settings_api.py`、`bootstrap/app.py`、`main.py`、`agent/supervisor.py`、`frontend/chat/src`、Observe 隔离 Gate |
 | 插件安装、热重载、自验证、plugin-data、Skill、Drift skill、MCP | `projectneed` 第 6、9～13 节 → [0008](decisions/0008-plugin-runtime-publishes-only-committed-snapshots.md) → [0024](decisions/0024-plugin-self-validation-uses-stable-and-latest.md) → [0026](decisions/0026-plugin-rollout-is-owned-by-the-parent-turn.md) → [插件 install/uninstall/revert turn 边界发布合同](design/plugin-install-uninstall-turn-boundary-rollout.md) → [插件递归自验证运行时设计](design/recursive-plugin-self-validation.md) → [持久化状态地图](design/persistence-state-map.md)；Apple Notes 写入另读 [Apple「备忘录」导出插件](design/apple-notes-export-plugin.md)，面经自动归档另读 [Telegram 面经教练](design/telegram-interview-coach.md) 与 [0036](decisions/0036-scoped-interview-images-may-auto-export-to-notes.md)，远程 Mac 提交另读 [Mac Notes Bridge](design/mac-notes-bridge.md) 与 [0037](decisions/0037-mac-notes-bridge-writes-only-through-live-commit.md) | `agent/plugins/base.py`、`agent/plugins/install.py`、`agent/plugins/manager.py`、`agent/plugins/snapshot.py`、`agent/plugins/reload_journal.py`、`agent/plugins/turn_rollout.py`、`agent/plugins/skill_links.py`、`agent/control/runtime.py`、`agent/looping/core.py`、`agent/mcp/host.py`、`infra/notes_bridge/`、`plugins/apple_notes/`、`plugins/interview_coach/` |
+| 插件 GitHub 组织、canonical source 与发布锁迁移 | `projectneed` 第 4、6、10～13 节 → [0004](decisions/0004-cross-repository-evidence-is-an-immutable-combination.md) → [1002](decisions/1002-roxy-plugins-is-canonical-plugin-organization.md) → [Roxy 插件组织迁移](design/roxy-plugin-organization-migration.md) → [持久化状态地图](design/persistence-state-map.md) | `docker/debug/plugin-api-v2.lock.json`、`docker/debug/mobile-plugin-release.lock.json`、`.github/workflows/plugin-api-v2.yml`、目标仓库 refs 与 GitHub API |
 | 移动端查看 Markdown、定时任务、插件、Skill、MCP | `projectneed` 第 6、10～13 节 → [移动端运行时检查](design/mobile-runtime-inspection.md) → [持久化状态地图](design/persistence-state-map.md) | `infra/mobile_realtime/runtime_inspection.py`、`infra/mobile_realtime/protocol.py`、`infra/mobile_realtime/channel.py` |
 | Workspace、配置、凭据、Roxy 身份迁移、备份 | `projectneed` 第 6、11～13 节 → [持久化状态地图](design/persistence-state-map.md) → [1001](decisions/1001-roxy-runtime-identity-migration.md) → [Roxy 身份迁移设计](design/roxy-brand-migration.md) → [0021](decisions/0021-yoyo-workspace-ledger-defines-migration-origin.md) → [Yoyo 迁移维护手册](design/git-migration-authoring.md) | `main.py`、`agent/identity.py`、`bootstrap/init_workspace.py`、`agent/config.py`、`agent/migrations/`、`migrations/yoyo/`、`agent/model_runtime/auth/store.py`、`scripts/rolling_backup.py` |
 | 高风险 refactor、语义不变重构、CI oracle | `projectneed` 第 4～6、13、15 节 → [综合重构账本](refactor/clean-code-ledger.md) → [上下文事故设计](design/project-workbook-and-semantic-safety.md) → 相关决策 | 改动前后的完整 diff、semantic tests、write set、故障注入 |
@@ -220,7 +221,9 @@ docs/
 │   ├── 0034-turn-is-the-logical-work-unit.md
 │   ├── 0035-mobile-protocol-delivery-is-phased.md
 │   ├── 0036-scoped-interview-images-may-auto-export-to-notes.md
-│   └── 0037-mac-notes-bridge-writes-only-through-live-commit.md
+│   ├── 0037-mac-notes-bridge-writes-only-through-live-commit.md
+│   ├── 1001-roxy-runtime-identity-migration.md
+│   └── 1002-roxy-plugins-is-canonical-plugin-organization.md
 ├── design/
 │   ├── akasha-v2-runtime-migration.md
 │   ├── akashic-future-roadmap-issue-drafts.md
@@ -246,6 +249,8 @@ docs/
 │   ├── persistence-state-map.md
 │   ├── programmatic-session-memory-exclusion.md
 │   ├── recursive-plugin-self-validation.md
+│   ├── roxy-brand-migration.md
+│   ├── roxy-plugin-organization-migration.md
 │   └── wake-recent-delivery-context.md
 ├── spark/
 │   ├── 2026-07-16-change-impact-contract-gate.md

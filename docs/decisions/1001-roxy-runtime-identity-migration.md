@@ -54,5 +54,6 @@ Roxy 优先规则使新部署只有一个主合同；薄别名让已安装的插
 
 ## 未决问题
 
-Android 发布仓是否改名仍由其 owner 决定。插件组织迁移由 Roxy fork 的独立决策拥有；
-该决定不改变本记录对 workspace、插件根、凭据和外部数据的保护边界。
+Android 发布仓是否改名仍由其 owner 决定。插件组织 owner 已在
+[1002](1002-roxy-plugins-is-canonical-plugin-organization.md) 中确认 `roxy-plugins` 为新的
+canonical source；该决定不改变本记录对 workspace、插件根、凭据和外部数据的保护边界。

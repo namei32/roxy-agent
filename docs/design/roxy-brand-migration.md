@@ -7,7 +7,9 @@
 理由。
 
 本设计只处理本仓库拥有的运行时名称和状态边界；Android 发布仓、用户的 Apple Notes 文件夹
-和旧 workspace 都不因本变更被自动重命名。外部插件组织迁移由 Roxy fork 的独立决策拥有。
+和旧 workspace 都不因本变更被自动重命名。外部插件组织由后续
+[1002](../decisions/1002-roxy-plugins-is-canonical-plugin-organization.md) 与
+[Roxy 插件 GitHub 组织全量迁移](roxy-plugin-organization-migration.md) 独立拥有。
 
 ## 2. Canonical 名称与兼容边界
 
@@ -111,8 +113,8 @@ Roxy 名称为准。
   的旧运行时别名。
 
 现有 `akashic-plugins` GitHub 组织与 `akashic-mobile` 发布 URL 是第三方/历史外部身份。
-本设计不假定它们已改名或有重定向；插件组织后续迁移按 fork 专属决策保留旧仓库并建立新的
-canonical source，Android 发布 URL 仍保持本设计原有边界。
+本设计不假定它们已改名或有重定向；插件组织后续迁移按 1002 保留旧仓库并建立新的 canonical
+source，Android 发布 URL 仍保持本设计原有边界。
 
 ## 7. 验收
 

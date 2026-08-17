@@ -248,6 +248,8 @@ python docker/debug/plugin_hot_reload_probe.py \
 
 `plugin-api-v2.lock.json` 固定合同检查器与 21 个外部插件的完整 commit SHA。Gate 只从公开
 GitHub HTTPS 地址获取这些对象，不读取宿主插件 cache、正式 workspace 或正式配置。
+Roxy 第一方发布组合的 canonical source 统一位于 `https://github.com/roxy-plugins/`；旧组织
+只保留历史 PR 与恢复证据。
 
 锁定的 `plugin-contracts` 仓库仍导出历史的 `akashic_plugin_contracts` Python 模块；Gate 在
 这个外部边界保留该模块名，不把它当作 Roxy Core 的新 API。

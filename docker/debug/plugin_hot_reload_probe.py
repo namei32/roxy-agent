@@ -2870,7 +2870,7 @@ def _dashboard_ready(container_id: str) -> bool:
             (
                 "import urllib.request; "
                 "urllib.request.urlopen("
-                "'http://127.0.0.1:2236/api/dashboard/plugins', timeout=1).read()"
+                "'http://127.0.0.1:2236/api/dashboard/plugins', timeout=5).read()"
             ),
         ],
         check=False,

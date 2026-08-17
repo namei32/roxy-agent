@@ -8,9 +8,9 @@
 
 ## 先装常用插件
 
-如果你想让自己的 Akashic 具备和作者差不多的扩展能力，先看社区插件组织：
+如果你想让自己的 Roxy 具备和作者差不多的扩展能力，先看社区插件组织：
 
-- <https://github.com/orgs/akashic-plugins/repositories>
+- <https://github.com/orgs/roxy-plugins/repositories>
 
 很多能力现在都不是写死在主仓里，而是做成独立插件仓库，例如：
 
@@ -18,21 +18,22 @@
 - `feed-mcp`
 - `huayue-skills`
 
-如果 Akashic 已经在运行，你通常可以直接像聊天一样让它安装：
+新的 canonical 插件源码统一位于 `roxy-plugins`；旧 `akashic-plugins` 仓库继续保留历史
+PR 和恢复证据。你通常可以直接像聊天一样让 Roxy 安装：
 
 ```text
 帮我安装这个插件试试看：
-https://github.com/akashic-plugins/steam-mcp
+https://github.com/roxy-plugins/steam-mcp
 ```
 
 或者更自然一点：
 
 ```text
 steam mcp 我想用插件方式加载，你帮我把这个插件装一下看看能不能用：
-https://github.com/akashic-plugins/steam-mcp
+https://github.com/roxy-plugins/steam-mcp
 ```
 
-Akashic 理想上的动作应该是：
+Roxy 理想上的动作应该是：
 
 ```text
 ┌─ 安装插件
