@@ -34,6 +34,7 @@
 | [0026](0026-scoped-interview-images-may-auto-export-to-notes.md) | accepted | 面经图片只在持久窄域授权内自动导出到 Notes | CAP-002～CAP-003、PLG-001～PLG-010、SES-005～SES-006 |
 | [0027](0027-mac-notes-bridge-writes-only-through-live-commit.md) | accepted | Mac Notes Bridge 只在当前在线提交 | CAP-002～CAP-004、PLG-001～PLG-005、SEC-010 |
 | [0028](0028-roxy-runtime-identity-migration.md) | accepted | Roxy 是唯一的新增运行时身份，旧 Akashic 仅作兼容 | WSP-003～WSP-005、MIG-001～MIG-002、WEBUI-007、SEC-010 |
+| [0029](0029-roxy-plugins-is-canonical-plugin-organization.md) | accepted | roxy-plugins 是插件源码的 canonical GitHub 组织 | GOV-005、PLG-009、WSP-004～WSP-005、TST-006～TST-007 |
 
 ## 新增规则
 

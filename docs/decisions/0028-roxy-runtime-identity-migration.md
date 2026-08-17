@@ -54,4 +54,6 @@ Roxy 优先规则使新部署只有一个主合同；薄别名让已安装的插
 
 ## 未决问题
 
-无。本仓库之外的 `akashic-plugins` 组织和 Android 发布仓是否改名，由各自 owner 决定。
+Android 发布仓是否改名仍由其 owner 决定。插件组织 owner 已在
+[0029](0029-roxy-plugins-is-canonical-plugin-organization.md) 中确认 `roxy-plugins` 为新的
+canonical source；该决定不改变本记录对 workspace、插件根、凭据和外部数据的保护边界。

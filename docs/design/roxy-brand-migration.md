@@ -6,8 +6,10 @@
 代码改名 → GitHub 仓库改名”的顺序执行。名称变化不能成为重写、合并或清理既有个人数据的
 理由。
 
-本设计只处理本仓库拥有的运行时名称和状态边界；外部 GitHub 组织、Android 发布仓、用户的
-Apple Notes 文件夹和旧 workspace 都不因本变更被自动重命名。
+本设计只处理本仓库拥有的运行时名称和状态边界；Android 发布仓、用户的 Apple Notes 文件夹
+和旧 workspace 都不因本变更被自动重命名。外部插件组织由后续
+[0029](../decisions/0029-roxy-plugins-is-canonical-plugin-organization.md) 与
+[Roxy 插件 GitHub 组织全量迁移](roxy-plugin-organization-migration.md) 独立拥有。
 
 ## 2. Canonical 名称与兼容边界
 
@@ -106,8 +108,9 @@ Interview Coach 参数全部以 Roxy 名称为准。
 - GitHub 仓库改名在代码合入后执行。旧仓库 URL 的 GitHub 重定向是平台能力，不替代本仓库
   的旧运行时别名。
 
-现有 `akashic-plugins` GitHub 组织与 `akashic-mobile` 发布 URL 是第三方/历史外部身份，
-本次只在文档中说明其仍可使用；不会假定其已改名或有重定向。
+现有 `akashic-plugins` GitHub 组织与 `akashic-mobile` 发布 URL 是第三方/历史外部身份。
+本设计不假定它们已改名或有重定向；插件组织后续迁移按 0029 保留旧仓库并建立新的 canonical
+source，Android 发布 URL 仍保持本设计原有边界。
 
 ## 7. 验收
 
