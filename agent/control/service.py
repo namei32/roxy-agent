@@ -110,6 +110,7 @@ class ControlService:
                 "reasoningEvents": False,
                 "turnInterrupt": True,
                 "turnSteer": False,
+                "deploymentMaintenance": True,
             },
         }
 
@@ -119,7 +120,22 @@ class ControlService:
             "bootId": self._boot_id,
             "workspace": str(self.workspace),
             "protocolVersion": "1.0",
+            "deploymentMaintenance": self.runtime.deployment_status(),
         }
+
+    async def prepare_deployment(
+        self,
+        deployment_id: str,
+        lease_seconds: int,
+    ) -> dict[str, object]:
+        """冻结准入并等待当前 turn 排空。"""
+
+        return await self.runtime.prepare_deployment(deployment_id, lease_seconds)
+
+    async def cancel_deployment(self, deployment_id: str) -> dict[str, object]:
+        """由当前部署 owner 取消维护并恢复准入。"""
+
+        return await self.runtime.cancel_deployment(deployment_id)
 
     def notify_turn_delivered(self, turn_id: str) -> None:
         if self._restart_coordinator is not None:

@@ -103,7 +103,7 @@
 | 会话、消息、turn、同 Turn 输入、打断、附件、删除或恢复 | `projectneed` 第 6～7、11～13 节 → [持久化状态地图](design/persistence-state-map.md) → [Codex 式同 Turn 输入需求](design/codex-style-same-turn-input-requirements.md) → [Codex 式同 Turn 输入设计](design/codex-style-same-turn-input.md) → [0025](decisions/0025-codex-style-same-turn-input.md) | `agent/control/runtime.py`、`agent/core/passive_turn.py`、`bootstrap/passive_worker.py`、`session/`、`infra/channels/base.py`、`bootstrap/channels.py`、`bootstrap/chat_api.py` |
 | Markdown 记忆、Memory2、Akasha | `projectneed` 第 6、8、11～13 节 → [0006](decisions/0006-akasha-v2-is-the-canonical-explicit-memory-engine.md) → [Akasha V2 在线与重放](design/akasha-v2-runtime-migration.md) → [Codex 式同 Turn 输入需求](design/codex-style-same-turn-input-requirements.md) → [Codex 式同 Turn 输入设计](design/codex-style-same-turn-input.md) → [持久化状态地图](design/persistence-state-map.md) | `agent/memory.py`、`core/memory/markdown.py`、`memory2/store.py`、`plugins/default_memory/`、`plugins/akasha/` |
 | 主动流程、Wake、Drift、调度 | `projectneed` 第 6、9、12～13 节 → [持久化状态地图](design/persistence-state-map.md) → [Wake 最近主动消息上下文](design/wake-recent-delivery-context.md) | `bootstrap/proactive.py`、`proactive_v2/`、`plugins/default_proactive/`、`plugins/wake_proactive/`、`plugins/drift_flow/`、`agent/scheduler.py` |
-| 正式启动、Supervisor、自重启、停止信号 | `projectneed` RUN-001～RUN-004 → [Linux Supervisor 安全自重启提议](design/linux-supervisor-safe-self-restart.md) → [`docker/debug/README.md`](../docker/debug/README.md) | `main.py`、`agent/supervisor.py`、`agent/restart.py`、`agent/tools/agent_restart.py`、`scripts/stop-runtime.sh`、restart Gate 报告 |
+| 正式启动、Supervisor、自重启、停止信号、GitHub 到 WSL 部署 | `projectneed` RUN-001～RUN-004、RUN-016 → [Linux Supervisor 安全自重启提议](design/linux-supervisor-safe-self-restart.md) → [GitHub 到 WSL 的不可变拉取部署](design/wsl-pull-deployment.md) → [1003](decisions/1003-wsl-pulls-ci-promoted-immutable-releases.md) → [`docker/debug/README.md`](../docker/debug/README.md) | `main.py`、`agent/supervisor.py`、`agent/restart.py`、`agent/control/runtime.py`、`agent/deployment/`、`scripts/wsl_deploy.py`、`.github/workflows/deploy-wsl.yml`、systemd units、部署报告 |
 | 容器、云主机运行适配、Host Bridge、hua-home迁移 | `projectneed` RUN-013～RUN-015、WSP-005、SH-001～SH-003 → [0032](decisions/0032-host-bridge-preserves-host-equivalent-execution.md) → [容器与 Linux 主机运行适配设计](design/akashic-container-cloud-runtime-adaptation.md) → [Core 与 Host Bridge 安装设计](design/akashic-core-bridge-installer.md) → [非迁移实验合同](design/akashic-container-host-bridge-experiment-contract.md) → [Unified Shell Execution 设计](design/unified-shell-execution.md) → [持久化状态地图](design/persistence-state-map.md) | exact-commit 安装、执行后端、runtime identity、插件安装链、Supervisor 与隔离实验；正式迁移前先运行 plan-only 清单并取得独立批准 |
 | Provider、模型角色、运行时切换、usage、首次配置 | `projectneed` RUN-005～RUN-012、ONB-001、CTX-001 → [0027](decisions/0027-runtime-models-use-generation-leases.md) → [0028](decisions/0028-model-credentials-live-with-workspace-connections.md) → [运行时模型注册表与 Onboarding](design/runtime-model-registry-and-onboarding.md) → [持久化状态地图](design/persistence-state-map.md) | `agent/model_runtime/`、`bootstrap/providers.py`、`bootstrap/settings_api.py`、`bootstrap/app.py`、`main.py`、`agent/supervisor.py`、`frontend/chat/src`、Observe 隔离 Gate |
 | 插件安装、热重载、自验证、plugin-data、Skill、Drift skill、MCP | `projectneed` 第 6、9～13 节 → [0008](decisions/0008-plugin-runtime-publishes-only-committed-snapshots.md) → [0024](decisions/0024-plugin-self-validation-uses-stable-and-latest.md) → [0026](decisions/0026-plugin-rollout-is-owned-by-the-parent-turn.md) → [插件 install/uninstall/revert turn 边界发布合同](design/plugin-install-uninstall-turn-boundary-rollout.md) → [插件递归自验证运行时设计](design/recursive-plugin-self-validation.md) → [持久化状态地图](design/persistence-state-map.md)；Apple Notes 写入另读 [Apple「备忘录」导出插件](design/apple-notes-export-plugin.md)，面经自动归档另读 [Telegram 面经教练](design/telegram-interview-coach.md) 与 [0036](decisions/0036-scoped-interview-images-may-auto-export-to-notes.md)，远程 Mac 提交另读 [Mac Notes Bridge](design/mac-notes-bridge.md) 与 [0037](decisions/0037-mac-notes-bridge-writes-only-through-live-commit.md) | `agent/plugins/base.py`、`agent/plugins/install.py`、`agent/plugins/manager.py`、`agent/plugins/snapshot.py`、`agent/plugins/reload_journal.py`、`agent/plugins/turn_rollout.py`、`agent/plugins/skill_links.py`、`agent/control/runtime.py`、`agent/looping/core.py`、`agent/mcp/host.py`、`infra/notes_bridge/`、`plugins/apple_notes/`、`plugins/interview_coach/` |
@@ -223,7 +223,8 @@ docs/
 │   ├── 0036-scoped-interview-images-may-auto-export-to-notes.md
 │   ├── 0037-mac-notes-bridge-writes-only-through-live-commit.md
 │   ├── 1001-roxy-runtime-identity-migration.md
-│   └── 1002-roxy-plugins-is-canonical-plugin-organization.md
+│   ├── 1002-roxy-plugins-is-canonical-plugin-organization.md
+│   └── 1003-wsl-pulls-ci-promoted-immutable-releases.md
 ├── design/
 │   ├── akasha-v2-runtime-migration.md
 │   ├── akashic-future-roadmap-issue-drafts.md
@@ -246,6 +247,7 @@ docs/
 │   ├── unified-shell-execution.md
 │   ├── veda-persona.md
 │   ├── webui-interaction-optimization.md
+│   ├── wsl-pull-deployment.md
 │   ├── persistence-state-map.md
 │   ├── programmatic-session-memory-exclusion.md
 │   ├── recursive-plugin-self-validation.md

@@ -1,0 +1,17 @@
+[deployment]
+source_repository = "namei32/roxy-agent"
+repository = "/home/namei/roxy-agent"
+remote = "origin"
+deployment_ref = "refs/heads/deploy/stable"
+release_root = "/home/namei/.local/opt/roxy"
+current_link = "/home/namei/.local/opt/roxy/current"
+state_root = "/home/namei/.local/state/roxy-deploy"
+service = "roxy-agent.service"
+runtime_config = "/home/namei/.roxy/config.toml"
+workspace = "/home/namei/.roxy/workspace"
+plugin_home = "/home/namei/.roxy-plugin"
+dashboard_url = "http://127.0.0.1:2236"
+python = "/usr/bin/python3"
+mode = "shadow"
+maintenance_lease_seconds = 180
+health_timeout_seconds = 180

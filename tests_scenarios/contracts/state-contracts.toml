@@ -178,6 +178,21 @@ physical_reduction_owner = "control.replay_ring"
 recovery_evidence = ["replay_truncated", "replay_expired", "session_store_write_set"]
 failure_semantics = ["operation_rejected", "cleanup_degraded", "runtime_fatal"]
 
+[states.wsl_deployment_release]
+priority = "p0"
+requirements = ["RUN-003", "RUN-004", "RUN-016", "CAP-002", "CAP-003", "PLG-013", "ERR-001", "TST-001", "TST-002", "TST-003", "TST-005", "TST-006"]
+owner = "deployment.release_controller"
+normal_change = "append_state_machine"
+destructive_owner = "protocol_owner"
+writers = ["deployment"]
+consumers = ["deployment", "runtime", "control", "plugin"]
+protected_tables = ["release_directories", "current_pointer", "deployment_state", "run_reports"]
+oracles = ["wsl_deployment_contract"]
+retention = "release 与 run report 第一版只增加；current/state 只在完整健康提交后原子更新"
+physical_reduction_owner = "deployment.release_controller"
+recovery_evidence = ["release_identity", "current_pointer", "state_commit", "run_report", "deployment_write_set", "rollback", "plugin_lock_sha", "dashboard_observe_probes"]
+failure_semantics = ["operation_rejected", "unit_failed", "runtime_fatal"]
+
 [states.companion_execution_spill]
 priority = "p1"
 requirements = ["SEC-002", "FS-001", "ERR-001", "TST-001"]

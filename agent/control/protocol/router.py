@@ -279,6 +279,15 @@ class ConnectionRouter:
             )
         if method == "plugin/revert":
             return await self._service.revert_plugin(values["ownerTurnId"])
+        if method == "deployment/prepare":
+            return await self._service.prepare_deployment(
+                values["deploymentId"],
+                values["leaseSeconds"],
+            )
+        if method == "deployment/cancel":
+            return await self._service.cancel_deployment(values["deploymentId"])
+        if method == "deployment/status":
+            return self._service.runtime.deployment_status()
         raise AssertionError(f"unhandled protocol method: {method}")
 
     async def _post_response_notifications(

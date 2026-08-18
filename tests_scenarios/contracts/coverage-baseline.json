@@ -1,7 +1,7 @@
 {
   "acceptedGaps": [],
   "base": "683b4791b0c25e3e899d65fe7c028514240414b3",
-  "catalogDigest": "42200b34e6c8b21d1575594452a84de4a65a917dc276c94ec85f134821c37d52",
+  "catalogDigest": "63b52662f06580ad8c7aed265b00682ddbd85f24c40fda8ad0da4844aea0ac42",
   "purpose": "approved_contract_mapping",
   "coveredP0": {
     "companion_control": [
@@ -37,6 +37,9 @@
     "host_execution": [
       "host_bridge_boot_fencing_contract",
       "shell_privileged_cleanup_contract"
+    ],
+    "deployment": [
+      "wsl_deployment_contract"
     ],
     "mcp": [
       "mcp_call_finality",

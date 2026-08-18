@@ -26,6 +26,7 @@ HOST_CHANNEL_CONTRACT_PLUGIN_IDS = ("feishu", "qqbot")
 # contract 仓库已迁入 Roxy 组织；历史 Python 模块名仍是外部兼容边界。
 LEGACY_EXTERNAL_CONTRACT_MODULE = "akashic_plugin_contracts"
 EXPECTED_PLUGIN_IDS = {
+    "bangumi-mcp",
     "calendar-mcp",
     "citation",
     "computer-use-linux",

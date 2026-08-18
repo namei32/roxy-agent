@@ -588,12 +588,17 @@ Codex、OpenCode 等 provider 权威目录优先提供模型能力；其余已�
 Core；旧代恢复失败则停在 maintenance 并保留全部证据。软件回滚不得冒充 workspace、plugin-data、
 消息或外部效果已经回滚；正式数据发生新写入后禁止自动切回旧端。
 
+### RUN-016 WSL 原生部署只消费 CI 晋升的不可变 release
+
+正式 WSL 原生实例不得把普通 Git branch 的最新状态直接解释成可部署版本。Core 的全部必需 CI 与跨仓库插件 Gate 在同一个完整 source SHA 上成功后，发布 owner 才能生成只增加构建产物的单 parent deployment commit，并推进机器管理的 `deploy/stable` ref。WSL 只通过出站拉取解析该 ref 的完整 SHA，在独立 release 目录准备依赖和校验 artifact；不得接受 webhook 中的命令、远程 SSH 执行或 branch/tag 短名作为运行身份。
+
+自动晋升只覆盖显式低风险 allowlist；依赖、迁移、持久化 owner、认证、控制面、插件锁和未知生产路径变化必须保持 CI 可验证但停止在人工晋升前。切换前由 ConversationRuntime 原子冻结新 turn 并排空既有 turn；部署器失联时租约自动恢复准入。切换只原子替换代码指针并由 systemd 创建新 boot；readiness、Dashboard、锁定插件 SHA 和声明的只读探针全部通过后才提交部署状态，失败恢复旧代码指针。代码回滚不拥有 SessionDB、记忆、plugin-data、外部发送或数据库迁移的回滚权限，不得把旧代码重新启动表述为这些效果已经撤销。
+
 ### ONB-001 首次模型配置使用三个渐进入口
 
 首次启动只展示“登录 Codex”“登录或检测 OpenCode”“Base URL + API Key + Model Name”三个主要入口。已识别模型自动填充能力并隐藏高级覆盖；无法识别能力仍允许保存连接，但必须明确显示哪些能力 unknown。没有配置时 Supervisor 仍须在 `2236` 提供统一 Dashboard 壳层：访问根路径 `/` 时地址不跳转，壳层默认选中 Chat，发送区明确显示尚未连接模型并能原地进入模型设置。保存合法配置后同一入口恢复聊天，不要求用户改 URL、端口或重启浏览器。
 
 `2236` 是唯一 Web 监听和唯一用户可见入口。模型设置、Chat、知识与运行及 Dashboard 使用同源路径；不得再启动 `6321`、`6322`，也不得依据浏览器端口判断页面类型。Gateway 未启动、正在换代或异常退出时，Supervisor 拥有的 `2236` 壳层继续存活并显示真实状态；启动脚本不得因 Gateway 尚未 ready 而杀死仍在 onboarding 的 Supervisor。
-
 ### OUT-001 被动按 Turn 提交，主动按送达提交
 
 被动消息以完整 Turn 为权威提交单位。推理和持久化成功后，本 turn 的全部有序 user message 与唯一 terminal assistant 共同进入会话历史；随后 dispatch 失败不得回滚已经提交的 Turn。主动消息没有对应 user message，但每条 proactive、`message_push`、schedule fire 和 spawn completion assistant 都拥有独立 Turn；assistant 明确送达即关闭该 Turn，不等待用户回复。只有 dispatch 明确成功后才进入会话历史、presence、dedupe 和 success 状态；未发送内容不得让 Agent 误认为自己已经说过。用户随后回复时创建新的被动 Turn，引用关系只能通过显式 `reply_to_turn_id` 表达，不能把主动 Turn 重新打开。

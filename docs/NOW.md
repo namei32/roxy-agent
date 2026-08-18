@@ -19,6 +19,12 @@
 - 建立受保护路径 policy：`semantic_delta: none` 的普通实现改动不能同时修改 P0 oracle、mutant 或 coverage baseline 来获得全绿。
 - 建立轻量 `change-intent` 校验，检查实际 diff、允许路径、受保护状态和副作用是否超出声明。
 
+## P0 · WSL 不可变部署激活
+
+- 合并部署实现后，在同一 source SHA 上取得 `CI` 与 `plugin-api-v2` 全绿证据，并以人工确认首次推进 `deploy/stable`。
+- 先用 shadow 模式在 WSL 暂存并复验 release；再备份旧 user unit、记录 Core/插件/业务状态基线，完成一次性 `current`/state bootstrap。
+- 启用 apply timer 后，用一条 Dashboard allowlist 变更验证真实自动更新，并用故障候选验证旧 release 恢复与业务 write set 不变。
+
 ## P1 · Agent Harness 抽象收敛
 
 - 目标骨架只使用 `Message`、`Turn`、`Session`：Message 组成 Turn，Turn 归入 Session；`Loop` 表达“输入 Message → 内部 `react` → 输出 Message”。当前从 `AgentLoop._react → PassiveTurnPipeline` 继续向内审查；只有独占权威状态、不变量、控制流、生命周期或真实边界的层才保留。纯转发、重复结果包装、字段复制、内部重复校验和平行模型分批内联、合并或删除；命名使用普通英语和 Python 风格，不再引入 `Unit` 一类没有独立事实的概念。
