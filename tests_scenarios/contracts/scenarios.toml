@@ -32,6 +32,7 @@ companion_receipt_deletes_valid_result = "tests/semantic/test_companion_contract
 companion_shell_cleanup_rewrites_turn = "tests/semantic/test_companion_contract.py::test_shell_cleanup_rejects_turn_rewrite_mutant"
 companion_control_replay_drops_live_event = "tests/semantic/test_companion_contract.py::test_control_replay_rejects_live_drop_mutant"
 companion_dashboard_uses_html_sink = "tests/semantic/test_companion_contract.py::test_dashboard_rejects_html_sink_mutant"
+deployment_auto_high_risk = "tests/deployment/test_controller.py::test_deployment_commit_cannot_claim_high_risk_source_is_automatic"
 
 [scenarios.contract_catalog]
 requirements = ["GOV-001", "GOV-003", "TST-001", "TST-006"]
@@ -50,6 +51,38 @@ timeout_seconds = 120
 command = ["python", "-m", "pytest", "-q", "tests/semantic/test_gate_workspace_contract.py"]
 observes = ["workspace_path", "plugin_home_path", "fresh_config"]
 mutants = ["official_workspace_path"]
+
+[scenarios.wsl_deployment_contract]
+requirements = ["RUN-003", "RUN-004", "RUN-009", "CAP-002", "CAP-003", "PLG-013", "ERR-001", "TST-001", "TST-002", "TST-003", "TST-005", "TST-006"]
+groups = ["deployment"]
+environment = "public_clean_workspace"
+timeout_seconds = 120
+command = [
+  "python",
+  "-m",
+  "pytest",
+  "-q",
+  "tests/deployment",
+  "tests/control/test_conversation_runtime.py::test_deployment_maintenance_atomically_drains_and_resumes",
+  "tests/control/test_conversation_runtime.py::test_deployment_maintenance_lease_expiry_recovers_admission",
+  "tests/control/test_conversation_runtime.py::test_deployment_lease_expiry_does_not_cancel_active_turn",
+  "tests/control/test_protocol.py::test_router_owns_deployment_maintenance_lease",
+]
+observes = [
+  "deployment_admission",
+  "lease_expiry",
+  "promotion_risk_recomputation",
+  "artifact_static_digest",
+  "plugin_lock_sha",
+  "release_identity",
+  "current_pointer",
+  "state_commit",
+  "run_report",
+  "deployment_write_set",
+  "rollback",
+  "dashboard_observe_probes",
+]
+mutants = ["deployment_auto_high_risk"]
 
 [scenarios.shell_execution_contract]
 requirements = ["SH-001", "RUN-002", "RUN-003", "ERR-001", "TST-001", "TST-003"]

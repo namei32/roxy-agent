@@ -77,6 +77,49 @@ async def test_router_requires_full_handshake_and_routes_turn(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
+async def test_router_owns_deployment_maintenance_lease(tmp_path: Path) -> None:
+    sessions = SessionManager(tmp_path)
+    runtime = ConversationRuntime(sessions.control_store, _echo)
+    service = ControlService(runtime, sessions, tmp_path)
+    sent: list[dict[str, object]] = []
+
+    async def send(message: dict[str, object]) -> None:
+        sent.append(message)
+
+    router = ConnectionRouter(service, send)
+    await router.handle_line(
+        b'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1.0","clientInfo":{"name":"deployer","version":"1"}}}\n'
+    )
+    await router.handle_line(b'{"jsonrpc":"2.0","method":"initialized","params":{}}\n')
+    await router.handle_line(
+        b'{"jsonrpc":"2.0","id":2,"method":"deployment/prepare","params":{"deploymentId":"deploy-deadbeef","leaseSeconds":10}}\n'
+    )
+    prepared = next(item for item in sent if item.get("id") == 2)["result"]
+    assert isinstance(prepared, dict)
+    assert prepared["state"] == "drained"
+    assert prepared["acceptingTurns"] is False
+
+    await router.handle_line(
+        b'{"jsonrpc":"2.0","id":3,"method":"server/status","params":{}}\n'
+    )
+    status = next(item for item in sent if item.get("id") == 3)["result"]
+    assert isinstance(status, dict)
+    assert status["deploymentMaintenance"] == prepared
+
+    await router.handle_line(
+        b'{"jsonrpc":"2.0","id":4,"method":"deployment/cancel","params":{"deploymentId":"deploy-deadbeef"}}\n'
+    )
+    cancelled = next(item for item in sent if item.get("id") == 4)["result"]
+    assert isinstance(cancelled, dict)
+    assert cancelled["state"] == "idle"
+    assert cancelled["acceptingTurns"] is True
+
+    await router.close()
+    await runtime.shutdown()
+    sessions.close()
+
+
+@pytest.mark.asyncio
 async def test_repeated_turn_start_returns_busy_for_active_turn(
     tmp_path: Path,
 ) -> None:

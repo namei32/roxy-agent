@@ -1,0 +1,31 @@
+[Unit]
+Description=Roxy Agent immutable release
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/opt/roxy/current
+Environment=HOME=%h
+Environment=ROXY_PLUGIN_HOME=%h/.roxy-plugin
+Environment=PATH=%h/.local/opt/roxy/current/.venv/bin:%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PYTHONUNBUFFERED=1
+Environment=ROXY_DASHBOARD_HOST=0.0.0.0
+Environment=ROXY_DASHBOARD_PORT=2236
+Environment=ROXY_READINESS_TIMEOUT_S=300
+ExecStartPre=/usr/bin/test -r %h/.roxy/config.toml
+ExecStartPre=/usr/bin/test -d %h/.roxy/workspace
+ExecStart=%h/.local/opt/roxy/current/.venv/bin/python %h/.local/opt/roxy/current/main.py --config %h/.roxy/config.toml --workspace %h/.roxy/workspace
+ExecStop=/bin/kill -TERM $MAINPID
+Restart=on-failure
+RestartSec=30
+KillMode=control-group
+TimeoutStartSec=360
+TimeoutStopSec=90s
+UMask=0077
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

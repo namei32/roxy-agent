@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 1,
+  "plugins": [
+    {
+      "id": "bangumi@github",
+      "repository": "https://github.com/roxy-plugins/bangumi-mcp.git",
+      "commit": "cbf6c46a79f39e7743f17a4cedf3dfbff3e11d51",
+      "required": true,
+      "dashboard": {
+        "panels": [],
+        "httpProbes": []
+      }
+    },
+    {
+      "id": "calendar@github",
+      "repository": "https://github.com/roxy-plugins/calendar-mcp.git",
+      "commit": "701eb14c65d3b4de0bda8e8af4da01f15ac19a5c",
+      "required": true,
+      "dashboard": {
+        "panels": [],
+        "httpProbes": []
+      }
+    },
+    {
+      "id": "citation@github",
+      "repository": "https://github.com/roxy-plugins/citation.git",
+      "commit": "9fb4e4eb047d4d252a93835ba86fa3a70c170d5f",
+      "required": true,
+      "dashboard": {
+        "panels": [],
+        "httpProbes": []
+      }
+    },
+    {
+      "id": "daynight_gate@github",
+      "repository": "https://github.com/roxy-plugins/daynight_gate.git",
+      "commit": "9e102918e10194647dd2565b685dcefc2ee6319b",
+      "required": true,
+      "dashboard": {
+        "panels": [],
+        "httpProbes": []
+      }
+    },
+    {
+      "id": "emotion@github",
+      "repository": "https://github.com/roxy-plugins/emotion.git",
+      "commit": "ff47f6e9d83a090babb220a2fb82299d94322538",
+      "required": true,
+      "dashboard": {
+        "panels": [],
+        "httpProbes": []
+      }
+    },
+    {
+      "id": "feed@github",
+      "repository": "https://github.com/roxy-plugins/feed-mcp.git",
+      "commit": "9709969014a94dd9cb7773f088be2650879319e1",
+      "required": true,
+      "dashboard": {
+        "panels": [],
+        "httpProbes": []
+      }
+    },
+    {
+      "id": "observe@github",
+      "repository": "https://github.com/roxy-plugins/observe.git",
+      "commit": "ebcb50351504edba5947a64834a59375d23185fd",
+      "required": true,
+      "dashboard": {
+        "panels": [
+          {
+            "name": "dashboard_panel",
+            "css": true,
+            "contains": [
+              "\\u8FD0\\u884C\\u76D1\\u6D4B",
+              "\\u88AB\\u52A8 KV \\u547D\\u4E2D\\u7387"
+            ]
+          }
+        ],
+        "httpProbes": [
+          {
+            "path": "/api/dashboard/observe/overview?range=24h",
+            "requiredKeys": [
+              "turns",
+              "errors",
+              "passive_cache_hit_rate",
+              "proactive_cache_hit_rate",
+              "avg_iteration",
+              "max_iteration"
+            ]
+          },
+          {
+            "path": "/api/dashboard/observe/timeseries?range=24h",
+            "requiredKeys": [
+              "range",
+              "bucket",
+              "points"
+            ]
+          },
+          {
+            "path": "/api/dashboard/observe/errors?range=24h&page=1&page_size=30",
+            "requiredKeys": [
+              "items",
+              "total",
+              "page",
+              "page_size",
+              "groups"
+            ]
+          },
+          {
+            "path": "/api/dashboard/observe/global_errors/overview?range=24h",
+            "requiredKeys": [
+              "total",
+              "types",
+              "new_types",
+              "spiking_types"
+            ]
+          },
+          {
+            "path": "/api/dashboard/observe/global_errors?range=24h&facet=type&q=",
+            "requiredKeys": [
+              "total",
+              "sections"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "proactive_feedback@github",
+      "repository": "https://github.com/roxy-plugins/proactive_feedback.git",
+      "commit": "b8a0e0eca4d16614bb1bd663616ee1c9ba1297ed",
+      "required": true,
+      "dashboard": {
+        "panels": [],
+        "httpProbes": []
+      }
+    },
+    {
+      "id": "status_commands@github",
+      "repository": "https://github.com/roxy-plugins/status_commands.git",
+      "commit": "cf61f99284be2b09636b6633f7832fa61e20926b",
+      "required": true,
+      "dashboard": {
+        "panels": [],
+        "httpProbes": []
+      }
+    }
+  ]
+}

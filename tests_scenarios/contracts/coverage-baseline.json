@@ -1,7 +1,7 @@
 {
   "acceptedGaps": [],
   "base": "d627fa600781855770a5ede752f268982b68ebf9",
-  "catalogDigest": "ba7783cfbfe61814381f5df81bc3ceecddba8913cb5c5d41b21ed8dca2e5719d",
+  "catalogDigest": "6046b5fdebd2302fb6a27380817dcd273c92a7e5f2da712e4a7d875cef670dda",
   "purpose": "approved_contract_mapping",
   "coveredP0": {
     "companion_control": [
@@ -33,6 +33,9 @@
     ],
     "context_projection": [
       "context_history_nondestructive"
+    ],
+    "deployment": [
+      "wsl_deployment_contract"
     ],
     "mcp": [
       "mcp_call_finality",

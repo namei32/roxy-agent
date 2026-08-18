@@ -7,14 +7,19 @@
   },
   "plugins": [
     {
+      "id": "bangumi-mcp",
+      "repository": "https://github.com/roxy-plugins/bangumi-mcp",
+      "commit": "cbf6c46a79f39e7743f17a4cedf3dfbff3e11d51"
+    },
+    {
       "id": "calendar-mcp",
       "repository": "https://github.com/roxy-plugins/calendar-mcp",
-      "commit": "33097acac778ea75a2d26733acb79726c2fdb396"
+      "commit": "701eb14c65d3b4de0bda8e8af4da01f15ac19a5c"
     },
     {
       "id": "citation",
       "repository": "https://github.com/roxy-plugins/citation",
-      "commit": "bf56c30df144f36e640174c5c8fe0723fc20fa02"
+      "commit": "9fb4e4eb047d4d252a93835ba86fa3a70c170d5f"
     },
     {
       "id": "computer-use-linux",
@@ -29,17 +34,17 @@
     {
       "id": "daynight_gate",
       "repository": "https://github.com/roxy-plugins/daynight_gate",
-      "commit": "2b95c6aed10d7ebd671a50ad215a61934f10e363"
+      "commit": "9e102918e10194647dd2565b685dcefc2ee6319b"
     },
     {
       "id": "emotion",
       "repository": "https://github.com/roxy-plugins/emotion",
-      "commit": "4193c26e47725775ea636f5d76abd16b2e89c787"
+      "commit": "ff47f6e9d83a090babb220a2fb82299d94322538"
     },
     {
       "id": "feed-mcp",
       "repository": "https://github.com/roxy-plugins/feed-mcp",
-      "commit": "2c36b11b0736adcf5e023524c13cf2bb9318cb95"
+      "commit": "9709969014a94dd9cb7773f088be2650879319e1"
     },
     {
       "id": "feishu",
@@ -64,7 +69,7 @@
     {
       "id": "observe",
       "repository": "https://github.com/roxy-plugins/observe",
-      "commit": "ff1508771fa1a33708ffcfd5458e5c90e0ae7b72"
+      "commit": "ebcb50351504edba5947a64834a59375d23185fd"
     },
     {
       "id": "plugin_undo",
@@ -74,7 +79,7 @@
     {
       "id": "proactive_feedback",
       "repository": "https://github.com/roxy-plugins/proactive_feedback",
-      "commit": "563f3dff99d3386ec304ed0e71b69e664b85ba01"
+      "commit": "b8a0e0eca4d16614bb1bd663616ee1c9ba1297ed"
     },
     {
       "id": "qqbot",
@@ -99,7 +104,7 @@
     {
       "id": "status_commands",
       "repository": "https://github.com/roxy-plugins/status_commands",
-      "commit": "c6c85915487f1d94ea2e8e95ba60341b1a0d849d"
+      "commit": "cf61f99284be2b09636b6633f7832fa61e20926b"
     },
     {
       "id": "steam-mcp",

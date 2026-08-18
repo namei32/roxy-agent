@@ -476,6 +476,12 @@ Linux 上无子命令执行 `python main.py` 是正式服务入口，必须先�
 
 ConversationRuntime 的 session lane owner 在 active attempt 上拒绝所有普通输入，只接受精确 `turn/interrupt`。Reasoner 最终回复前仍在同一 owner 下封口；中断和完成都必须提交唯一 terminal 状态。下一条普通输入只能在 terminal 后创建新 attempt，并由 durable predecessor 恢复同一未完成 logical interaction；不得存在运行中 drain user input 的隐式或显式入口。
 
+### RUN-009 正式代码更新只消费 CI 晋升的不可变 release
+
+正式 WSL 实例不得把普通 Git branch 的最新状态直接解释成可部署版本。Core 的全部必需 CI 与跨仓库插件 Gate 在同一个完整 source SHA 上成功后，发布 owner 才能生成只增加构建产物的单 parent deployment commit，并推进机器管理的 `deploy/stable` ref。WSL 只通过出站拉取解析该 ref 的完整 SHA，在独立 release 目录准备依赖和校验 artifact；不得接受 webhook 中的命令、远程 SSH 执行或 branch/tag 短名作为运行身份。
+
+自动晋升只覆盖显式低风险 allowlist；依赖、迁移、持久化 owner、认证、控制面、插件锁和未知生产路径变化必须保持 CI 可验证但停止在人工晋升前。切换前由 ConversationRuntime 原子冻结新 turn 并排空既有 turn；部署器失联时租约自动恢复准入。切换只原子替换代码指针并由 systemd 创建新 boot；readiness、Dashboard、锁定插件 SHA 和声明的只读探针全部通过后才提交部署状态，失败恢复旧代码指针。代码回滚不拥有 SessionDB、记忆、plugin-data、外部发送或数据库迁移的回滚权限，不得把旧代码重新启动表述为这些效果已经撤销。
+
 ### OUT-001 被动按 Turn 提交，主动按送达提交
 
 被动消息以完整 Turn 为权威提交单位。推理和持久化成功后，本 turn 的全部有序 user message 与唯一 terminal assistant 共同进入会话历史；随后 dispatch 失败不得回滚已经提交的 Turn。主动消息没有对应的用户 Turn，只有 dispatch 明确成功后才进入会话历史、presence、dedupe 和 success 状态；未发送内容不得让 Agent 误认为自己已经说过。

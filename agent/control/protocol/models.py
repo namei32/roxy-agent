@@ -65,6 +65,23 @@ class PluginInstallParams(StrictModel):
     sparse: list[str] = Field(default_factory=list, max_length=128)
 
 
+class DeploymentPrepareParams(StrictModel):
+    deploymentId: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+    )
+    leaseSeconds: int = Field(default=120, ge=10, le=600)
+
+
+class DeploymentIdParams(StrictModel):
+    deploymentId: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+    )
+
+
 METHOD_PARAMS: dict[str, type[StrictModel]] = {
     "initialize": InitializeParams,
     "server/status": StrictModel,
@@ -83,4 +100,7 @@ METHOD_PARAMS: dict[str, type[StrictModel]] = {
     "plugin/promote": PluginDrainParams,
     "plugin/discard": PluginDrainParams,
     "plugin/uninstall/start": PluginDrainParams,
+    "deployment/prepare": DeploymentPrepareParams,
+    "deployment/cancel": DeploymentIdParams,
+    "deployment/status": StrictModel,
 }

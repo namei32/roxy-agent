@@ -1,0 +1,11 @@
+[Unit]
+Description=Stage and deploy the CI-promoted Roxy release
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/opt/roxy/current/.venv/bin/python %h/.local/opt/roxy/current/scripts/wsl_deploy.py --config %h/.config/roxy-deploy/config.toml
+TimeoutStartSec=20min
+NoNewPrivileges=true
+PrivateTmp=true

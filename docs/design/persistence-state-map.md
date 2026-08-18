@@ -111,6 +111,9 @@ workspace 仍不是完整运行环境的全部。显式主配置、全局凭据�
 | `~/.akashic-plugin/manifest.toml` | 安装时增加 plugin/package identity；运行时加载该插件后取得 Skill/MCP 声明 | enable/disable 更新 entry | 明确卸载时移除对应 entry；这只减少安装清单和能力，不删除 workspace 内 plugin-data |
 | `~/.akashic-plugin/cache/` | 插件安装在 staging 校验后发布插件代码、Skill 和 MCP runtime | 更新版本时原子替换并可回滚当前安装事务 | 明确卸载可以删除代码与能力 cache；它不是外部 canonical source，也不授权删除 plugin-data |
 | 外部插件 canonical source | 用户在独立源码仓库创建和提交 | 通过该仓库自己的 Git 工作流演进 | 只受该源码仓库的用户操作管理；Akashic workspace 备份、插件卸载和 cache 清理都不拥有它 |
+| WSL Core repository 的部署 Git 元数据 | 注册每个 release worktree | fetch 更新 `refs/remotes/origin/deploy/stable`；正式源码 checkout 和用户改动不被部署器切换或覆盖 | 第一版不自动 prune worktree 注册。Owner 是 Git/WSL deploy controller，恢复证据是完整 remote-tracking SHA 与 `git worktree list --porcelain` |
+| WSL `releases/<deployment-sha>/` 与独立 venv | CI 晋升的新 deployment SHA 增加不可变 source/static checkout 和解析依赖证据 | 已有 release 只复验；venv 只在 ready marker 前续建 | 第一版没有自动 GC；current、previous 或 run report 仍引用时不得删除。Owner 是 WSL deploy controller，恢复证据是 Git parent/source/tree、artifact digest、pip freeze 与 ready marker |
+| WSL deploy `current`、`state.json` 与 `runs/*.json` | bootstrap 创建 current/state；每个 operation 追加不可变 run report | maintenance 内原子切换 current；全部健康通过后原子替换 state | current 不以删除实现切换；state/report 第一版不得自动删除。Owner 是 WSL deploy controller，恢复证据是 link target、systemd boot、Control ready、Dashboard/plugin probes 与旧 release 恢复结果 |
 
 ### 3.5 Companion 安全边界涉及的临时与可衰减状态
 

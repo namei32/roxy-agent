@@ -17,6 +17,12 @@
 - 建立受保护路径 policy：`semantic_delta: none` 的普通实现改动不能同时修改 P0 oracle、mutant 或 coverage baseline 来获得全绿。
 - 建立轻量 `change-intent` 校验，检查实际 diff、允许路径、受保护状态和副作用是否超出声明。
 
+## P0 · WSL 不可变部署激活
+
+- 合并部署实现后，在同一 source SHA 上取得 `CI` 与 `plugin-api-v2` 全绿证据，并以人工确认首次推进 `deploy/stable`。
+- 先用 shadow 模式在 WSL 暂存并复验 release；再备份旧 user unit、记录 Core/插件/业务状态基线，完成一次性 `current`/state bootstrap。
+- 启用 apply timer 后，用一条 Dashboard allowlist 变更验证真实自动更新，并用故障候选验证旧 release 恢复与业务 write set 不变。
+
 ## P1 · 工作流扩展
 
 - 把 `projectneed.md` 中其他 P0 不变量逐步迁入可执行契约，优先处理 MEM-001、MEM-002、OUT-001、PLG-001、PLG-004、WSP-001 和 BAK-001。

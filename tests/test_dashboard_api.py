@@ -15,6 +15,7 @@ import pytest
 from fastapi.testclient import TestClient as _RawTestClient
 
 import bootstrap.dashboard_api as dashboard_api
+from agent.plugins.artifacts import ArtifactPointer, write_pointers
 from bootstrap.dashboard_api import (
     _dashboard_plugin_dirs,
     create_dashboard_app as _create_dashboard_app,
@@ -1155,6 +1156,72 @@ def test_dashboard_lists_installed_plugin_panels(tmp_path, monkeypatch) -> None:
             }
         ],
     }
+
+
+def test_dashboard_lists_stable_immutable_artifact_panel(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _seed_workspace(tmp_path)
+    home = tmp_path / "home"
+    plugin_base = home / ".roxy-plugin" / "cache" / "github" / "observe"
+    plugin_dir = plugin_base / ".artifacts" / "1.2.0-abcdef1234567890"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "dashboard.py").write_text(
+        "from fastapi import FastAPI\n"
+        "def register(app: FastAPI, plugin_dir, workspace):\n"
+        "    return None\n",
+        encoding="utf-8",
+    )
+    (plugin_dir / "dashboard_panel.js").write_text(
+        "export default {};\n",
+        encoding="utf-8",
+    )
+    (plugin_dir / "dashboard_panel.css").write_text(
+        ".observe {}\n",
+        encoding="utf-8",
+    )
+    (plugin_dir / "plugin.py").write_text(
+        "from agent.plugins import Plugin\n"
+        "class ObservePlugin(Plugin):\n"
+        "    name='observe'\n"
+        "    version='1.2.0'\n",
+        encoding="utf-8",
+    )
+    _ = write_pointers(
+        plugin_base,
+        stable=ArtifactPointer(".artifacts/1.2.0-abcdef1234567890"),
+        latest=ArtifactPointer(".artifacts/1.2.0-abcdef1234567890"),
+    )
+    manifest_path = home / ".roxy-plugin" / "manifest.toml"
+    manifest_path.write_text(
+        '[plugins."observe@github"]\nenabled = true\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+
+    with TestClient(create_dashboard_app(tmp_path)) as client:
+        plugins = client.get("/api/dashboard/plugins").json()
+        panel_js = client.get("/plugins/observe@github/dashboard_panel.js")
+        panel_css = client.get("/plugins/observe@github/dashboard_panel.css")
+
+    installed = next(item for item in plugins if item["id"] == "observe@github")
+    assert installed == {
+        "id": "observe@github",
+        "panels": [
+            {
+                "name": "dashboard_panel",
+                "js_version": str(
+                    (plugin_dir / "dashboard_panel.js").stat().st_mtime_ns
+                ),
+                "has_css": True,
+            }
+        ],
+    }
+    assert panel_js.status_code == 200
+    assert panel_js.text == "export default {};\n"
+    assert panel_css.status_code == 200
+    assert panel_css.text == ".observe {}\n"
 
 
 def test_standalone_dashboard_honors_builtin_plugin_manifest(
