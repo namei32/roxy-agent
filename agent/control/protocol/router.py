@@ -276,6 +276,15 @@ class ConnectionRouter:
             self._event_tasks.add(task)
             task.add_done_callback(self._event_tasks.discard)
             return operation.record()
+        if method == "deployment/prepare":
+            return await self._service.prepare_deployment(
+                values["deploymentId"],
+                values["leaseSeconds"],
+            )
+        if method == "deployment/cancel":
+            return await self._service.cancel_deployment(values["deploymentId"])
+        if method == "deployment/status":
+            return self._service.runtime.deployment_status()
         raise AssertionError(f"unhandled protocol method: {method}")
 
     async def _post_response_notifications(

@@ -103,7 +103,7 @@
 | 会话、消息、turn、同 Turn 输入、打断、附件、删除或恢复 | `projectneed` 第 6～7、11～13 节 → [持久化状态地图](design/persistence-state-map.md) → [Codex 式同 Turn 输入需求](design/codex-style-same-turn-input-requirements.md) → [Codex 式同 Turn 输入设计](design/codex-style-same-turn-input.md) → [0025](decisions/0025-codex-style-same-turn-input.md) | `agent/control/runtime.py`、`agent/core/passive_turn.py`、`bootstrap/passive_worker.py`、`session/`、`infra/channels/base.py`、`bootstrap/channels.py`、`bootstrap/chat_api.py` |
 | Markdown 记忆、Memory2、Akasha | `projectneed` 第 6、8、11～13 节 → [0006](decisions/0006-akasha-v2-is-the-canonical-explicit-memory-engine.md) → [Akasha V2 在线与重放](design/akasha-v2-runtime-migration.md) → [Codex 式同 Turn 输入需求](design/codex-style-same-turn-input-requirements.md) → [Codex 式同 Turn 输入设计](design/codex-style-same-turn-input.md) → [持久化状态地图](design/persistence-state-map.md) | `agent/memory.py`、`core/memory/markdown.py`、`memory2/store.py`、`plugins/default_memory/`、`plugins/akasha/` |
 | 主动流程、Wake、Drift、调度 | `projectneed` 第 6、9、12～13 节 → [持久化状态地图](design/persistence-state-map.md) → [Wake 最近主动消息上下文](design/wake-recent-delivery-context.md) | `bootstrap/proactive.py`、`proactive_v2/`、`plugins/default_proactive/`、`plugins/wake_proactive/`、`plugins/drift_flow/`、`agent/scheduler.py` |
-| 正式启动、Supervisor、自重启、停止信号 | `projectneed` RUN-001～RUN-004 → [Linux Supervisor 安全自重启提议](design/linux-supervisor-safe-self-restart.md) → [`docker/debug/README.md`](../docker/debug/README.md) | `main.py`、`agent/supervisor.py`、`agent/restart.py`、`agent/tools/agent_restart.py`、`scripts/stop-runtime.sh`、restart Gate 报告 |
+| 正式启动、Supervisor、自重启、停止信号、GitHub 到 WSL 部署 | `projectneed` RUN-001～RUN-004、RUN-009 → [Linux Supervisor 安全自重启提议](design/linux-supervisor-safe-self-restart.md) → [GitHub 到 WSL 的不可变拉取部署](design/wsl-pull-deployment.md) → [0030](decisions/0030-wsl-pulls-ci-promoted-immutable-releases.md) → [`docker/debug/README.md`](../docker/debug/README.md) | `main.py`、`agent/supervisor.py`、`agent/restart.py`、`agent/control/runtime.py`、`agent/deployment/`、`scripts/wsl_deploy.py`、`.github/workflows/deploy-wsl.yml`、systemd units、部署报告 |
 | 插件安装、热重载、自验证、plugin-data、Skill、Drift skill、MCP | `projectneed` 第 6、9～13 节 → [0008](decisions/0008-plugin-runtime-publishes-only-committed-snapshots.md) → [0024](decisions/0024-plugin-self-validation-uses-stable-and-latest.md) → [插件递归自验证运行时设计](design/recursive-plugin-self-validation.md) → [持久化状态地图](design/persistence-state-map.md)；Apple Notes 写入另读 [Apple「备忘录」导出插件](design/apple-notes-export-plugin.md)，面经自动归档另读 [Telegram 面经教练](design/telegram-interview-coach.md) 与 [0026](decisions/0026-scoped-interview-images-may-auto-export-to-notes.md)，远程 Mac 提交另读 [Mac Notes Bridge](design/mac-notes-bridge.md) 与 [0027](decisions/0027-mac-notes-bridge-writes-only-through-live-commit.md) | `agent/plugins/base.py`、`agent/plugins/install.py`、`agent/plugins/manager.py`、`agent/plugins/snapshot.py`、`agent/plugins/reload_journal.py`、`agent/plugins/skill_links.py`、`agent/control/runtime.py`、`agent/looping/core.py`、`agent/mcp/host.py`、`infra/notes_bridge/`、`plugins/apple_notes/`、`plugins/interview_coach/` |
 | 插件 GitHub 组织、canonical source 与发布锁迁移 | `projectneed` 第 4、6、10～13 节 → [0004](decisions/0004-cross-repository-evidence-is-an-immutable-combination.md) → [0029](decisions/0029-roxy-plugins-is-canonical-plugin-organization.md) → [Roxy 插件组织迁移](design/roxy-plugin-organization-migration.md) → [持久化状态地图](design/persistence-state-map.md) | `docker/debug/plugin-api-v2.lock.json`、`docker/debug/mobile-plugin-release.lock.json`、`.github/workflows/plugin-api-v2.yml`、目标仓库 refs 与 GitHub API |
 | 移动端查看 Markdown、定时任务、插件、Skill、MCP | `projectneed` 第 6、10～13 节 → [移动端运行时检查](design/mobile-runtime-inspection.md) → [持久化状态地图](design/persistence-state-map.md) | `infra/mobile_realtime/runtime_inspection.py`、`infra/mobile_realtime/protocol.py`、`infra/mobile_realtime/channel.py` |
@@ -212,7 +212,8 @@ docs/
 │   ├── 0026-scoped-interview-images-may-auto-export-to-notes.md
 │   ├── 0027-mac-notes-bridge-writes-only-through-live-commit.md
 │   ├── 0028-roxy-runtime-identity-migration.md
-│   └── 0029-roxy-plugins-is-canonical-plugin-organization.md
+│   ├── 0029-roxy-plugins-is-canonical-plugin-organization.md
+│   └── 0030-wsl-pulls-ci-promoted-immutable-releases.md
 ├── design/
 │   ├── akasha-v2-runtime-migration.md
 │   ├── apple-notes-export-plugin.md
@@ -229,6 +230,7 @@ docs/
 │   ├── telegram-interview-coach.md
 │   ├── unified-shell-execution.md
 │   ├── veda-persona.md
+│   ├── wsl-pull-deployment.md
 │   ├── persistence-state-map.md
 │   ├── programmatic-session-memory-exclusion.md
 │   ├── recursive-plugin-self-validation.md

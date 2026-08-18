@@ -1,0 +1,208 @@
+name: deploy-wsl
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+      - plugin-api-v2
+    types:
+      - completed
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Full main commit SHA to promote
+        required: true
+        type: string
+      confirm:
+        description: Type PROMOTE_HIGH_RISK to authorize a manual promotion
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: roxy-deploy-stable
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve immutable target and current deployment
+        id: target
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_SHA: ${{ github.event.workflow_run.head_sha }}
+          MANUAL_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -euo pipefail
+          target="$WORKFLOW_SHA"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            target="$MANUAL_SHA"
+          fi
+          if [[ ! "$target" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "target_sha must be a full lowercase commit SHA" >&2
+            exit 1
+          fi
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          set +e
+          git ls-remote --exit-code --heads origin refs/heads/deploy/stable >/dev/null
+          stable_status=$?
+          set -e
+          if [[ "$stable_status" == "0" ]]; then
+            git fetch --no-tags origin +refs/heads/deploy/stable:refs/remotes/origin/deploy/stable
+          elif [[ "$stable_status" != "2" ]]; then
+            echo "failed to resolve deploy/stable" >&2
+            exit "$stable_status"
+          fi
+          git cat-file -e "$target^{commit}"
+          git merge-base --is-ancestor "$target" origin/main
+          old_deployment=""
+          base_source=""
+          if git show-ref --verify --quiet refs/remotes/origin/deploy/stable; then
+            old_deployment="$(git rev-parse refs/remotes/origin/deploy/stable)"
+            base_source="$(git show refs/remotes/origin/deploy/stable:deploy/artifact.json | jq -er .sourceCommit)"
+            if ! git merge-base --is-ancestor "$base_source" "$target"; then
+              echo "target source is older than or divergent from deploy/stable" >&2
+              exit 1
+            fi
+          else
+            base_source="$(git rev-parse "$target^")"
+          fi
+          {
+            echo "sha=$target"
+            echo "base_source=$base_source"
+            echo "old_deployment=$old_deployment"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Require both source workflows on the exact SHA
+        id: checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$TARGET_SHA&per_page=100" > "$RUNNER_TEMP/runs.json"
+          ready=true
+          for workflow in CI plugin-api-v2; do
+            conclusion="$(jq -r --arg workflow "$workflow" '[.workflow_runs[] | select(.name == $workflow and .event == "push" and .head_branch == "main")] | sort_by(.created_at, .run_attempt) | last | .conclusion // "missing"' "$RUNNER_TEMP/runs.json")"
+            if [[ "$conclusion" != "success" ]]; then
+              echo "$workflow is not successful for $TARGET_SHA: $conclusion"
+              ready=false
+            fi
+          done
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+
+      - name: Check out exact source commit
+        if: steps.checks.outputs.ready == 'true'
+        env:
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        run: git checkout --detach "$TARGET_SHA"
+
+      - name: Classify cumulative deployment risk
+        if: steps.checks.outputs.ready == 'true'
+        id: policy
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          CONFIRM: ${{ inputs.confirm }}
+          BASE_SOURCE: ${{ steps.target.outputs.base_source }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+          force=()
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            if [[ "$CONFIRM" != "PROMOTE_HIGH_RISK" ]]; then
+              echo "manual promotion confirmation does not match" >&2
+              exit 1
+            fi
+            force=(--force-manual)
+          fi
+          python scripts/check_deployment_policy.py \
+            --base "$BASE_SOURCE" \
+            --head "$TARGET_SHA" \
+            "${force[@]}" \
+            --json-output "$RUNNER_TEMP/promotion.json" \
+            --github-output "$GITHUB_OUTPUT"
+          promote=false
+          if [[ "$EVENT_NAME" == "workflow_dispatch" || "$(grep '^eligible=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2)" == "true" ]]; then
+            promote=true
+          fi
+          current_source=""
+          if [[ -n "${{ steps.target.outputs.old_deployment }}" ]]; then
+            current_source="$BASE_SOURCE"
+          fi
+          if [[ "$current_source" == "$TARGET_SHA" ]]; then
+            promote=false
+          fi
+          echo "promote=$promote" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        if: steps.policy.outputs.promote == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Build committed frontend artifact
+        if: steps.policy.outputs.promote == 'true'
+        run: |
+          npm ci
+          npm run build
+
+      - name: Generate immutable deployment manifest
+        if: steps.policy.outputs.promote == 'true'
+        env:
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          python scripts/generate_deployment_artifact.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-commit "$TARGET_SHA" \
+            --source-tree "$(git show -s --format=%T "$TARGET_SHA")" \
+            --promotion-json "$RUNNER_TEMP/promotion.json"
+
+      - name: Commit only generated deployment members
+        if: steps.policy.outputs.promote == 'true'
+        env:
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git add -f static deploy/artifact.json
+          invalid="$(git diff --cached --name-only | grep -Ev '^(static/|deploy/artifact\.json$)' || true)"
+          if [[ -n "$invalid" ]]; then
+            echo "deployment commit contains unexpected paths:" >&2
+            echo "$invalid" >&2
+            exit 1
+          fi
+          source_date="$(git show -s --format=%cI "$TARGET_SHA")"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_AUTHOR_DATE="$source_date" GIT_COMMITTER_DATE="$source_date" \
+            git commit -m "build(deploy): ${TARGET_SHA}"
+
+      - name: Advance machine-managed deployment ref
+        if: steps.policy.outputs.promote == 'true'
+        env:
+          OLD_DEPLOYMENT: ${{ steps.target.outputs.old_deployment }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$OLD_DEPLOYMENT" ]]; then
+            git push \
+              --force-with-lease="refs/heads/deploy/stable:$OLD_DEPLOYMENT" \
+              origin HEAD:refs/heads/deploy/stable
+          else
+            git push origin HEAD:refs/heads/deploy/stable
+          fi

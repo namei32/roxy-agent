@@ -1,6 +1,53 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "methods": {
+    "deployment/cancel": {
+      "additionalProperties": false,
+      "properties": {
+        "deploymentId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Deploymentid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "deploymentId"
+      ],
+      "title": "DeploymentIdParams",
+      "type": "object"
+    },
+    "deployment/prepare": {
+      "additionalProperties": false,
+      "properties": {
+        "deploymentId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Deploymentid",
+          "type": "string"
+        },
+        "leaseSeconds": {
+          "default": 120,
+          "maximum": 600,
+          "minimum": 10,
+          "title": "Leaseseconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "deploymentId"
+      ],
+      "title": "DeploymentPrepareParams",
+      "type": "object"
+    },
+    "deployment/status": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "StrictModel",
+      "type": "object"
+    },
     "initialize": {
       "$defs": {
         "ClientCapabilities": {

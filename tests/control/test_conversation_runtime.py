@@ -8,7 +8,7 @@ from typing import Any, cast
 
 import pytest
 
-from agent.control.errors import ThreadBusyError
+from agent.control.errors import RuntimeClosedError, ThreadBusyError
 from agent.control.events import TurnEvent
 from agent.control.models import (
     TurnItem,
@@ -29,6 +29,113 @@ def _assert_single_terminal(runtime: ConversationRuntime, turn_id: str) -> None:
         event for event in runtime._history[turn_id] if event.method == "turn/completed"
     ]
     assert len(terminal) == 1
+
+
+@pytest.mark.asyncio
+async def test_deployment_maintenance_atomically_drains_and_resumes(
+    tmp_path: Path,
+) -> None:
+    store = SessionStore(tmp_path / "sessions.db")
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def execute(request: TurnRequest) -> str:
+        started.set()
+        await release.wait()
+        return request.input
+
+    runtime = ConversationRuntime(store, execute)
+    first = await runtime.start_turn(TurnRequest("programmatic:first", "held"))
+    await started.wait()
+    preparing = asyncio.create_task(
+        runtime.prepare_deployment("deploy-abc123", 5),
+    )
+    await asyncio.sleep(0)
+
+    with pytest.raises(RuntimeClosedError, match="shutting down"):
+        await runtime.start_turn(TurnRequest("programmatic:blocked", "new"))
+    assert store.list_turns("programmatic:blocked") == []
+
+    release.set()
+    assert (await first.result()).status is TurnStatus.COMPLETED
+    prepared = await preparing
+    assert prepared["state"] == "drained"
+    assert prepared["deploymentId"] == "deploy-abc123"
+    assert prepared["activeTurns"] == 0
+    assert prepared["acceptingTurns"] is False
+
+    cancelled = await runtime.cancel_deployment("deploy-abc123")
+    assert cancelled == {
+        "state": "idle",
+        "deploymentId": None,
+        "expiresAt": None,
+        "activeTurns": 0,
+        "acceptingTurns": True,
+    }
+    resumed = await runtime.start_turn(TurnRequest("programmatic:resumed", "ok"))
+    assert (await resumed.result()).status is TurnStatus.COMPLETED
+    await runtime.shutdown()
+    store.close()
+
+
+@pytest.mark.asyncio
+async def test_deployment_maintenance_lease_expiry_recovers_admission(
+    tmp_path: Path,
+) -> None:
+    store = SessionStore(tmp_path / "sessions.db")
+
+    async def execute(request: TurnRequest) -> str:
+        return request.input
+
+    runtime = ConversationRuntime(store, execute)
+    prepared = await runtime.prepare_deployment("deploy-expiring", 0.01)
+    assert prepared["acceptingTurns"] is False
+    await asyncio.sleep(0.03)
+    assert runtime.deployment_status() == {
+        "state": "idle",
+        "deploymentId": None,
+        "expiresAt": None,
+        "activeTurns": 0,
+        "acceptingTurns": True,
+    }
+    with pytest.raises(ValueError, match="owner 不匹配"):
+        await runtime.cancel_deployment("deploy-expiring")
+
+    resumed = await runtime.start_turn(TurnRequest("programmatic:expiry", "ok"))
+    assert (await resumed.result()).status is TurnStatus.COMPLETED
+    await runtime.shutdown()
+    store.close()
+
+
+@pytest.mark.asyncio
+async def test_deployment_lease_expiry_does_not_cancel_active_turn(
+    tmp_path: Path,
+) -> None:
+    store = SessionStore(tmp_path / "sessions.db")
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def execute(request: TurnRequest) -> str:
+        started.set()
+        await release.wait()
+        return request.input
+
+    runtime = ConversationRuntime(store, execute)
+    active = await runtime.start_turn(TurnRequest("programmatic:active", "ok"))
+    await started.wait()
+    preparing = asyncio.create_task(
+        runtime.prepare_deployment("deploy-expiring-active", 0.01)
+    )
+
+    with pytest.raises(RuntimeClosedError, match="租约已释放"):
+        await preparing
+    assert runtime.is_thread_active("programmatic:active")
+    assert runtime.deployment_status()["acceptingTurns"] is True
+
+    release.set()
+    assert (await active.result()).status is TurnStatus.COMPLETED
+    await runtime.shutdown()
+    store.close()
 
 
 @pytest.mark.asyncio

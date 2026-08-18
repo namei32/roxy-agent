@@ -6,7 +6,7 @@ import logging
 import time
 from collections import OrderedDict
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from agent.control.errors import (
@@ -200,6 +200,11 @@ class ConversationRuntime:
         self._closed = False
         self._accepting_turns = True
         self._restart_owner_turn_id: str | None = None
+        self._deployment_owner_id: str | None = None
+        self._deployment_expires_at: datetime | None = None
+        self._deployment_drain_task: asyncio.Task[None] | None = None
+        self._deployment_expiry_task: asyncio.Task[None] | None = None
+        self._deployment_release_event: asyncio.Event | None = None
         self._restart_coordinator = restart_coordinator
         recovered = self._store.recover_in_progress_turns()
         if recovered:
@@ -1233,6 +1238,164 @@ class ConversationRuntime:
         if tasks:
             await asyncio.gather(*tasks)
 
+    async def prepare_deployment(
+        self,
+        deployment_id: str,
+        lease_seconds: float,
+    ) -> dict[str, object]:
+        """冻结新 turn，排空既有 turn，并持有可超时恢复的部署租约。"""
+
+        # 1. admission lock 同时封住新 turn 与部署 owner，重复请求只复用同一租约。
+        async with self._control_admission_lock:
+            if self._closed:
+                raise RuntimeClosedError("conversation runtime 已关闭")
+            if self._deployment_owner_id is None:
+                if not self._accepting_turns or self._restart_owner_turn_id is not None:
+                    raise RuntimeClosedError("conversation runtime 已在排空")
+                self._accepting_turns = False
+                self._deployment_owner_id = deployment_id
+                self._deployment_expires_at = datetime.now(UTC) + timedelta(
+                    seconds=lease_seconds
+                )
+                release_event = asyncio.Event()
+                self._deployment_release_event = release_event
+                existing_tasks = tuple(self._tasks.values())
+                self._deployment_drain_task = asyncio.create_task(
+                    self._drain_deployment_turns(existing_tasks),
+                    name=f"deployment-drain:{deployment_id}",
+                )
+                self._deployment_expiry_task = asyncio.create_task(
+                    self._expire_deployment(deployment_id, lease_seconds),
+                    name=f"deployment-expiry:{deployment_id}",
+                )
+            elif self._deployment_owner_id != deployment_id:
+                raise RuntimeClosedError(
+                    "另一个 deployment maintenance 已持有 admission"
+                )
+
+            drain_task = self._deployment_drain_task
+            release_event = self._deployment_release_event
+            if drain_task is None or release_event is None:
+                raise RuntimeError("deployment maintenance 状态不完整")
+
+        # 2. 请求取消不取消既有 turn；租约释放或超时后，本请求明确失败。
+        released = asyncio.create_task(
+            release_event.wait(),
+            name=f"deployment-release-wait:{deployment_id}",
+        )
+        try:
+            done, _ = await asyncio.wait(
+                {drain_task, released},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if drain_task in done and not drain_task.cancelled():
+                await asyncio.shield(drain_task)
+            async with self._control_admission_lock:
+                if self._deployment_owner_id != deployment_id:
+                    raise RuntimeClosedError(
+                        f"deployment maintenance 租约已释放: {deployment_id}"
+                    )
+                return self.deployment_status()
+        except BaseException:
+            if drain_task.done() and not drain_task.cancelled():
+                error = drain_task.exception()
+                if error is not None:
+                    await self._release_deployment(deployment_id)
+            raise
+        finally:
+            released.cancel()
+            await asyncio.gather(released, return_exceptions=True)
+
+    async def cancel_deployment(self, deployment_id: str) -> dict[str, object]:
+        """只允许当前 deployment owner 恢复 turn admission。"""
+
+        async with self._control_admission_lock:
+            if self._deployment_owner_id != deployment_id:
+                raise ValueError(
+                    f"deployment maintenance owner 不匹配: {deployment_id}"
+                )
+        await self._release_deployment(deployment_id)
+        return self.deployment_status()
+
+    def deployment_status(self) -> dict[str, object]:
+        """返回当前部署维护租约的只读状态。"""
+
+        drain_task = self._deployment_drain_task
+        state = "idle"
+        if self._deployment_owner_id is not None:
+            state = (
+                "drained"
+                if drain_task is not None and drain_task.done()
+                else "draining"
+            )
+        return {
+            "state": state,
+            "deploymentId": self._deployment_owner_id,
+            "expiresAt": (
+                self._deployment_expires_at.isoformat()
+                if self._deployment_expires_at is not None
+                else None
+            ),
+            "activeTurns": len(self._tasks),
+            "acceptingTurns": self._accepting_turns,
+        }
+
+    @staticmethod
+    async def _drain_deployment_turns(
+        tasks: tuple[asyncio.Task[None], ...],
+    ) -> None:
+        """等待冻结瞬间已经准入的 turn，不把调用方取消传播给它们。"""
+
+        if tasks:
+            await asyncio.gather(
+                *(asyncio.shield(task) for task in tasks),
+                return_exceptions=True,
+            )
+
+    async def _expire_deployment(
+        self,
+        deployment_id: str,
+        lease_seconds: float,
+    ) -> None:
+        """部署器失联时自动恢复 admission。"""
+
+        await asyncio.sleep(lease_seconds)
+        released = await self._release_deployment(deployment_id)
+        if released:
+            logger.warning(
+                "deployment maintenance lease expired deployment_id=%s",
+                deployment_id,
+            )
+
+    async def _release_deployment(self, deployment_id: str) -> bool:
+        """在 owner 仍匹配时释放租约；返回是否真实释放。"""
+
+        drain_task: asyncio.Task[None] | None = None
+        expiry_task: asyncio.Task[None] | None = None
+        async with self._control_admission_lock:
+            if self._deployment_owner_id != deployment_id:
+                return False
+            release_event = self._deployment_release_event
+            drain_task = self._deployment_drain_task
+            expiry_task = self._deployment_expiry_task
+            self._deployment_owner_id = None
+            self._deployment_expires_at = None
+            self._deployment_drain_task = None
+            self._deployment_expiry_task = None
+            self._deployment_release_event = None
+            if release_event is not None:
+                release_event.set()
+            if not self._closed and self._restart_owner_turn_id is None:
+                self._accepting_turns = True
+        current = asyncio.current_task()
+        if drain_task is not None and drain_task is not current:
+            drain_task.cancel()
+            await asyncio.gather(drain_task, return_exceptions=True)
+        if expiry_task is not None and expiry_task is not current:
+            expiry_task.cancel()
+            await asyncio.gather(expiry_task, return_exceptions=True)
+        return True
+
     def quiesce_for_restart(self, caller_turn_id: str) -> None:
         """仅在 caller 是唯一 turn 时冻结新的 turn 准入。"""
 
@@ -1262,7 +1425,7 @@ class ConversationRuntime:
         if self._restart_owner_turn_id != caller_turn_id:
             raise RuntimeError(f"restart admission owner 不匹配: {caller_turn_id}")
         self._restart_owner_turn_id = None
-        if not self._closed:
+        if not self._closed and self._deployment_owner_id is None:
             self._accepting_turns = True
 
     async def wait_thread_available(self, thread_id: str) -> None:
@@ -1362,11 +1525,26 @@ class ConversationRuntime:
             return
         self._closed = True
         self._accepting_turns = False
+        release_event = self._deployment_release_event
+        if release_event is not None:
+            release_event.set()
+        drain_task = self._deployment_drain_task
+        expiry_task = self._deployment_expiry_task
+        self._deployment_owner_id = None
+        self._deployment_expires_at = None
+        self._deployment_drain_task = None
+        self._deployment_expiry_task = None
+        self._deployment_release_event = None
+        if expiry_task is not None:
+            expiry_task.cancel()
+            await asyncio.gather(expiry_task, return_exceptions=True)
         tasks = tuple(self._tasks.values())
         for task in tasks:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        if drain_task is not None:
+            await asyncio.gather(drain_task, return_exceptions=True)
         reaper = self._replay_reaper_task
         if reaper is not None:
             reaper.cancel()

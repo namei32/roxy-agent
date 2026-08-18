@@ -243,6 +243,32 @@ paths = [
 depends_on = ["events", "session_persistence"]
 scenarios = ["contract_catalog", "plugin_uninstall_drain_finality"]
 
+[groups.deployment]
+priority = "p0"
+requirements = ["RUN-003", "RUN-004", "RUN-009", "CAP-002", "CAP-003", "PLG-013", "ERR-001", "TST-001", "TST-002", "TST-003", "TST-005", "TST-006"]
+paths = [
+  ".github/workflows/ci.yml",
+  ".github/workflows/deploy-wsl.yml",
+  "agent/control/protocol/models.py",
+  "agent/control/protocol/router.py",
+  "agent/control/runtime.py",
+  "agent/control/service.py",
+  "agent/deployment/**",
+  "deploy/**",
+  "schema/app-server-v1.json",
+  "scripts/check_deployment_policy.py",
+  "scripts/generate_deployment_artifact.py",
+  "scripts/wsl_deploy.py",
+  "systemd/roxy-agent.service",
+  "systemd/roxy-deploy.service",
+  "systemd/roxy-deploy.timer",
+  "tests/control/test_conversation_runtime.py",
+  "tests/control/test_protocol.py",
+  "tests/deployment/**",
+]
+depends_on = ["control", "plugin", "runtime", "frontend"]
+scenarios = ["wsl_deployment_contract"]
+
 [groups.runtime]
 priority = "p1"
 requirements = ["OBJ-003", "RUN-001", "ERR-001"]
