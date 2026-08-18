@@ -44,7 +44,7 @@
     {
       "id": "emotion@github",
       "repository": "https://github.com/roxy-plugins/emotion.git",
-      "commit": "ff47f6e9d83a090babb220a2fb82299d94322538",
+      "commit": "1f826170db677fad93c5df1daacb2fe4ac727a4d",
       "required": true,
       "dashboard": {
         "panels": [],
@@ -129,7 +129,7 @@
     {
       "id": "proactive_feedback@github",
       "repository": "https://github.com/roxy-plugins/proactive_feedback.git",
-      "commit": "b8a0e0eca4d16614bb1bd663616ee1c9ba1297ed",
+      "commit": "9c61ba576cea3741b67d8bd2c1ffbb135db58092",
       "required": true,
       "dashboard": {
         "panels": [],
