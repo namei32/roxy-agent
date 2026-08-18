@@ -5,6 +5,7 @@ import fcntl
 import json
 import os
 import re
+import signal
 import subprocess
 import tempfile
 import time
@@ -210,6 +211,8 @@ class CandidateRelease:
 
 
 class CommandRunner:
+    _TERMINATE_GRACE_SECONDS = 2.0
+
     def run(
         self,
         args: list[str],
@@ -219,19 +222,7 @@ class CommandRunner:
     ) -> str:
         """执行固定 argv 并把非零终态升级成部署失败。"""
 
-        try:
-            result = subprocess.run(
-                args,
-                cwd=cwd,
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            command = " ".join(args[:3])
-            raise DeploymentError(f"部署命令失败: {command}") from exc
-        return result.stdout.strip()
+        return self._execute(args, cwd=cwd, timeout=timeout).decode("utf-8").strip()
 
     def read_bytes(
         self,
@@ -242,18 +233,65 @@ class CommandRunner:
     ) -> bytes:
         """读取命令的原始 stdout，供 Git blob 摘要验证使用。"""
 
+        return self._execute(args, cwd=cwd, timeout=timeout)
+
+    def _execute(
+        self,
+        args: list[str],
+        *,
+        cwd: Path | None,
+        timeout: int | None,
+    ) -> bytes:
+        """在独立进程组执行命令，超时后回收整组并等待 leader。"""
+
         try:
-            result = subprocess.run(
+            process = subprocess.Popen(
                 args,
                 cwd=cwd,
-                check=True,
-                capture_output=True,
-                timeout=timeout,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
             )
+            try:
+                stdout, stderr = process.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                self._terminate_process_group(process)
+                raise
+            if process.returncode != 0:
+                raise subprocess.CalledProcessError(
+                    process.returncode,
+                    args,
+                    output=stdout,
+                    stderr=stderr,
+                )
         except (OSError, subprocess.SubprocessError) as exc:
             command = " ".join(args[:3])
             raise DeploymentError(f"部署命令失败: {command}") from exc
-        return result.stdout
+        return stdout
+
+    def _terminate_process_group(self, process: subprocess.Popen[bytes]) -> None:
+        """先温和终止独立进程组，宽限期后强杀并回收 leader。"""
+
+        group_id = process.pid
+        try:
+            os.killpg(group_id, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+
+        deadline = time.monotonic() + self._TERMINATE_GRACE_SECONDS
+        while time.monotonic() < deadline:
+            try:
+                os.killpg(group_id, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            try:
+                os.killpg(group_id, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+        process.communicate()
 
 
 class WslDeploymentController:

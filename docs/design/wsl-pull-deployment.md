@@ -106,6 +106,8 @@ deployment commit 必须只有 source SHA 一个 parent，diff 只能包含：
 
 部署配置只包含固定路径、服务名、ref、超时和本机 URL，不包含 shell command、GitHub token 或远端可控 hook。systemd 部署 unit 只能运行仓库内固定 CLI；Git 凭据继续由既有 Git credential 边界拥有。
 
+部署器执行每条固定 argv 时创建独立 POSIX session。命令超时先向整个进程组发送 `SIGTERM`，宽限期后仍存在的成员统一 `SIGKILL`，并在返回失败前回收 leader；因此 Git transport、pip 或编译器的子进程不能在本轮部署报告失败后继续占用网络、锁或文件句柄。
+
 ## 6. 维护、切换和恢复
 
 `deployment/prepare` 与普通 `turn/start` 共用 `_control_admission_lock`。第一次请求把 `accepting_turns` 设为 false，冻结当时的 turn task 集合并启动不可续期 watchdog；随后在锁外等待这些 task 自然终结。其他 deployment ID 被拒绝，同 ID 可重试。调用方断线不会取消 turn，最多等到租约超时后自动恢复 admission。
@@ -134,6 +136,7 @@ Observe 的生产锁要求：catalog 中存在 `observe@github/dashboard_panel`�
 
 - 控制面维护租约、租约超时和排空竞态测试通过。
 - artifact、插件锁、风险 allowlist、原子 current 切换和失败回滚测试通过。
+- 命令超时回归测试证明忽略 `SIGTERM` 的 leader 被回收、后代不再执行，不遗留后台工作。
 - Control schema、pyright、相关 pytest、前端 build 和 change-impact Gate 通过。
 
 ### 阶段 B：GitHub shadow
