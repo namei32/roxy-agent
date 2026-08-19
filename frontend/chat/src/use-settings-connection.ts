@@ -28,6 +28,7 @@ export function useSettingsConnection({ template, existing, settings, onSaved, o
   const [models, setModels] = useState<ModelOption[]>([]);
   const [discovering, setDiscovering] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loggingIn, setLoggingIn] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [error, setError] = useState("");
   const [codexLogin, setCodexLogin] = useState<CodexLoginState | null>(null);
@@ -89,13 +90,17 @@ export function useSettingsConnection({ template, existing, settings, onSaved, o
     if (loginRef.current) return;
     const controller = new AbortController();
     loginRef.current = controller;
+    setLoggingIn(true);
     setError("");
     try {
       setCodexLogin(await startCodexLogin(controller.signal));
     } catch (reason) {
       if (!controller.signal.aborted) setError(settingsErrorMessage(reason));
     } finally {
-      if (loginRef.current === controller) loginRef.current = null;
+      if (loginRef.current === controller) {
+        loginRef.current = null;
+        if (!controller.signal.aborted) setLoggingIn(false);
+      }
     }
   }, []);
 
@@ -125,6 +130,7 @@ export function useSettingsConnection({ template, existing, settings, onSaved, o
     models,
     discovering,
     saving,
+    loggingIn,
     showKey,
     setShowKey,
     error,

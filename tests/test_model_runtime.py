@@ -7,6 +7,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import httpx
 import pytest
 
 from agent.config import _load_api_key, load_config
@@ -359,6 +360,20 @@ def test_codex_token_and_catalog_metadata_are_resolved_once() -> None:
     assert model.capabilities.input_modalities == ("text", "image")
     assert model.capabilities.supports_reasoning_summaries is True
     assert CodexModelCatalog(_Auth()).client_version == CODEX_CLIENT_VERSION  # type: ignore[arg-type]
+
+
+def test_codex_device_login_maps_network_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def post(*_args: object, **_kwargs: object) -> object:
+        raise httpx.ConnectTimeout("TLS handshake timed out")
+
+    monkeypatch.setattr("agent.model_runtime.auth.codex.httpx.post", post)
+
+    with pytest.raises(RetryableTransportError, match="Codex 登录服务连接失败"):
+        CodexAuthDriver(
+            CredentialStore(tmp_path / "auth.json"), "codex_default"
+        ).begin_device_login()
 
 
 def test_codex_refresh_uses_json_and_preserves_rotation_token(

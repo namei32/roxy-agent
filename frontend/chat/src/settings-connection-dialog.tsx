@@ -31,7 +31,7 @@ export function SettingsConnectionDialog({
   onLoginCompleted,
 }: SettingsConnectionDialogProps) {
   const connection = useSettingsConnection({ template, existing, settings, onSaved, onLoginCompleted });
-  const { draft, setDraft, models, discovering, saving, showKey, setShowKey, error, codexLogin } = connection;
+  const { draft, setDraft, models, discovering, saving, loggingIn, showKey, setShowKey, error, codexLogin } = connection;
   const nameInputRef = useRef<HTMLInputElement>(null);
   const title = connectionDialogTitle(draft.kind, draft.provider, draft.sourceName, Boolean(existing));
   const description = connectionDialogDescription(draft.kind, draft.provider);
@@ -86,7 +86,10 @@ export function SettingsConnectionDialog({
                     <strong>{settings.codexConfigured || codexLogin?.status === "completed" ? "Codex 已登录" : "使用 ChatGPT 订阅登录"}</strong>
                     <small>授权凭据保存在当前 workspace，不会显示在页面中。</small>
                   </span>
-                  <button type="button" onClick={() => void connection.beginLogin()}>{settings.codexConfigured ? "重新登录" : "开始登录"}</button>
+                  <button type="button" onClick={() => void connection.beginLogin()} disabled={loggingIn}>
+                    {loggingIn ? <LoaderCircle aria-hidden="true" className="is-spinning" size={16} /> : null}
+                    {loggingIn ? "正在连接" : settings.codexConfigured ? "重新登录" : "开始登录"}
+                  </button>
                 </div>
               ) : <>
                 {draft.kind === "api" ? <label>

@@ -8,7 +8,11 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
-from agent.model_runtime.errors import AuthenticationError, RateLimitError
+from agent.model_runtime.errors import (
+    AuthenticationError,
+    RateLimitError,
+    RetryableTransportError,
+)
 
 from .store import Credential, CredentialStore
 
@@ -36,11 +40,16 @@ class CodexAuthDriver:
         self.credential_id = credential_id
 
     def begin_device_login(self) -> DeviceCode:
-        response = httpx.post(
-            f"{CODEX_AUTH_BASE}/api/accounts/deviceauth/usercode",
-            json={"client_id": CODEX_CLIENT_ID},
-            timeout=15,
-        )
+        try:
+            response = httpx.post(
+                f"{CODEX_AUTH_BASE}/api/accounts/deviceauth/usercode",
+                json={"client_id": CODEX_CLIENT_ID},
+                timeout=15,
+            )
+        except httpx.HTTPError as exc:
+            raise RetryableTransportError(
+                "Codex 登录服务连接失败，请检查运行环境网络后重试"
+            ) from exc
         if response.status_code == 429:
             raise RateLimitError("Codex 登录请求被限流，请稍后重试")
         self._require_success(response, "获取 Codex device code 失败")
@@ -65,11 +74,19 @@ class CodexAuthDriver:
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
             time.sleep(code.interval)
-            response = httpx.post(
-                f"{CODEX_AUTH_BASE}/api/accounts/deviceauth/token",
-                json={"device_auth_id": code.device_auth_id, "user_code": code.user_code},
-                timeout=15,
-            )
+            try:
+                response = httpx.post(
+                    f"{CODEX_AUTH_BASE}/api/accounts/deviceauth/token",
+                    json={
+                        "device_auth_id": code.device_auth_id,
+                        "user_code": code.user_code,
+                    },
+                    timeout=15,
+                )
+            except httpx.HTTPError as exc:
+                raise RetryableTransportError(
+                    "Codex 登录轮询连接失败，请检查运行环境网络后重试"
+                ) from exc
             if response.status_code in {403, 404}:
                 continue
             self._require_success(response, "Codex 登录轮询失败")
@@ -94,15 +111,20 @@ class CodexAuthDriver:
             current = self.store.get(self.credential_id)
             if not current.refresh_token:
                 raise AuthenticationError("Codex refresh token 缺失，请重新登录")
-            response = httpx.post(
-                CODEX_TOKEN_URL,
-                json={
-                    "grant_type": "refresh_token",
-                    "refresh_token": current.refresh_token,
-                    "client_id": CODEX_CLIENT_ID,
-                },
-                timeout=20,
-            )
+            try:
+                response = httpx.post(
+                    CODEX_TOKEN_URL,
+                    json={
+                        "grant_type": "refresh_token",
+                        "refresh_token": current.refresh_token,
+                        "client_id": CODEX_CLIENT_ID,
+                    },
+                    timeout=20,
+                )
+            except httpx.HTTPError as exc:
+                raise RetryableTransportError(
+                    "Codex token 刷新连接失败，请检查运行环境网络后重试"
+                ) from exc
             if response.status_code == 429:
                 raise RateLimitError("Codex token 刷新被限流")
             self._require_success(response, "Codex token 刷新失败，请重新登录")
@@ -120,17 +142,22 @@ class CodexAuthDriver:
             code_verifier = str(data["code_verifier"])
         except (KeyError, TypeError) as exc:
             raise AuthenticationError("Codex 授权响应结构无效") from exc
-        response = httpx.post(
-            CODEX_TOKEN_URL,
-            data={
-                "grant_type": "authorization_code",
-                "code": authorization_code,
-                "redirect_uri": f"{CODEX_AUTH_BASE}/deviceauth/callback",
-                "client_id": CODEX_CLIENT_ID,
-                "code_verifier": code_verifier,
-            },
-            timeout=20,
-        )
+        try:
+            response = httpx.post(
+                CODEX_TOKEN_URL,
+                data={
+                    "grant_type": "authorization_code",
+                    "code": authorization_code,
+                    "redirect_uri": f"{CODEX_AUTH_BASE}/deviceauth/callback",
+                    "client_id": CODEX_CLIENT_ID,
+                    "code_verifier": code_verifier,
+                },
+                timeout=20,
+            )
+        except httpx.HTTPError as exc:
+            raise RetryableTransportError(
+                "Codex token 交换连接失败，请检查运行环境网络后重试"
+            ) from exc
         self._require_success(response, "Codex token 交换失败")
         return self._credential_from_token(response.json())
 

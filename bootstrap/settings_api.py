@@ -37,6 +37,7 @@ from agent.model_runtime.catalog.litellm_registry import (
 from agent.model_runtime.errors import (
     AuthenticationError,
     ModelRuntimeError,
+    RetryableTransportError,
     TransportError,
 )
 from agent.model_runtime.store import ModelRegistryStore
@@ -293,6 +294,8 @@ def create_settings_app(
                     models.append(item)
                 return {"models": models}
             return {"models": []}
+        except RetryableTransportError as exc:
+            raise _settings_model_error(exc) from exc
         except (
             AuthenticationError,
             TransportError,
@@ -515,7 +518,7 @@ def create_settings_app(
                 CodexAuthDriver(store, "codex_default"),
             )
         except ModelRuntimeError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise _settings_model_error(exc) from exc
         with login_lock:
             logins[login_id] = session
         threading.Thread(
@@ -555,6 +558,12 @@ def _error_response(status_code: int, code: str, message: str):
     return JSONResponse(
         status_code=status_code, content={"code": code, "message": message}
     )
+
+
+def _settings_model_error(exc: ModelRuntimeError) -> HTTPException:
+    """把模型边界错误映射为可重试或可修复的设置响应。"""
+    status_code = 503 if isinstance(exc, RetryableTransportError) else 400
+    return HTTPException(status_code=status_code, detail=str(exc))
 
 
 def _complete_codex_login(
