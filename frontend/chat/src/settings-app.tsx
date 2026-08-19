@@ -108,6 +108,7 @@ export function SettingsApp() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
   const [codexLogin, setCodexLogin] = useState<CodexLoginState | null>(null);
+  const [codexLoginLoading, setCodexLoginLoading] = useState(false);
 
   useEffect(() => {
     requestJson<SettingsState>("/api/settings/state")
@@ -251,6 +252,8 @@ export function SettingsApp() {
   }
 
   async function beginCodexLogin() {
+    if (codexLoginLoading) return;
+    setCodexLoginLoading(true);
     setError("");
     try {
       const login = await requestJson<CodexLoginState>("/api/settings/codex-login", {
@@ -260,6 +263,8 @@ export function SettingsApp() {
       setCodexLogin(login);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setCodexLoginLoading(false);
     }
   }
 
@@ -376,7 +381,14 @@ export function SettingsApp() {
                 ) : (
                   <>
                     <span>尚未找到 Codex 登录</span>
-                    <MaterialButton variant="outlined" onClick={beginCodexLogin}>登录 Codex</MaterialButton>
+                    <MaterialButton
+                      variant="outlined"
+                      onClick={beginCodexLogin}
+                      disabled={codexLoginLoading}
+                      loading={codexLoginLoading}
+                    >
+                      登录 Codex
+                    </MaterialButton>
                   </>
                 )}
               </div>

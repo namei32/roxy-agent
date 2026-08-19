@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from agent.model_runtime.auth.store import CredentialStore
+from agent.model_runtime.errors import RetryableTransportError
 from bootstrap.settings_api import _new_config, _validate_live_candidate, create_settings_app
 from bootstrap.setup_wizard import WizardAnswers
 
@@ -264,6 +265,29 @@ def test_codex_models_expose_reasoning_effort_capabilities(
     model = response.json()["models"][0]
     assert model["supportedReasoningEfforts"] == ["minimal", "low", "medium", "high"]
     assert model["defaultReasoningEffort"] == "medium"
+
+
+def test_codex_login_returns_retryable_network_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail(*_args: object, **_kwargs: object) -> None:
+        raise RetryableTransportError("Codex 登录服务连接失败，请检查运行环境网络后重试")
+
+    monkeypatch.setattr("bootstrap.settings_api.CodexLoginSession", fail)
+    app = create_settings_app(
+        tmp_path / "config.toml",
+        tmp_path / "workspace",
+        credential_store=CredentialStore(tmp_path / "auth" / "auth.json"),
+    )
+
+    response = TestClient(app, raise_server_exceptions=False).post(
+        "/api/settings/codex-login",
+        headers={"Origin": "http://testserver", "X-Akasic-CSRF": "1"},
+        json={},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Codex 登录服务连接失败，请检查运行环境网络后重试"
 
 
 def test_opencode_go_models_expose_reasoning_efforts(
