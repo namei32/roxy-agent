@@ -10,7 +10,11 @@ from agent.model_runtime.auth.codex import (
     CODEX_CLIENT_VERSION,
     CodexAuthDriver,
 )
-from agent.model_runtime.errors import AuthenticationError, TransportError
+from agent.model_runtime.errors import (
+    AuthenticationError,
+    RetryableTransportError,
+    TransportError,
+)
 from agent.model_runtime.context_policy import recommended_context_settings
 from agent.model_runtime.types import ModelCapabilities
 
@@ -38,20 +42,25 @@ class CodexModelCatalog:
 
     async def list_models(self) -> list[CodexModel]:
         headers = self.auth.headers()
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.get(
-                f"{self.base_url}/models",
-                params={"client_version": self.client_version},
-                headers=headers,
-            )
-        if response.status_code == 401:
-            headers = self.auth.headers(force_refresh=True)
+        try:
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.get(
                     f"{self.base_url}/models",
                     params={"client_version": self.client_version},
                     headers=headers,
                 )
+            if response.status_code == 401:
+                headers = self.auth.headers(force_refresh=True)
+                async with httpx.AsyncClient(timeout=30) as client:
+                    response = await client.get(
+                        f"{self.base_url}/models",
+                        params={"client_version": self.client_version},
+                        headers=headers,
+                    )
+        except httpx.HTTPError as exc:
+            raise RetryableTransportError(
+                "Codex 模型目录连接失败，请检查运行环境网络后重试"
+            ) from exc
         if response.status_code in {401, 403}:
             raise AuthenticationError("Codex 模型目录认证失败，请重新登录")
         if response.status_code >= 400:
