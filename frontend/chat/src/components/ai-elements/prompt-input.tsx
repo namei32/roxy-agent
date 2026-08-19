@@ -40,6 +40,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { shouldSubmitPromptInputKey } from "@/prompt-input-state";
 import type { ChatStatus, FileUIPart, SourceDocumentUIPart } from "ai";
 import {
   CornerDownLeftIcon,
@@ -975,10 +976,13 @@ export const PromptInputTextarea = ({
       }
 
       if (e.key === "Enter") {
-        if (isComposing || e.nativeEvent.isComposing) {
-          return;
-        }
-        if (e.shiftKey) {
+        if (!shouldSubmitPromptInputKey({
+          key: e.key,
+          shiftKey: e.shiftKey,
+          isComposing,
+          nativeIsComposing: e.nativeEvent.isComposing,
+          nativeKeyCode: e.nativeEvent.keyCode,
+        })) {
           return;
         }
         e.preventDefault();
