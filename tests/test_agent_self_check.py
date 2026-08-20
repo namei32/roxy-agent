@@ -88,10 +88,9 @@ def test_format_request_time_anchor_contains_iso_and_label():
 
 def test_build_current_message_time_envelope_contains_today_and_tomorrow():
     message_timestamp = datetime.fromisoformat("2026-04-08T17:57:00+08:00")
-    local_timestamp = message_timestamp.astimezone()
 
     text = build_current_message_time_envelope(message_timestamp=message_timestamp)
 
-    assert f"当前消息时间: {local_timestamp:%Y-%m-%d %H:%M}" in text
-    assert f"今天={local_timestamp:%Y-%m-%d}" in text
-    assert f"明天={local_timestamp + timedelta(days=1):%Y-%m-%d}" in text
+    assert f"当前消息时间: {message_timestamp:%Y-%m-%d %H:%M}" in text
+    assert f"今天={message_timestamp:%Y-%m-%d}" in text
+    assert f"明天={message_timestamp + timedelta(days=1):%Y-%m-%d}" in text

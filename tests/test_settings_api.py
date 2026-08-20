@@ -486,10 +486,12 @@ def test_opencode_connection_without_model_syncs_catalog(
                 SimpleNamespace(
                     slug="deepseek-v4-flash",
                     supported_reasoning_efforts=("low", "high"),
+                    input_modalities=("text",),
                 ),
                 SimpleNamespace(
                     slug="kimi-k2.5",
                     supported_reasoning_efforts=("medium", "high"),
+                    input_modalities=("text",),
                 ),
             ]
 
