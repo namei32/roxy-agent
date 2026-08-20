@@ -76,6 +76,7 @@ class CommonMetaToolsetProvider(ToolsetProvider):
                 ReadImageVisionTool(
                     vl_provider=deps.vl_provider,
                     vl_model=deps.vl_model,
+                    allowed_dir=deps.workspace,
                 ),
                 always_on=True,
                 risk="read-only",

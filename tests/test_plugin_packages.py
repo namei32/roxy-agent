@@ -61,6 +61,7 @@ def test_manager_discover_reads_each_package_file_once(
         ("akasha", "", "builtin"),
         ("apple_notes", "", "builtin"),
         ("default_memory", "", "builtin"),
+        ("interview_coach", "", "builtin"),
     ]
 
 
@@ -118,8 +119,7 @@ def test_package_manifest_rejects_non_schema_values(tmp_path: Path) -> None:
     package_dir.mkdir(parents=True)
 
     (package_dir / "package.toml").write_text(
-        '[package]\nid = "broken"\nmembers = ["broken"]\n'
-        'dashboard = "false"\n',
+        '[package]\nid = "broken"\nmembers = ["broken"]\n' 'dashboard = "false"\n',
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="dashboard 无效"):

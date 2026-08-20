@@ -13,7 +13,7 @@ from .service import AppleNotesService
 
 
 class AppleNotesPlugin(Plugin):
-    """Export explicitly requested knowledge cards to Apple Notes."""
+    """Export authorized knowledge cards to Apple Notes."""
 
     api_version = 2
     name = "apple_notes"
@@ -98,8 +98,8 @@ class AppleNotesPlugin(Plugin):
         risk="read-write",
         always_on=False,
         search_hint=(
-            "save important content to a new Apple Note only when the user "
-            "explicitly asks to save or remember it in Apple Notes"
+            "save important content to a new Apple Note after a current explicit "
+            "request or the scoped Interview Coach automation grant"
         ),
     )
     async def create_note(
@@ -110,13 +110,13 @@ class AppleNotesPlugin(Plugin):
         document_key: str,
         template: str = "knowledge_card",
     ) -> str:
-        """Create one plugin-owned Apple Note after an explicit user request.
+        """Create one plugin-owned Apple Note after an authorized request.
 
         Args:
             title: The human-readable Apple Note title.
             markdown: Markdown content to save.
             document_key: Stable key used for idempotency and later appends.
-            template: knowledge_card, flow_chain, or plain.
+            template: knowledge_card, flow_chain, interview_review, or plain.
         """
 
         del event
@@ -135,7 +135,7 @@ class AppleNotesPlugin(Plugin):
         always_on=False,
         search_hint=(
             "append a new section to an Apple Note previously created by "
-            "Akashic only when the user explicitly asks"
+            "Akashic after an explicit request or active Interview Coach turn"
         ),
     )
     async def append_note(
@@ -152,7 +152,7 @@ class AppleNotesPlugin(Plugin):
             document_key: Stable key of a note created by this plugin.
             markdown: Markdown content to append.
             section_title: Heading for the appended section.
-            template: knowledge_card, flow_chain, or plain.
+            template: knowledge_card, flow_chain, interview_review, or plain.
         """
 
         del event

@@ -103,6 +103,46 @@ def test_renderer_produces_bounded_safe_knowledge_card() -> None:
     assert rendered.html_bytes == len(rendered.html.encode("utf-8"))
 
 
+def test_renderer_supports_interview_review_template() -> None:
+    renderer = NotesRenderer(AppleNotesConfig())
+
+    rendered = renderer.preview(
+        title="面经复盘｜Memory2｜2026-08-07",
+        markdown="## 原题\n\nMemory2 的检索链路是什么？",
+        template="interview_review",
+    )
+
+    assert "🎯 面经复盘" in rendered.html
+    assert "Memory2 的检索链路是什么？" in rendered.plaintext
+
+
+@pytest.mark.asyncio
+async def test_interview_export_requires_text_only_template(tmp_path: Path) -> None:
+    bridge = FakeBridge()
+    service, _ = _service(tmp_path, bridge)
+
+    wrong_template = await service.create(
+        title="面经复盘",
+        markdown="## 原题\n\n什么是 Agent？",
+        document_key="interview:batch-1",
+        template="knowledge_card",
+        context=_context(),
+    )
+    image_markdown = await service.create(
+        title="面经复盘",
+        markdown="## 原题\n\n![原图](/tmp/workspace/uploads/source.png)",
+        document_key="interview:batch-2",
+        template="interview_review",
+        context=_context("telegram:update:101"),
+    )
+
+    assert wrong_template.status == "operation_rejected"
+    assert "interview_review" in wrong_template.detail
+    assert image_markdown.status == "operation_rejected"
+    assert "只允许整理后的文字" in image_markdown.detail
+    assert bridge.create_calls == 0
+
+
 def test_renderer_rejects_oversize_and_unknown_template() -> None:
     renderer = NotesRenderer(
         AppleNotesConfig(max_markdown_characters=200, max_html_bytes=1_000)

@@ -104,6 +104,7 @@ class AppleNotesService:
             self._bridge.require_available()
             clean_key = _validate_document_key(document_key)
             actual_template = self._template(template)
+            _validate_document_template(clean_key, actual_template)
             content_hash = self._renderer.fingerprint_create(
                 title,
                 markdown,
@@ -151,6 +152,7 @@ class AppleNotesService:
             self._bridge.require_available()
             clean_key = _validate_document_key(document_key)
             actual_template = self._template(template)
+            _validate_document_template(clean_key, actual_template)
             content_hash = self._renderer.fingerprint_append(
                 markdown,
                 section_title,
@@ -502,7 +504,7 @@ def _validate_provenance(
     if context is None or not context.current_user_source_ref.strip():
         return _rejected(
             "explicit_user_source_required",
-            "Apple Notes 写入只允许由当前明确用户消息触发",
+            "Apple Notes 写入只允许由当前用户消息及其有效授权触发",
         )
     if not context.origin_session_key.strip():
         return _rejected(
@@ -517,6 +519,11 @@ def _validate_document_key(value: str) -> str:
     if _DOCUMENT_KEY_RE.fullmatch(normalized) is None:
         raise ValueError("document_key 必须是 1-128 位稳定标识，只允许字母、数字、._:-")
     return normalized
+
+
+def _validate_document_template(document_key: str, template: str) -> None:
+    if document_key.startswith("interview:") and template != "interview_review":
+        raise ValueError("interview: document_key 必须使用 interview_review 模板")
 
 
 def _from_receipt(

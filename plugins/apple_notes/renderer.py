@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import hashlib
 from html import escape
+import re
 from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup, Tag
@@ -11,7 +12,9 @@ from markdown_it import MarkdownIt
 
 from .config import AppleNotesConfig
 
-_ALLOWED_TEMPLATES = frozenset({"knowledge_card", "flow_chain", "plain"})
+_ALLOWED_TEMPLATES = frozenset(
+    {"knowledge_card", "flow_chain", "interview_review", "plain"}
+)
 _ALLOWED_TAGS = frozenset(
     {
         "a",
@@ -35,6 +38,7 @@ _ALLOWED_TAGS = frozenset(
     }
 )
 _SAFE_LINK_SCHEMES = frozenset({"http", "https", "mailto"})
+_MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\s*\(", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -175,6 +179,8 @@ class NotesRenderer:
         normalized_template = template.strip() or self._config.default_template
         if normalized_template not in _ALLOWED_TEMPLATES:
             raise ValueError(f"未知备忘录模板: {normalized_template}")
+        if normalized_template == "interview_review":
+            _validate_interview_text_only(normalized_markdown)
         return normalized_title, normalized_markdown, normalized_template
 
     @staticmethod
@@ -218,7 +224,12 @@ class NotesRenderer:
     def _lead(self, template: str, saved_at: datetime) -> str:
         if template == "plain":
             return ""
-        label = "🧭 链路知识卡" if template == "flow_chain" else "🧠 知识卡片"
+        labels = {
+            "flow_chain": "🧭 链路知识卡",
+            "interview_review": "🎯 面经复盘",
+            "knowledge_card": "🧠 知识卡片",
+        }
+        label = labels[template]
         date_text = saved_at.astimezone().strftime("%Y-%m-%d")
         return f"<p><strong>{label}</strong> · {escape(date_text)}</p><hr>"
 
@@ -254,3 +265,16 @@ def _digest(*parts: str) -> str:
         hasher.update(len(encoded).to_bytes(8, "big"))
         hasher.update(encoded)
     return hasher.hexdigest()
+
+
+def _validate_interview_text_only(markdown: str) -> None:
+    lowered = markdown.lower()
+    if (
+        _MARKDOWN_IMAGE_RE.search(markdown) is not None
+        or "<img" in lowered
+        or "data:image" in lowered
+        or "file://" in lowered
+        or "/uploads/" in lowered
+        or "\\uploads\\" in lowered
+    ):
+        raise ValueError("面经复盘只允许整理后的文字，不得包含图片或本地附件路径")
