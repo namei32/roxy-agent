@@ -1,6 +1,6 @@
-# Akashic Agent 项目需求与语义不变量
+# Roxy Agent 项目需求与语义不变量
 
-这份文件是 Akashic Agent 的长期需求规范。它回答“系统必须保持什么”，供新会话、维护者、coding agent、评审者和 CI 使用。
+这份文件是 Roxy Agent 的长期需求规范。它回答“系统必须保持什么”，供新会话、维护者、coding agent、评审者和 CI 使用。
 
 实现细节、临时进度和历史讨论不放在这里：
 
@@ -673,13 +673,19 @@ plugin、marketplace、snapshot 等名称必须是安全单片段；resolved pat
 
 迁移先获得 workspace 单实例锁。SQLite 使用在线 backup 与 integrity check；全部内容写到唯一 staging，再一次性发布。目标已存在时拒绝合并，源数据保留到独立清理步骤。
 
-### WSP-004 Workspace 是 Akashic 运行数据根
+### WSP-004 Workspace 是 Roxy 运行数据根
 
-`<workspace>` 表示由 `--workspace`、`AKASHIC_WORKSPACE` 或主配置选中的 Akashic 运行实例主要工作区。它承载会话、长期记忆、附件、调度、主动流程、模型 connection credential、plugin-data、能力投影、诊断和运行控制状态，不是源码仓库、Git checkout 或 Git worktree。插件代码、Skill/MCP 的 canonical source、全局插件清单以及旧或非模型凭据可以位于 workspace 之外，必须作为明确 companion state 管理。Git worktree 只承载代码、测试和项目工作手册；任何代码 worktree 都不得把自己的目录当成正式运行数据根。
+`<workspace>` 表示由 `--workspace`、`ROXY_WORKSPACE` 或主配置选中的 Roxy 运行实例主要工作区。旧 `AKASHIC_WORKSPACE` 仅供既有安装兼容；新旧变量同时存在时 Roxy 优先。它承载会话、长期记忆、附件、调度、主动流程、模型 connection credential、plugin-data、能力投影、诊断和运行控制状态，不是源码仓库、Git checkout 或 Git worktree。插件代码、Skill/MCP 的 canonical source、全局插件清单以及旧或非模型凭据可以位于 workspace 之外，必须作为明确 companion state 管理。Git worktree 只承载代码、测试和项目工作手册；任何代码 worktree 都不得把自己的目录当成正式运行数据根。
 
 ### WSP-005 容器与宿主共享一个逻辑路径和一个状态 owner
 
 正式容器与 Host Bridge 对 workspace、canonical source、Git worktree 和允许访问的宿主文件使用一致的逻辑绝对路径。宿主文件系统是这些路径的唯一权威状态；不得同时维护容器副本、命名卷副本或双向同步副本。Bridge 返回的图片、附件和其他二进制内容必须可按原始字节进入 Core 工具结果或渠道投递，不能只返回容器不可访问的宿主路径。实验只能使用带 run identity 的隔离 workspace 和 companion state，不得 bind、merge 或清理正式状态。
+
+### WSP-006 Roxy 身份迁移必须显式、保留源且不越权
+
+Roxy 是新增环境变量、默认路径、Socket、SDK、Skill、Dashboard 与 Mobile bridge 的唯一 canonical 名称；旧 Akashic 名称只能作为既有部署的兼容入口。将旧 workspace 切换到新名称空间必须由明确命令指定源和目标，离线持锁、校验 staging 并原子发布。目标已存在时必须拒绝合并，源 workspace 必须保留，运行锁和 Socket 不得随状态复制。
+
+迁移不得借品牌升级自动改写人格、配置、旧凭据、全局插件根或外部 Apple Notes；这些对象只能由各自 owner 的明确操作改变。旧移动端 keyset 必须保留历史密钥命名空间和证书身份；只有新建且带明确 Roxy marker 的 keyset 才采用新身份。
 
 ### MIG-001 兼容迁移由 workspace Yoyo 账本一次性推进
 

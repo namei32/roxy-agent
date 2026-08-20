@@ -55,7 +55,7 @@ class AppServerConfig:
 @dataclass(frozen=True)
 class MobileKeyEncryptionConfig:
     provider: str = "secret_service"
-    master_key_namespace: str = "akasic/mobile-realtime"
+    master_key_namespace: str = "roxy/mobile-realtime"
     master_key_file: Path = Path("data/mobile/master-keys.json")
     keyset_manifest: Path = Path("data/mobile/keys/current.json")
 
@@ -66,7 +66,7 @@ class MobileRealtimeConfig:
     host: str = "0.0.0.0"
     port: int = 6323
     database: Path = Path("data/mobile_realtime.db")
-    lan_hostname: str = "akashic.local"
+    lan_hostname: str = "roxy.local"
     public_url: str = ""
     max_attachment_mb: int = 50
     inbox_retention_days: int = 7

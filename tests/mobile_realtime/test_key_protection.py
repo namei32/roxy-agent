@@ -124,11 +124,14 @@ def test_keyset_never_writes_plaintext_private_keys_and_loads_via_memfd(
     root = tmp_path / "keys"
     manager = KeysetManager(root, keys)
 
-    initialized = manager.initialize(lan_hostname="akashic.local")
+    initialized = manager.initialize(lan_hostname="roxy.local")
     loaded = manager.load(expected_server_fingerprint=initialized.server_fingerprint)
-    context = create_server_ssl_context(loaded)
-
-    assert isinstance(context, ssl.SSLContext)
+    if Path("/proc/self/fd").is_dir():
+        context = create_server_ssl_context(loaded)
+        assert isinstance(context, ssl.SSLContext)
+    else:
+        with pytest.raises(KeyProtectionError, match="memfd"):
+            create_server_ssl_context(loaded)
     assert os.stat(root).st_mode & 0o777 == 0o700
     for path in root.rglob("*"):
         if path.is_file():
@@ -139,7 +142,7 @@ def test_keyset_never_writes_plaintext_private_keys_and_loads_via_memfd(
 def test_keyset_rotation_keeps_public_identity_and_old_version(tmp_path: Path) -> None:
     keys = _EphemeralMasterKeys()
     manager = KeysetManager(tmp_path / "keys", keys)
-    original = manager.initialize(lan_hostname="akashic.local")
+    original = manager.initialize(lan_hostname="roxy.local")
 
     rotated = manager.rotate_master_key()
     current = json.loads((tmp_path / "keys" / "current.json").read_text())
@@ -148,18 +151,36 @@ def test_keyset_rotation_keeps_public_identity_and_old_version(tmp_path: Path) -
     assert rotated.server_fingerprint == original.server_fingerprint
     assert rotated.tls_spki_fingerprint == original.tls_spki_fingerprint
     assert current["keyset_version"] == 2
+    assert current["runtime_identity"] == "roxy"
     assert (tmp_path / "keys" / "keyset-v1").is_dir()
     assert (tmp_path / "keys" / "keyset-v2").is_dir()
+
+
+def test_legacy_keyset_rotation_preserves_legacy_identity_marker_absence(
+    tmp_path: Path,
+) -> None:
+    keys = _EphemeralMasterKeys()
+    manager = KeysetManager(tmp_path / "keys", keys)
+    _ = manager.initialize(lan_hostname="akashic.local")
+    current_path = tmp_path / "keys" / "current.json"
+    current = json.loads(current_path.read_text())
+    del current["runtime_identity"]
+    current_path.write_text(json.dumps(current), encoding="utf-8")
+
+    _ = manager.rotate_master_key()
+
+    rotated = json.loads(current_path.read_text())
+    assert "runtime_identity" not in rotated
 
 
 def test_interrupted_rotation_leaves_current_keyset_loadable(tmp_path: Path) -> None:
     keys = _EphemeralMasterKeys()
     root = tmp_path / "keys"
     stable = KeysetManager(root, keys)
-    original = stable.initialize(lan_hostname="akashic.local")
+    original = stable.initialize(lan_hostname="roxy.local")
 
     class _InterruptedManager(KeysetManager):
-        def _write_current(self, keyset_version: int) -> None:
+        def _write_current(self, keyset_version: int, **_kwargs: object) -> None:
             raise OSError("injected current pointer failure")
 
     with pytest.raises(OSError, match="injected"):
@@ -189,7 +210,7 @@ def test_tampered_blob_and_manifest_path_are_rejected(tmp_path: Path) -> None:
     keys = _EphemeralMasterKeys()
     root = tmp_path / "keys"
     manager = KeysetManager(root, keys)
-    _ = manager.initialize(lan_hostname="akashic.local")
+    _ = manager.initialize(lan_hostname="roxy.local")
     blob = root / "keyset-v1" / "server-identity.key.enc"
     tampered_blob = bytearray(blob.read_bytes())
     tampered_blob[-1] ^= 1

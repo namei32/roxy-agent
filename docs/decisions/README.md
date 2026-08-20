@@ -41,6 +41,7 @@
 | [0033](0033-local-agent-instructions-are-not-project-documents.md) | accepted | 本地 Agent 指令不属于版本化项目文档 | WBK-001～WBK-006、COM-001～COM-004 |
 | [0034](0034-turn-is-the-logical-work-unit.md) | accepted | Turn 是逻辑工作单元 | CTX-003、SES-007、SES-008、MEM-011、OUT-001、OUT-004、SCH-003 |
 | [0035](0035-mobile-protocol-delivery-is-phased.md) | accepted | 移动协议交付按变更性质分阶段 | MOB-008、MOB-006、TST-007、GOV-002 |
+| [1001](1001-roxy-runtime-identity-migration.md) | accepted | Roxy 是唯一的新增运行时身份，旧 Akashic 仅作兼容 | WSP-003～WSP-004、WSP-006、MIG-001～MIG-002、WEBUI-007、SEC-010 |
 
 ## 新增规则
 
@@ -48,3 +49,4 @@
 2. 写明状态、日期、背景、决定、理由、影响、验收和关联条款。
 3. 旧决定被推翻时保留原文件，新记录声明 `supersedes`，旧记录补 `superseded by`。
 4. 没有形成选择的讨论不进入这里；未完成动作写入 `NOW.md`。
+5. `0001`～`0999` 保留上游 Akashic 决策编号；Roxy fork 专属决策使用 `1000` 系列，避免后续上游同步发生编号冲突。

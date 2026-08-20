@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import types
@@ -279,8 +280,11 @@ def test_default_socket_is_derived_from_workspace(tmp_path: Path) -> None:
 
     if sys.platform == "win32":
         assert endpoint.startswith("127.0.0.1:")
+    elif len(os.fsencode(str(tmp_path / "roxy.sock"))) > 96:
+        assert Path(endpoint).parent.name == "roxy-sockets"
+        assert len(os.fsencode(endpoint)) <= 96
     else:
-        assert endpoint == str(tmp_path / "akashic.sock")
+        assert endpoint == str(tmp_path / "roxy.sock")
 
 
 def test_main_help_does_not_start_runtime() -> None:
@@ -338,7 +342,7 @@ def test_workspace_selection_uses_default_only_for_bootstrap(
         [],
         config_path,
         allow_default=True,
-    ) == (tmp_path / ".akashic" / "workspace").resolve()
+    ) == (tmp_path / ".roxy" / "workspace").resolve()
     with pytest.raises(ValueError, match="找不到配置文件"):
         main._workspace_from_args([], config_path)
 
@@ -465,7 +469,7 @@ def test_validated_timezone_rejects_invalid_names(tz_name: str):
 @pytest.mark.asyncio
 async def test_serve_smoke_loads_config_and_runs_shutdown(monkeypatch, tmp_path):
     config_path = tmp_path / "config.toml"
-    socket_path = tmp_path / "akashic.sock"
+    socket_path = tmp_path / "roxy.sock"
     _write_config(config_path, socket_path)
     _ = reset_veda(tmp_path)
 

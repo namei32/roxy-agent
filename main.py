@@ -25,7 +25,9 @@ from pathlib import Path
 from typing import cast
 from uuid import uuid4
 
-_DEFAULT_WORKSPACE = "~/.akashic/workspace"
+from agent.identity import default_workspace_path, roxy_env, set_roxy_env
+
+
 _PLUGIN_ROLLOUT_OWNER_TURN_ENV = "AKASHIC_PLUGIN_ROLLOUT_OWNER_TURN"
 _PLUGIN_ROLLOUT_CAPABILITY_ENV = "AKASHIC_PLUGIN_ROLLOUT_CAPABILITY"
 _AGENT_INTERNAL_PLUGIN_COMMANDS = frozenset(
@@ -52,7 +54,7 @@ def _reject_agent_internal_plugin_action(command: str) -> None:
 
 
 def _supervisor_readiness_timeout() -> float:
-    return float(os.environ.get("AKASHIC_READINESS_TIMEOUT_S", "300"))
+    return float(roxy_env("READINESS_TIMEOUT_S", "300"))
 
 
 def _supervisor_supported(platform: str | None = None) -> bool:
@@ -89,14 +91,14 @@ def _workspace_from_args(
             raise ValueError("参数 --workspace 缺少值")
         value = args[index + 1]
     else:
-        value = os.environ.get("AKASHIC_WORKSPACE", "")
+        value = roxy_env("WORKSPACE")
 
     # 2. 环境变量为空时读取 config.toml；首次初始化使用可移植默认值
     if not value.strip():
         if config_path.exists():
             value = _workspace_from_config(config_path)
         elif allow_default:
-            value = _DEFAULT_WORKSPACE
+            value = str(default_workspace_path())
         else:
             raise ValueError(
                 f"找不到配置文件 {config_path!s}，且未指定 --workspace PATH"
@@ -316,7 +318,7 @@ def _prepare_startup_migrations(
         "dashboard",
     }:
         return None
-    if command == "gateway" and os.environ.get("AKASHIC_SUPERVISED") == "1":
+    if command == "gateway" and roxy_env("SUPERVISED") == "1":
         return None
     outcome = migrate_installation(config_path, workspace)
     if outcome.state == "migrated":
@@ -753,7 +755,7 @@ if __name__ == "__main__":
         print(str(exc))
         sys.exit(1)
 
-    os.environ["AKASHIC_WORKSPACE"] = str(workspace)
+    set_roxy_env("WORKSPACE", str(workspace))
     try:
         _reject_agent_internal_plugin_action(args[0] if args else "")
     except ValueError as exc:

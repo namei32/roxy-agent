@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 import sys
@@ -31,6 +33,7 @@ from agent.config_models import (
     WebChatConfig,
     WiringConfig,
 )
+from agent.identity import LEGACY_AKASHIC_SOCKET_NAME, ROXY_SOCKET_NAME
 from proactive_v2.config import ProactiveConfig
 from proactive_v2.config_loader import ProactiveConfigError, load_proactive_config
 from agent.model_runtime.auth.store import CredentialStore
@@ -69,13 +72,34 @@ def resolve_app_server_endpoint(value: str, workspace: Path) -> str:
 
     # 1. 显式配置保持原样
     if value:
+        if (
+            os.name != "nt"
+            and Path(value) == workspace / ROXY_SOCKET_NAME
+            and len(os.fsencode(value)) > 96
+        ):
+            return _short_workspace_socket(workspace)
         return value
 
     # 2. 缺省配置按 workspace 稳定派生
     if os.name != "nt":
-        return str(workspace / "akashic.sock")
+        candidate = workspace / ROXY_SOCKET_NAME
+        legacy_candidate = workspace / LEGACY_AKASHIC_SOCKET_NAME
+        if not candidate.exists() and legacy_candidate.exists():
+            return str(legacy_candidate)
+        if len(os.fsencode(candidate)) > 96:
+            return _short_workspace_socket(workspace)
+        return str(candidate)
     port_seed = zlib.crc32(str(workspace).encode("utf-8")) % 20000
     return f"127.0.0.1:{20000 + port_seed}"
+
+
+def _short_workspace_socket(workspace: Path) -> str:
+    digest = hashlib.sha256(str(workspace.resolve()).encode("utf-8")).hexdigest()
+    return str(
+        Path("/tmp")
+        / "roxy-sockets"
+        / f"{os.getuid()}-{digest[:24]}.sock"
+    )
 
 
 def _validated_timezone(tz_name: str, *, enabled: bool) -> str:
@@ -150,7 +174,7 @@ def load_config(
         raise ValueError("必须配置 llm provider")
     channels = _load_channels_config(data, workspace_path)
     app_server = _load_app_server_config(data)
-    mobile_realtime = _load_mobile_realtime_config(data)
+    mobile_realtime = _load_mobile_realtime_config(data, workspace_path)
     if mobile_realtime.enabled and not channels.chat.enabled:
         raise ValueError("mobile_realtime 启用时必须启用 channels.chat 配对入口")
     proactive = _load_proactive_config(data)
@@ -377,7 +401,10 @@ def _load_app_server_config(data: dict) -> AppServerConfig:
     return config
 
 
-def _load_mobile_realtime_config(data: dict) -> MobileRealtimeConfig:
+def _load_mobile_realtime_config(
+    data: dict,
+    workspace: Path,
+) -> MobileRealtimeConfig:
     """在配置边界建立只允许 WSS 和加密 keyset 的移动网关配置。"""
 
     # 1. 解析主网关与密钥保护配置
@@ -386,10 +413,6 @@ def _load_mobile_realtime_config(data: dict) -> MobileRealtimeConfig:
         raw.get("key_encryption"),
         field="mobile_realtime.key_encryption",
     )
-    provider = str(key_raw.get("provider", "secret_service") or "")
-    namespace = str(
-        key_raw.get("master_key_namespace", "akasic/mobile-realtime") or ""
-    ).strip()
     master_key_file = _relative_data_path(
         key_raw.get("master_key_file", "data/mobile/master-keys.json"),
         field="mobile_realtime.key_encryption.master_key_file",
@@ -398,6 +421,15 @@ def _load_mobile_realtime_config(data: dict) -> MobileRealtimeConfig:
         key_raw.get("keyset_manifest", "data/mobile/keys/current.json"),
         field="mobile_realtime.key_encryption.keyset_manifest",
     )
+    legacy_keyset = _is_legacy_mobile_keyset(workspace / keyset_manifest)
+    provider = str(key_raw.get("provider", "secret_service") or "")
+    default_namespace = (
+        "akasic/mobile-realtime" if legacy_keyset else "roxy/mobile-realtime"
+    )
+    namespace = str(
+        key_raw.get("master_key_namespace", default_namespace) or ""
+    ).strip()
+    default_hostname = "akashic.local" if legacy_keyset else "roxy.local"
     config = MobileRealtimeConfig(
         enabled=_as_bool(raw.get("enabled", False), field="mobile_realtime.enabled"),
         host=str(raw.get("host", "0.0.0.0") or "").strip(),
@@ -406,7 +438,7 @@ def _load_mobile_realtime_config(data: dict) -> MobileRealtimeConfig:
             raw.get("database", "data/mobile_realtime.db"),
             field="mobile_realtime.database",
         ),
-        lan_hostname=str(raw.get("lan_hostname", "akashic.local") or "").strip(),
+        lan_hostname=str(raw.get("lan_hostname", default_hostname) or "").strip(),
         public_url=str(raw.get("public_url", "") or "").strip(),
         max_attachment_mb=int(raw.get("max_attachment_mb", 50)),
         inbox_retention_days=int(raw.get("inbox_retention_days", 7)),
@@ -457,6 +489,22 @@ def _load_mobile_realtime_config(data: dict) -> MobileRealtimeConfig:
         ):
             raise ValueError("mobile_realtime.public_url 必须是无凭据的 wss://.../ws")
     return config
+
+
+def _is_legacy_mobile_keyset(current_path: Path) -> bool:
+    """无 Roxy 标记的既有 keyset 延续旧密钥和证书身份。"""
+
+    if not current_path.is_file():
+        return False
+    try:
+        with current_path.open("rb") as stream:
+            payload = stream.read(128 * 1024 + 1)
+        if len(payload) > 128 * 1024:
+            return True
+        current = json.loads(payload)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return True
+    return not isinstance(current, dict) or current.get("runtime_identity") != "roxy"
 
 
 def _relative_data_path(value: object, *, field: str) -> Path:

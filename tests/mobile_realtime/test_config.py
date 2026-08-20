@@ -36,6 +36,10 @@ def test_mobile_realtime_defaults_to_disabled(tmp_path: Path) -> None:
 
     assert config.mobile_realtime.enabled is False
     assert config.mobile_realtime.port == 6323
+    assert config.mobile_realtime.lan_hostname == "roxy.local"
+    assert config.mobile_realtime.key_encryption.master_key_namespace == (
+        "roxy/mobile-realtime"
+    )
     assert str(config.mobile_realtime.key_encryption.keyset_manifest) == (
         "data/mobile/keys/current.json"
     )
@@ -58,7 +62,7 @@ inbox_retention_days = 9
 
 [mobile_realtime.key_encryption]
 provider = "secret_service"
-master_key_namespace = "akasic/mobile-test"
+master_key_namespace = "roxy/mobile-test"
 keyset_manifest = "data/mobile/keys/current.json"
             """,
         ),

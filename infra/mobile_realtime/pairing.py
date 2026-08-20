@@ -27,7 +27,8 @@ from infra.mobile_realtime.storage import (
 )
 
 _PAIRING_SECRET_BYTES = 32
-_PAIRING_SECRET_DOMAIN = b"akasic-mobile-pairing-secret-v1\x00"
+_PAIRING_SECRET_DOMAIN = b"roxy-mobile-pairing-secret-v1\x00"
+_LEGACY_PAIRING_SECRET_DOMAIN = b"akasic-mobile-pairing-secret-v1\x00"
 _PAIRING_TTL = timedelta(minutes=8)
 _MAX_ENDPOINTS = 16
 
@@ -181,9 +182,9 @@ class PairingService:
             raise PairingStateError(f"配对会话不能 claim: status={session.status}")
         if session.expires_at <= self._now():
             raise PairingSecretError("配对会话已过期")
-        if session.secret_hash is None or not hmac.compare_digest(
+        if session.secret_hash is None or not _matches_pairing_secret_hash(
             session.secret_hash,
-            _pairing_secret_hash(payload.one_time_secret),
+            payload.one_time_secret,
         ):
             raise PairingSecretError("一次性 pairing secret 无效")
 
@@ -332,10 +333,26 @@ def _pair_claim_transcript(
     )
 
 
-def _pairing_secret_hash(one_time_secret: str) -> str:
+def _pairing_secret_hash(
+    one_time_secret: str,
+    *,
+    domain: bytes = _PAIRING_SECRET_DOMAIN,
+) -> str:
     return hashlib.sha256(
-        _PAIRING_SECRET_DOMAIN + one_time_secret.encode("ascii")
+        domain + one_time_secret.encode("ascii")
     ).hexdigest()
+
+
+def _matches_pairing_secret_hash(stored_hash: str, one_time_secret: str) -> bool:
+    """允许升级窗口内尚未过期的旧配对会话完成一次验证。"""
+
+    return any(
+        hmac.compare_digest(
+            stored_hash,
+            _pairing_secret_hash(one_time_secret, domain=domain),
+        )
+        for domain in (_PAIRING_SECRET_DOMAIN, _LEGACY_PAIRING_SECRET_DOMAIN)
+    )
 
 
 def _confirmation_code(transcript: bytes) -> str:
