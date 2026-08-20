@@ -88,6 +88,20 @@ provider = "secret_service"
 master_key_namespace = "akasic/mobile-realtime"
 keyset_manifest = "data/mobile/keys/current.json"
 
+# Linux 云端可选：只在 Mac 当前在线时写 Apple Notes。
+# 正式远程接入必须由 Tailscale/Caddy 等提供 WSS；Broker 默认只监听 loopback。
+[notes_bridge]
+enabled = false
+host = "127.0.0.1"
+port = 6330
+bridge_id = "mac-primary"
+token = "${AKASHIC_NOTES_BRIDGE_TOKEN}"
+heartbeat_interval_seconds = 5.0
+offline_after_seconds = 15.0
+proposal_timeout_seconds = 5.0
+commit_timeout_seconds = 30.0
+max_message_bytes = 1048576
+
 # 可选：长期记忆整理任务（默认已启用，通常无需修改）
 # [agent.maintenance]
 # memory_optimizer_enabled = true

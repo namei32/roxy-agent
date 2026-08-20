@@ -79,6 +79,22 @@ class MobileRealtimeConfig:
         return timedelta(days=self.inbox_retention_days)
 
 
+@dataclass(frozen=True)
+class NotesBridgeConfig:
+    """Authenticated, live-only bridge from the cloud runtime to one Mac."""
+
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = 6330
+    bridge_id: str = "mac-primary"
+    token: str = ""
+    heartbeat_interval_seconds: float = 5.0
+    offline_after_seconds: float = 15.0
+    proposal_timeout_seconds: float = 5.0
+    commit_timeout_seconds: float = 30.0
+    max_message_bytes: int = 1024 * 1024
+
+
 @dataclass
 class MemoryEmbeddingConfig:
     model_ref: str = ""
@@ -205,6 +221,7 @@ class Config:
     channels: ChannelsConfig = field(default_factory=ChannelsConfig)
     app_server: AppServerConfig = field(default_factory=AppServerConfig)
     mobile_realtime: MobileRealtimeConfig = field(default_factory=MobileRealtimeConfig)
+    notes_bridge: NotesBridgeConfig = field(default_factory=NotesBridgeConfig)
     proactive: ProactiveConfig = field(default_factory=ProactiveConfig)
     memory_optimizer_enabled: bool = True
     memory_optimizer_interval_seconds: int = 64800
@@ -266,6 +283,7 @@ __all__ = [
     "MobileKeyEncryptionConfig",
     "MobileRealtimeConfig",
     "ModelRuntimeConfig",
+    "NotesBridgeConfig",
     "QQChannelConfig",
     "QQGroupConfig",
     "TelegramChannelConfig",

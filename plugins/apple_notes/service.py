@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 import hashlib
 import json
@@ -12,7 +12,7 @@ import uuid
 from agent.tools.base import ToolExecutionContext
 
 from .bridge import (
-    AppleNotesBridge,
+    AppleNotesExecutionBridge,
     NotesBridgeError,
     NotesOperationRejected,
     NotesOutcomeUnknown,
@@ -38,6 +38,7 @@ class NoteToolResult:
         "unit_failed",
         "outcome_unknown",
         "not_found",
+        "skipped_offline",
     ]
     code: str = ""
     operation_id: str = ""
@@ -50,6 +51,7 @@ class NoteToolResult:
     preview: str = ""
     html_bytes: int = 0
     detail: str = ""
+    content: str = ""
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), ensure_ascii=False, sort_keys=True)
@@ -64,7 +66,7 @@ class AppleNotesService:
         config: AppleNotesConfig,
         renderer: NotesRenderer,
         receipts: AppleNotesReceiptStore,
-        bridge: AppleNotesBridge,
+        bridge: AppleNotesExecutionBridge,
     ) -> None:
         self._config = config
         self._renderer = renderer
@@ -111,6 +113,13 @@ class AppleNotesService:
                 actual_template,
             )
         except (ValueError, NotesOperationRejected) as error:
+            if _is_offline(error):
+                return _offline_result(
+                    error,
+                    title=title,
+                    document_key=document_key,
+                    content=markdown,
+                )
             return _error_result(error, fallback_kind="operation_rejected")
 
         async with self._write_lock:
@@ -159,6 +168,12 @@ class AppleNotesService:
                 actual_template,
             )
         except (ValueError, NotesOperationRejected) as error:
+            if _is_offline(error):
+                return _offline_result(
+                    error,
+                    document_key=document_key,
+                    content=markdown,
+                )
             return _error_result(error, fallback_kind="operation_rejected")
 
         async with self._write_lock:
@@ -266,6 +281,8 @@ class AppleNotesService:
             rendered=rendered,
             created=created,
             action="create",
+            document_key=document_key,
+            fallback_content=markdown,
         )
 
     async def _execute_append(
@@ -312,6 +329,8 @@ class AppleNotesService:
             created=created,
             action="append",
             note_id=document.note_id,
+            document_key=document.document_key,
+            fallback_content=markdown,
         )
 
     async def _reserve(
@@ -401,17 +420,21 @@ class AppleNotesService:
         created: bool,
         action: Literal["create", "append"],
         note_id: str = "",
+        document_key: str = "",
+        fallback_content: str = "",
     ) -> NoteToolResult:
         try:
             if action == "create":
                 external = await self._bridge.create(
                     title=rendered.title,
                     html=rendered.html,
+                    document_key=document_key,
                 )
             else:
                 external = await self._bridge.append(
                     note_id=note_id,
                     html=rendered.html,
+                    document_key=document_key,
                 )
         except asyncio.CancelledError:
             _ = await asyncio.shield(
@@ -433,7 +456,14 @@ class AppleNotesService:
                 error_detail=error.detail,
                 updated_at=_now().isoformat(),
             )
-            return _from_receipt(failed, idempotent_replay=not created)
+            result = _from_receipt(failed, idempotent_replay=not created)
+            if _is_offline(error):
+                return replace(
+                    result,
+                    status="skipped_offline",
+                    content=fallback_content,
+                )
+            return result
         except NotesUnitFailed as error:
             failed = await asyncio.to_thread(
                 self._receipts.mark_failed,
@@ -579,6 +609,40 @@ def _error_result(
         code = "invalid_request"
         detail = str(error)
     return NoteToolResult(status=status, code=code, detail=detail)
+
+
+def _is_offline(error: BaseException) -> bool:
+    return isinstance(error, NotesOperationRejected) and error.code in {
+        "mac_notes_bridge_offline",
+        "mac_bridge_disconnected_before_commit",
+    }
+
+
+def _offline_result(
+    error: BaseException,
+    *,
+    document_key: str,
+    content: str,
+    title: str = "",
+) -> NoteToolResult:
+    code = (
+        error.code
+        if isinstance(error, NotesOperationRejected)
+        else "mac_notes_bridge_offline"
+    )
+    detail = (
+        error.detail
+        if isinstance(error, NotesOperationRejected)
+        else "Mac 当前离线，本次没有写入 Apple Notes"
+    )
+    return NoteToolResult(
+        status="skipped_offline",
+        code=code,
+        document_key=document_key,
+        title=title,
+        detail=detail,
+        content=content,
+    )
 
 
 def _unknown_reconciliation_result(

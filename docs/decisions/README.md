@@ -42,6 +42,7 @@
 | [0034](0034-turn-is-the-logical-work-unit.md) | accepted | Turn 是逻辑工作单元 | CTX-003、SES-007、SES-008、MEM-011、OUT-001、OUT-004、SCH-003 |
 | [0035](0035-mobile-protocol-delivery-is-phased.md) | accepted | 移动协议交付按变更性质分阶段 | MOB-008、MOB-006、TST-007、GOV-002 |
 | [0036](0036-scoped-interview-images-may-auto-export-to-notes.md) | accepted | 面经图片只在持久窄域授权内自动导出到 Notes | CAP-002～CAP-003、PLG-001～PLG-010、SES-005～SES-006 |
+| [0037](0037-mac-notes-bridge-writes-only-through-live-commit.md) | accepted | Mac Notes Bridge 只在当前在线提交 | CAP-002～CAP-004、PLG-001～PLG-005、SEC-010 |
 | [1001](1001-roxy-runtime-identity-migration.md) | accepted | Roxy 是唯一的新增运行时身份，旧 Akashic 仅作兼容 | WSP-003～WSP-004、WSP-006、MIG-001～MIG-002、WEBUI-007、SEC-010 |
 
 ## 新增规则

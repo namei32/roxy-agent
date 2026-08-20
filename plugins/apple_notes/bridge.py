@@ -8,6 +8,7 @@ from pathlib import Path
 import stat
 import sys
 import tempfile
+from typing import Protocol
 
 from .config import AppleNotesConfig
 
@@ -60,6 +61,28 @@ class NotesOutcomeUnknown(NotesBridgeError):
     pass
 
 
+class AppleNotesExecutionBridge(Protocol):
+    def require_available(self) -> None: ...
+
+    async def create(
+        self,
+        *,
+        title: str,
+        html: str,
+        document_key: str = "",
+    ) -> NotesMutationReceipt: ...
+
+    async def append(
+        self,
+        *,
+        note_id: str,
+        html: str,
+        document_key: str = "",
+    ) -> NotesMutationReceipt: ...
+
+    async def find_marker(self, marker: str) -> NotesMutationReceipt | None: ...
+
+
 class AppleNotesBridge:
     """Execute a fixed AppleScript without interpolating user content."""
 
@@ -100,7 +123,9 @@ class AppleNotesBridge:
         *,
         title: str,
         html: str,
+        document_key: str = "",
     ) -> NotesMutationReceipt:
+        del document_key
         result = await self._run(
             "create",
             title=title,
@@ -113,7 +138,9 @@ class AppleNotesBridge:
         *,
         note_id: str,
         html: str,
+        document_key: str = "",
     ) -> NotesMutationReceipt:
+        del document_key
         result = await self._run(
             "append",
             note_id=note_id,
@@ -139,6 +166,15 @@ class AppleNotesBridge:
             f"Apple Notes 查找返回无效: {result[:200]!r}",
             stage="find_marker",
         )
+
+    async def probe(self) -> None:
+        result = await self._run("probe")
+        if result != "READY":
+            raise NotesUnitFailed(
+                "notes_probe_invalid",
+                f"Apple Notes 权限探针返回无效: {result[:200]!r}",
+                stage="probe",
+            )
 
     async def _run(
         self,

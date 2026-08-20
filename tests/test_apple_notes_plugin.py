@@ -14,6 +14,7 @@ from plugins.apple_notes.bridge import (
     AppleNotesBridge,
     NotesMutationReceipt,
     NotesOutcomeUnknown,
+    NotesOperationRejected,
     NotesUnitFailed,
     _parse_script_envelope,
 )
@@ -34,17 +35,23 @@ class FakeBridge:
     def require_available(self) -> None:
         return None
 
-    async def create(self, *, title: str, html: str) -> NotesMutationReceipt:
+    async def create(
+        self, *, title: str, html: str, document_key: str = ""
+    ) -> NotesMutationReceipt:
         self.create_calls += 1
         assert title
+        assert document_key
         assert "AKASHIC_EXPORT:" in html
         if self.create_error is not None:
             raise self.create_error
         return NotesMutationReceipt(note_id="note-1", folder_id="folder-1")
 
-    async def append(self, *, note_id: str, html: str) -> NotesMutationReceipt:
+    async def append(
+        self, *, note_id: str, html: str, document_key: str = ""
+    ) -> NotesMutationReceipt:
         self.append_calls += 1
         assert note_id == "note-1"
+        assert document_key
         assert "AKASHIC_EXPORT:" in html
         return NotesMutationReceipt(note_id=note_id, folder_id="folder-1")
 
@@ -52,6 +59,15 @@ class FakeBridge:
         self.find_calls += 1
         assert marker.startswith("AKASHIC_EXPORT:")
         return self.found
+
+
+class OfflineBridge(FakeBridge):
+    def require_available(self) -> None:
+        raise NotesOperationRejected(
+            "mac_notes_bridge_offline",
+            "Mac offline",
+            stage="online_gate",
+        )
 
 
 def _context(source_ref: str = "telegram:update:100") -> ToolExecutionContext:
@@ -237,6 +253,29 @@ async def test_write_requires_current_explicit_user_provenance(tmp_path: Path) -
 
     assert missing_context.code == "explicit_user_source_required"
     assert proactive_context.code == "explicit_user_source_required"
+    assert bridge.create_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_remote_offline_returns_full_content_without_creating_receipt(
+    tmp_path: Path,
+) -> None:
+    bridge = OfflineBridge()
+    service, receipts = _service(tmp_path, bridge)
+    content = "完整回答：Mac 离线时仍必须返回给当前用户。"
+
+    result = await service.create(
+        title="离线降级",
+        markdown=content,
+        document_key="offline-note",
+        template="plain",
+        context=_context(),
+    )
+
+    assert result.status == "skipped_offline"
+    assert result.content == content
+    assert result.code == "mac_notes_bridge_offline"
+    assert receipts.latest_for_document("offline-note") is None
     assert bridge.create_calls == 0
 
 

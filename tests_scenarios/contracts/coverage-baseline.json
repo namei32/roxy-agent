@@ -1,7 +1,7 @@
 {
   "acceptedGaps": [],
   "base": "683b4791b0c25e3e899d65fe7c028514240414b3",
-  "catalogDigest": "98d030091096d2040917947f5c98a8febf8c73a96653098779f0e2cb4853040c",
+  "catalogDigest": "42200b34e6c8b21d1575594452a84de4a65a917dc276c94ec85f134821c37d52",
   "purpose": "approved_contract_mapping",
   "coveredP0": {
     "companion_control": [
@@ -41,6 +41,9 @@
     "mcp": [
       "mcp_call_finality",
       "mcp_process_lifecycle"
+    ],
+    "mac_notes_bridge": [
+      "mac_notes_bridge_contract"
     ],
     "memory": [
       "memory_persistence_contract"

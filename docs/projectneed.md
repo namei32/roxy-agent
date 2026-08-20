@@ -317,6 +317,14 @@ owner 和目标范围；默认关闭，启用与撤销都必须可观察。分�
 和不确定结果恢复协议；一次授权不得被 Memory、Consolidation、Scheduler、Proactive、后台任务或
 其他 channel 继承。
 
+### CAP-004 远程 Mac Notes 只在当前在线提交
+
+运行于非 macOS 主机的 Apple Notes 调用只能交给已认证、当前在线且通过 Notes readiness 的 Mac
+Bridge。云端必须先取得绑定本次 operation、payload 摘要和 connection epoch 的提议确认，再发送
+提交；提议未确认、Bridge 离线或提交前断线时只返回完整内容，不得排队、延迟补写或伪装保存。
+提交已经发送后结果不明时进入 `outcome_unknown`，只能核对，不能自动重放。在线事实由当前认证
+连接、短时心跳和本次提议确认共同证明；持久 `last_seen` 只能用于诊断，不能授权外部写入。
+
 ### ERR-001 失败必须保留含义
 
 不存在、空结果、合法跳过、明确降级、输入错误、数据损坏和内部故障必须可区分。只有拥有正确恢复动作的边界才能捕获异常并降级；其余错误 fail-fast、fail-loud。

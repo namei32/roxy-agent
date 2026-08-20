@@ -19,6 +19,8 @@ on run argv
 		return my appendNote(accountName, folderName, shouldCreateFolder, noteIdentifier, htmlPath)
 	else if actionName is "find" then
 		return my findMarker(accountName, folderName, shouldCreateFolder, markerText)
+	else if actionName is "probe" then
+		return my probeNotes(accountName, folderName)
 	end if
 	return my errorEnvelope("validate_action", -17000, "Unsupported Apple Notes action")
 end run
@@ -108,6 +110,22 @@ on findMarker(accountName, folderName, shouldCreateFolder, markerText)
 		return my errorEnvelope(stageName, errorNumber, errorMessage)
 	end try
 end findMarker
+
+
+on probeNotes(accountName, folderName)
+	set stageName to "probe_account"
+	try
+		tell application "Notes"
+			set targetAccount to my resolveAccount(accountName)
+			set stageName to "probe_folder"
+			set folderMatches to every folder of targetAccount whose name is folderName
+			if (count of folderMatches) is greater than 1 then error "Apple Notes folder is ambiguous" number -17007
+			return "READY"
+		end tell
+	on error errorMessage number errorNumber
+		return my errorEnvelope(stageName, errorNumber, errorMessage)
+	end try
+end probeNotes
 
 
 on resolveAccount(accountName)

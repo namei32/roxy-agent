@@ -192,3 +192,33 @@ retention = "until turn end or explicit release; cleanup failure retains owner"
 physical_reduction_owner = "tool.execution_spill"
 recovery_evidence = ["spill_owner", "spill_lifetime", "cleanup_diagnostic"]
 failure_semantics = ["operation_rejected", "degraded_continuation", "cleanup_degraded", "runtime_fatal"]
+
+[states.notes_bridge_cloud_operations]
+priority = "p0"
+requirements = ["CAP-002", "CAP-004", "SEC-010", "TST-001", "TST-002", "TST-005"]
+owner = "notes_bridge.broker"
+normal_change = "append_state_machine"
+destructive_owner = "protocol_owner"
+writers = ["mac_notes_bridge"]
+consumers = ["mac_notes_bridge", "plugin"]
+protected_tables = ["bridge_operations"]
+oracles = ["mac_notes_bridge_contract"]
+retention = "metadata-only operation evidence retained; no payload queue"
+physical_reduction_owner = "notes_bridge.broker"
+recovery_evidence = ["request_hash", "content_hash", "connection_epoch", "commit_boundary"]
+failure_semantics = ["operation_rejected", "degraded_continuation", "unit_failed", "runtime_fatal"]
+
+[states.mac_notes_receipts]
+priority = "p0"
+requirements = ["CAP-002", "CAP-004", "SEC-010", "TST-001", "TST-002", "TST-005"]
+owner = "mac_notes_bridge.receipt_store"
+normal_change = "append_state_machine"
+destructive_owner = "protocol_owner"
+writers = ["mac_notes_bridge"]
+consumers = ["mac_notes_bridge"]
+protected_tables = ["operations", "documents"]
+oracles = ["mac_notes_bridge_contract"]
+retention = "operation receipts and document mappings retained until an explicit future deletion protocol"
+physical_reduction_owner = "mac_notes_bridge.receipt_store"
+recovery_evidence = ["request_hash", "operation_status", "document_mapping", "notes_marker"]
+failure_semantics = ["operation_rejected", "degraded_continuation", "unit_failed", "runtime_fatal"]

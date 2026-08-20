@@ -100,6 +100,21 @@ def assert_unconfirmed_cleanup_retains_ownership(
         raise AssertionError("cleanup 未确认却提前丢失 execution ownership")
 
 
+def assert_mac_notes_bridge_contract(observation: Mapping[str, object]) -> None:
+    """Reject designs that turn presence into authority or replay Notes effects."""
+
+    if observation.get("unauthenticated_connection_online") is True:
+        raise AssertionError("未认证 Mac 连接被视为在线")
+    if observation.get("stale_heartbeat_online") is True:
+        raise AssertionError("过期心跳仍授予 Notes 写权限")
+    if observation.get("offline_payload_queued") is True:
+        raise AssertionError("Mac 离线正文进入了延迟队列")
+    if observation.get("write_before_commit") is True:
+        raise AssertionError("Mac 在 commit 前执行了 Apple Notes 写入")
+    if observation.get("unknown_effect_replayed") is True:
+        raise AssertionError("outcome_unknown Apple Notes 效果被自动重放")
+
+
 def assert_snapshot_fields(
     snapshot: Mapping[str, object],
     expected: Mapping[str, object],
@@ -425,7 +440,10 @@ def assert_mcp_reservoir_contract(observation: Mapping[str, object]) -> None:
 
 def assert_schedule_capacity_contract(observation: Mapping[str, object]) -> None:
     """断言第 11 个 Schedule add 不改变已有任务。"""
-    if observation.get("active_jobs", 0) > 10 and observation.get("operation_accepted") is True:
+    if (
+        cast(int, observation.get("active_jobs", 0)) > 10
+        and observation.get("operation_accepted") is True
+    ):
         raise AssertionError("Schedule 超过默认 10 个仍被接受")
     assert_companion_capacity(observation)
 

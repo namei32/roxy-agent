@@ -15,6 +15,7 @@ class AppleNotesConfig(BaseModel):
     create_folder_if_missing: bool = True
     allow_create: bool = True
     allow_append: bool = True
+    execution_mode: Literal["auto", "local", "remote"] = "auto"
     max_markdown_characters: int = Field(default=50_000, ge=200, le=200_000)
     max_html_bytes: int = Field(default=200_000, ge=1_000, le=1_000_000)
     script_timeout_seconds: float = Field(default=15.0, ge=1.0, le=60.0)

@@ -251,6 +251,7 @@ paths = [
   "agent/config_models.py",
   "agent/context.py",
   "agent/core/**",
+  "agent/identity.py",
   "agent/llm_json.py",
   "agent/model_runtime/**",
   "agent/persona.py",
@@ -350,6 +351,19 @@ requirements = ["SEC-002", "FS-001", "SES-006", "ERR-001", "TST-001", "TST-003"]
 paths = ["core/net/http.py", "agent/tools/web_fetch.py", "bootstrap/chat_api.py", "infra/channels/base.py", "infra/channels/delivery.py", "infra/channels/qq_channel.py", "infra/channels/telegram_channel.py", "infra/channels/web_chat_channel.py", "infra/mobile_realtime/attachments.py", "infra/mobile_realtime/channel.py", "infra/mobile_realtime/gateway.py", "infra/mobile_realtime/storage.py", "tests/mobile_realtime/test_attachments.py", "tests/mobile_realtime/test_channel.py", "tests/mobile_realtime/test_gateway.py", "tests/mobile_realtime/test_storage.py"]
 depends_on = ["runtime", "mobile_realtime"]
 scenarios = ["companion_external_io_contract"]
+
+[groups.mac_notes_bridge]
+priority = "p0"
+requirements = ["CAP-002", "CAP-004", "PLG-001", "PLG-004", "SEC-010", "TST-001", "TST-002", "TST-003", "TST-005"]
+paths = [
+  "companion/**",
+  "infra/notes_bridge/**",
+  "plugins/apple_notes/**",
+  "tests/test_notes_bridge.py",
+  "tests/test_apple_notes_plugin.py",
+]
+depends_on = ["runtime", "plugin", "companion_external_io"]
+scenarios = ["mac_notes_bridge_contract"]
 
 [groups.companion_peer_removal]
 priority = "p0"

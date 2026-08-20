@@ -49,6 +49,9 @@ description: Analyze an authorized Telegram image batch as interview material, a
 9. 只有 Apple Notes 返回 `committed` 才能说“已保存”。`outcome_unknown` 必须先报告结果不明并
    使用 `apple_notes_status` 核对，绝不能重放 create。`existing` 表示该批已经登记，不再创建
    第二条 Note；活动批次只提示当前题，已完成批次不重新开始追问。
+   `skipped_offline` 表示 Mac 当前不在线：本轮必须返回完整整理内容并说明没有保存，
+   不得在本轮重试，也不得在 Mac 上线后自动补写。只有用户之后再次明确要求保存，
+   才能开始新的写入尝试。
 10. Telegram 最终回复给出完整逐题回答、真实保存状态，并在末尾只问第一道模拟追问。
 
 ## Follow-up：一次只处理一道
