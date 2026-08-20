@@ -14,6 +14,7 @@ _PROJECT_ROOT = Path(__file__).parents[1]
 def test_setup_main_does_not_import_agent_runtime(tmp_path: Path) -> None:
     """setup-main 应在完整 Agent runtime 依赖加载前完成分发。"""
     missing_config = tmp_path / "missing.toml"
+    workspace = tmp_path / "workspace"
 
     result = subprocess.run(
         [
@@ -23,7 +24,7 @@ def test_setup_main_does_not_import_agent_runtime(tmp_path: Path) -> None:
             "--config",
             str(missing_config),
             "--workspace",
-            str(tmp_path / "workspace"),
+            str(workspace),
         ],
         capture_output=True,
         text=True,
@@ -34,6 +35,7 @@ def test_setup_main_does_not_import_agent_runtime(tmp_path: Path) -> None:
     assert result.returncode != 0
     assert "配置文件不存在" in output
     assert "apscheduler" not in output
+    assert not workspace.exists()
 
 
 def test_init_records_yoyo_origin_in_workspace_ledger(tmp_path: Path) -> None:

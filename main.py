@@ -180,12 +180,18 @@ def _run_lightweight_command() -> bool:
 
     import click
 
-    from agent.migrations import migrate_installation
-    from bootstrap.setup_main import run_main_model_setup
-
+    resolved_config_path = Path(config_path)
     try:
-        _ = migrate_installation(Path(config_path), workspace)
-        run_main_model_setup(Path(config_path), workspace)
+        # 1. 先拒绝无效输入，避免失败的设置命令提前创建迁移账本。
+        if not resolved_config_path.is_file():
+            raise click.ClickException(f"配置文件不存在: {resolved_config_path}")
+
+        # 2. 配置边界成立后才加载迁移与交互式设置依赖。
+        from agent.migrations import migrate_installation
+        from bootstrap.setup_main import run_main_model_setup
+
+        _ = migrate_installation(resolved_config_path, workspace)
+        run_main_model_setup(resolved_config_path, workspace)
     except click.ClickException as exc:
         exc.show()
         raise SystemExit(exc.exit_code) from exc
