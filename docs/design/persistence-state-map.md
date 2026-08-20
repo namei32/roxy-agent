@@ -111,6 +111,7 @@ workspace 仍不是完整运行环境的全部。模型 Provider credential 已�
 
 | 对象 | 正常增加 | 允许的原位或逻辑变化 | 允许物理减少的条件 |
 |---|---|---|---|
+| 显式 Roxy workspace 命名空间迁移 | `roxy-migrate` 只在目标不存在时把源 workspace 复制到唯一 staging，逐项校验后原子发布目标；目标父目录增加命名迁移锁，源缺少 `.instance.lock` 时可增加空运行锁用于离线协调 | 不改写源内文件、配置或外部 companion state；目标发布后也不由迁移器继续更新。源中既有 `.instance.lock`、PID、readiness 与 Socket 只作为跳过项，不进入目标 | 迁移器只能删除本次调用创建且尚未发布的唯一失败 staging；不得删除源、已发布目标或已有目标内容。owner 是 `RoxyWorkspaceMigrator`，恢复证据是始终保留的源目录、发布前源/目标树与文件 SHA-256 等价检查及返回的跳过清单 |
 | 显式 `config.toml` | 用户增加 channel、plugin、memory 和进程配置；模型迁移后只保留 workspace registry 标记 | 由配置管理动作修改静态当前值；它可能位于源码目录或任意 `--config` 路径 | 只能由明确配置管理动作删除；workspace 迁移不能假设它一定随目录存在 |
 | `~/.akashic/auth.json` | 旧安装、非模型配置或其他 workspace 可以增加 credential ID；0026 后本 workspace 的模型不再以它为 owner | 兼容 owner 可以继续更新自己的 credential；模型 Yoyo 只复制被当前 workspace 引用的值，不原位修改旧文件 | 当前 store 没有通用删除 API；模型迁移不得因当前 workspace 已复制就删除可能被其他消费者引用的 credential |
 | `~/.akashic-plugin/manifest.toml` | 安装时增加 plugin/package identity；运行时加载该插件后取得 Skill/MCP 声明 | enable/disable 更新 entry | 明确卸载时移除对应 entry；这只减少安装清单和能力，不删除 workspace 内 plugin-data |

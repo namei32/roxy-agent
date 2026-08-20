@@ -8,6 +8,7 @@
   python main.py app-server --stdio 启动父进程托管控制面
   python main.py exec ...           非交互执行一个 turn
   python main.py veda-reset         重建 workspace 默认人格
+  python main.py roxy-migrate ...   显式复制旧 workspace 到新名称空间
 """
 
 from __future__ import annotations
@@ -107,9 +108,41 @@ def _workspace_from_args(
 def _run_lightweight_command() -> bool:
     """在加载 Agent runtime 依赖前分发恢复与纯配置命令。"""
     args = sys.argv[1:]
-    if not args or args[0] not in {"setup-main", "veda-reset"}:
+    if not args or args[0] not in {"setup-main", "veda-reset", "roxy-migrate"}:
         return False
     command = args[0]
+
+    if command == "roxy-migrate":
+        import argparse
+
+        from agent.migrations import migrate_legacy_workspace
+
+        parser = argparse.ArgumentParser(
+            prog="python main.py roxy-migrate",
+            description="复制并原子发布 workspace；源目录始终保留。",
+        )
+        parser.add_argument("--from-workspace", required=True, type=Path)
+        parser.add_argument("--to-workspace", required=True, type=Path)
+        parser.add_argument("--dry-run", action="store_true")
+        parsed = parser.parse_args(args[1:])
+        try:
+            result = migrate_legacy_workspace(
+                source=parsed.from_workspace,
+                destination=parsed.to_workspace,
+                dry_run=parsed.dry_run,
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise SystemExit(f"Roxy workspace 迁移失败: {exc}") from exc
+        if result.state == "planned":
+            print(f"迁移计划有效: {result.source} -> {result.destination}")
+        else:
+            print(f"Roxy workspace 已迁移: {result.source} -> {result.destination}")
+            print("旧 workspace 未被删除；确认新实例正常后，再单独决定是否清理旧目录。")
+        if result.skipped_runtime_entries:
+            skipped = ", ".join(result.skipped_runtime_entries)
+            print(f"未复制仅运行期条目: {skipped}")
+        return True
+
     config_path = "config.toml"
     if "--config" in args:
         index = args.index("--config")
@@ -198,6 +231,7 @@ _HELP = """\
   setup-main                    仅切换主模型并保留其他配置
   init                          非交互初始化配置和工作区
   veda-reset                    备份并重建 workspace 默认人格
+  roxy-migrate                  显式迁移旧 workspace 到 Roxy 路径
   gateway                       启动未托管 Agent 服务（调试）
   supervise                     显式进入 supervisor（兼容别名）
   app-server --stdio            在 stdio 上运行程序化控制面
@@ -211,6 +245,8 @@ _HELP = """\
 通用选项:
   --config PATH                 配置文件，默认 config.toml
   --workspace PATH              覆盖 config.toml 中的 runtime.workspace
+  roxy-migrate --from-workspace OLD --to-workspace NEW [--dry-run]
+                                复制并原子发布 workspace；源目录保留
   -h, --help                    显示帮助
 
 无命令时启动 Agent 服务。
