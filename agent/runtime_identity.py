@@ -35,9 +35,9 @@ class RuntimeIdentity:
 
         # 1. Validate the deployment-owned expected identity.
         if _COMMIT_PATTERN.fullmatch(expected_commit) is None:
-            raise RuntimeError("AKASHIC_RUNTIME_COMMIT 必须是完整 40 位小写 commit")
+            raise RuntimeError("ROXY_RUNTIME_COMMIT 必须是完整 40 位小写 commit")
         if not host_checkout.is_absolute():
-            raise RuntimeError("AKASHIC_RUNTIME_CHECKOUT 必须是宿主绝对路径")
+            raise RuntimeError("ROXY_RUNTIME_CHECKOUT 必须是宿主绝对路径")
         if not host_checkout.is_dir():
             raise RuntimeError(f"runtime host checkout 不存在: {host_checkout}")
 
@@ -135,7 +135,7 @@ def _git_value(checkout: Path, *arguments: str) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Verify Akashic runtime identity")
+    parser = argparse.ArgumentParser(description="Verify Roxy runtime identity")
     parser.add_argument("--runtime-info", type=Path, required=True)
     parser.add_argument("--release-manifest", type=Path, required=True)
     parser.add_argument("--expected-commit", required=True)

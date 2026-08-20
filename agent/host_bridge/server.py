@@ -25,6 +25,7 @@ from agent.host_bridge.protocol import decode_message
 from agent.host_bridge.protocol import deserialize_message
 from agent.host_bridge.protocol import encode_message
 from agent.host_bridge.protocol import serialize_message
+from agent.identity import roxy_env_from, set_roxy_env_in, unset_roxy_env_in
 from agent.tools.unified_exec import ExecutionCleanupReport
 from agent.tools.unified_exec import ExecutionResult
 from agent.tools.unified_exec import ShellProcessManager
@@ -704,10 +705,16 @@ def _host_environment(
     """Keep host identity and import only execution-scoped presentation fields."""
 
     env = os.environ.copy()
-    env["AKASHIC_BOOT_ID"] = boot_id
+    set_roxy_env_in(env, "BOOT_ID", boot_id)
     for name in (
-        "AKASHIC_PLUGIN_ROLLOUT_OWNER_TURN",
-        "AKASHIC_PLUGIN_ROLLOUT_CAPABILITY",
+        "PLUGIN_ROLLOUT_OWNER_TURN",
+        "PLUGIN_ROLLOUT_CAPABILITY",
+    ):
+        if f"ROXY_{name}" in requested or f"AKASHIC_{name}" in requested:
+            set_roxy_env_in(env, name, roxy_env_from(requested, name))
+        else:
+            unset_roxy_env_in(env, name)
+    for name in (
         "NO_COLOR",
         "TERM",
         "COLORTERM",
@@ -719,7 +726,7 @@ def _host_environment(
             env[name] = requested[name]
         else:
             env.pop(name, None)
-    env["AKASHIC_RUNTIME_CLI"] = str(runtime_cli)
+    set_roxy_env_in(env, "RUNTIME_CLI", str(runtime_cli))
     env["PATH"] = f"{runtime_cli.parent}:{env.get('PATH', '')}"
     return env
 
@@ -742,7 +749,7 @@ def _materialize_runtime_cli(
     # 2. Publish a literal launcher under the Bridge-owned artifact root.
     launcher_dir = artifact_root / "runtime-cli" / release_commit
     launcher_dir.mkdir(parents=True, exist_ok=True)
-    launcher = launcher_dir / "akashic-runtime"
+    launcher = launcher_dir / "roxy-runtime"
     content = "\n".join(
         (
             "#!/bin/sh",
@@ -752,18 +759,19 @@ def _materialize_runtime_cli(
             "",
         )
     )
-    descriptor, temporary_name = tempfile.mkstemp(
-        dir=launcher_dir,
-        prefix=f".{launcher.name}.",
-        suffix=".tmp",
-    )
-    temporary = Path(temporary_name)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-        stream.write(content)
-        stream.flush()
-        os.fsync(stream.fileno())
-        os.fchmod(stream.fileno(), 0o500)
-    temporary.replace(launcher)
+    for target in (launcher, launcher_dir / "akashic-runtime"):
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=launcher_dir,
+            prefix=f".{target.name}.",
+            suffix=".tmp",
+        )
+        temporary = Path(temporary_name)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+            os.fchmod(stream.fileno(), 0o500)
+        temporary.replace(target)
     return launcher
 
 
@@ -797,7 +805,7 @@ def _cleanup_payload(report: ExecutionCleanupReport) -> dict[str, Any]:
 
 def main() -> None:
     configure_logging()
-    parser = argparse.ArgumentParser(description="Run the Akashic Host Bridge")
+    parser = argparse.ArgumentParser(description="Run the Roxy Host Bridge")
     parser.add_argument("--socket", type=Path, required=True)
     parser.add_argument("--token-file", type=Path, required=True)
     parser.add_argument("--lease-timeout", type=float, default=10.0)

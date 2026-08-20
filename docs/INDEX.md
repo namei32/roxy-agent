@@ -1,10 +1,10 @@
-# Akashic Agent 项目阅读索引
+# Roxy Agent 项目阅读索引
 
 这份文件是每个新会话进入仓库后的第一站。它只回答三件事：先读什么、什么情况下继续读哪份文件、读完后去哪里核对真实实现。
 
 它不是需求规范，也不保存临时进度。修改仓库文件时按 [`WORKFLOW.md`](WORKFLOW.md) 执行；长期语义以 [`projectneed.md`](projectneed.md) 为准，当前接手点以 [`NOW.md`](NOW.md) 为准，决策理由以 [`decisions/`](decisions/README.md) 为准。
 
-## 1. 先分清 Git worktree 与 Akashic workspace
+## 1. 先分清 Git worktree 与 Roxy workspace
 
 本项目同时使用两个容易混淆的“工作区”，它们不是一回事：
 
@@ -14,12 +14,12 @@
 └──────────────────────────────┘
 
 ┌──────────────────────────────┐
-│ Akashic <workspace>          │  会话、记忆、附件、调度、主动流程、
+│ Roxy <workspace>             │  会话、记忆、附件、调度、主动流程、
 │                              │  plugin-data、能力投影和运行状态
 └──────────────────────────────┘
 ```
 
-文档中的裸词 `workspace` 一律指第二种：由 `--workspace`、`AKASHIC_WORKSPACE` 或 `config.toml` 选中的 Akashic 运行数据根。要表达代码副本时必须写 `Git worktree`、`repository` 或 `checkout`。代码 worktree 可以随时重建；正式 Akashic workspace 含用户和 agent 的持续数据，不能随代码清理、切分支或重构一起变化。
+文档中的裸词 `workspace` 一律指第二种：由 `--workspace`、`ROXY_WORKSPACE`（兼容读取 `AKASHIC_WORKSPACE`）或 `config.toml` 选中的 Roxy 运行数据根。要表达代码副本时必须写 `Git worktree`、`repository` 或 `checkout`。代码 worktree 可以随时重建；正式 Roxy workspace 含用户和 agent 的持续数据，不能随代码清理、切分支或重构一起变化。
 
 ## 2. 新会话固定入口
 

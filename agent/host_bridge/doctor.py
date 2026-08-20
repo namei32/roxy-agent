@@ -43,7 +43,7 @@ async def _probe(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Probe the Akashic Host Bridge")
+    parser = argparse.ArgumentParser(description="Probe the Roxy Host Bridge")
     parser.add_argument("--socket", type=Path, required=True)
     parser.add_argument("--token", required=True)
     parser.add_argument("--expected-release-commit", required=True)

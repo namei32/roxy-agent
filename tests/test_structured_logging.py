@@ -80,6 +80,25 @@ def test_json_logging_uses_library_formatter_and_drops_arbitrary_extra(
     assert "arbitrary_payload" not in document
 
 
+def test_roxy_logging_environment_overrides_legacy_aliases(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("AKASHIC_LOG_FORMAT", "text")
+    monkeypatch.setenv("AKASHIC_SERVICE_NAME", "legacy-service")
+    monkeypatch.setenv("AKASHIC_BOOT_ID", "legacy-boot")
+    monkeypatch.setenv("ROXY_LOG_FORMAT", "json")
+    monkeypatch.setenv("ROXY_SERVICE_NAME", "roxy-service")
+    monkeypatch.setenv("ROXY_BOOT_ID", "roxy-boot")
+
+    configure_logging()
+    logging.getLogger("test.roxy").info("canonical")
+
+    document = json.loads(capsys.readouterr().err)
+    assert document["service"] == "roxy-service"
+    assert document["boot_id"] == "roxy-boot"
+
+
 def test_structured_logging_rejects_unowned_fields() -> None:
     with pytest.raises(ValueError, match="未知结构化日志字段"):
         log_event(

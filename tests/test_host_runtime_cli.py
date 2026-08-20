@@ -39,6 +39,7 @@ def test_runtime_cli_is_bound_to_materialized_release(tmp_path: Path) -> None:
         bridge_python,
         "a" * 40,
     )
+    legacy_launcher = launcher.with_name("akashic-runtime")
 
     result = subprocess.run(
         [str(launcher), "plugin-doctor", "demo@github"],
@@ -60,6 +61,10 @@ def test_runtime_cli_is_bound_to_materialized_release(tmp_path: Path) -> None:
     ]
     assert str(bridge_python) in launcher.read_text(encoding="utf-8")
     assert str(fake_python) not in launcher.read_text(encoding="utf-8")
+    assert launcher.name == "roxy-runtime"
+    assert legacy_launcher.read_text(encoding="utf-8") == launcher.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_host_runtime_hint_is_explicit_and_local_mode_is_silent(

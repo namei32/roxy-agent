@@ -1,4 +1,4 @@
-"""Host execution bridge for containerized Akashic runtimes."""
+"""Host execution bridge for containerized Roxy runtimes."""
 
 from agent.host_bridge.factory import build_shell_process_manager
 

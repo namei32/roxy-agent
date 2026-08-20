@@ -16,7 +16,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import signal
 import sys
 import tomllib
@@ -28,8 +27,8 @@ from uuid import uuid4
 from agent.identity import default_workspace_path, roxy_env, set_roxy_env
 
 
-_PLUGIN_ROLLOUT_OWNER_TURN_ENV = "AKASHIC_PLUGIN_ROLLOUT_OWNER_TURN"
-_PLUGIN_ROLLOUT_CAPABILITY_ENV = "AKASHIC_PLUGIN_ROLLOUT_CAPABILITY"
+_PLUGIN_ROLLOUT_OWNER_TURN_ENV = "PLUGIN_ROLLOUT_OWNER_TURN"
+_PLUGIN_ROLLOUT_CAPABILITY_ENV = "PLUGIN_ROLLOUT_CAPABILITY"
 _AGENT_INTERNAL_PLUGIN_COMMANDS = frozenset(
     {
         "plugin-status",
@@ -43,7 +42,7 @@ _AGENT_INTERNAL_PLUGIN_COMMANDS = frozenset(
 
 def _reject_agent_internal_plugin_action(command: str) -> None:
     if (
-        os.environ.get(_PLUGIN_ROLLOUT_OWNER_TURN_ENV)
+        roxy_env(_PLUGIN_ROLLOUT_OWNER_TURN_ENV)
         and command in _AGENT_INTERNAL_PLUGIN_COMMANDS
     ):
         raise ValueError(
@@ -362,7 +361,7 @@ def _uninstall_via_runtime(
         config.app_server.listen,
         workspace,
     )
-    owner_turn_id = os.environ.get(_PLUGIN_ROLLOUT_OWNER_TURN_ENV, "")
+    owner_turn_id = roxy_env(_PLUGIN_ROLLOUT_OWNER_TURN_ENV)
     return asyncio.run(
         _request_plugin_uninstall(
             endpoint,
@@ -432,7 +431,7 @@ async def run_exec(args: list[str], config_path: str, workspace: Path) -> int:
     runtime_value = _get_flag_value(args, "--runtime")
     if runtime_value is not None and runtime_value not in {"stable", "latest"}:
         raise ValueError("exec --runtime 必须是 stable 或 latest")
-    rollout_capability = os.environ.get(_PLUGIN_ROLLOUT_CAPABILITY_ENV, "")
+    rollout_capability = roxy_env(_PLUGIN_ROLLOUT_CAPABILITY_ENV)
     if rollout_capability and runtime_value is not None:
         raise ValueError("插件自验证由 Core 自动选择候选版本，请移除 --runtime")
     if "--persist-memory" in args and not new_thread:
@@ -819,9 +818,7 @@ if __name__ == "__main__":
                         "marketplace": marketplace,
                         "ref": ref_value or "",
                         "sparse": _parse_csv_flag(sparse_value),
-                        "ownerTurnId": os.environ.get(
-                            _PLUGIN_ROLLOUT_OWNER_TURN_ENV, ""
-                        ),
+                        "ownerTurnId": roxy_env(_PLUGIN_ROLLOUT_OWNER_TURN_ENV),
                     },
                 )
             )
@@ -838,7 +835,7 @@ if __name__ == "__main__":
         sys.exit(0)
 
     if args and args[0] == "plugin-revert":
-        owner_turn_id = os.environ.get(_PLUGIN_ROLLOUT_OWNER_TURN_ENV, "")
+        owner_turn_id = roxy_env(_PLUGIN_ROLLOUT_OWNER_TURN_ENV)
         try:
             result = asyncio.run(
                 _request_runtime_control(

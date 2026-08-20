@@ -1,21 +1,21 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Protocol
 
 from agent.host_bridge.client import HostBridgeShellProcessManager
 from agent.host_bridge.client import HostBridgeSkillCapabilityChecker
+from agent.identity import roxy_env
 from agent.tools.unified_exec import ExecutionCleanupReport
 from agent.tools.unified_exec import ExecutionResult
 from agent.tools.unified_exec import ShellProcessManager
 
-_SOCKET_ENV = "AKASHIC_HOST_BRIDGE_SOCKET"
-_TOKEN_ENV = "AKASHIC_HOST_BRIDGE_TOKEN"
-_BOOT_ID_ENV = "AKASHIC_BOOT_ID"
-_MODE_ENV = "AKASHIC_EXECUTION_MODE"
-_RELEASE_COMMIT_ENV = "AKASHIC_RUNTIME_COMMIT"
-_TOOLCHAIN_DIGEST_ENV = "AKASHIC_HOST_TOOLCHAIN_DIGEST"
+_SOCKET_ENV = "HOST_BRIDGE_SOCKET"
+_TOKEN_ENV = "HOST_BRIDGE_TOKEN"
+_BOOT_ID_ENV = "BOOT_ID"
+_MODE_ENV = "EXECUTION_MODE"
+_RELEASE_COMMIT_ENV = "RUNTIME_COMMIT"
+_TOOLCHAIN_DIGEST_ENV = "HOST_TOOLCHAIN_DIGEST"
 
 
 class ShellProcessManagerProtocol(Protocol):
@@ -54,11 +54,11 @@ class ShellProcessManagerProtocol(Protocol):
 def build_shell_process_manager() -> ShellProcessManagerProtocol:
     """Select the explicit local or host-bridge execution backend."""
 
-    mode = os.environ.get(_MODE_ENV, "local")
+    mode = roxy_env(_MODE_ENV, "local")
     if mode == "local":
         return ShellProcessManager()
     if mode != "host-bridge":
-        raise RuntimeError(f"{_MODE_ENV} 只能是 local 或 host-bridge")
+        raise RuntimeError("ROXY_EXECUTION_MODE 只能是 local 或 host-bridge")
     socket_path, boot_id, token, release_commit, toolchain_digest = _bridge_identity()
     return HostBridgeShellProcessManager(
         socket_path,
@@ -72,20 +72,21 @@ def build_shell_process_manager() -> ShellProcessManagerProtocol:
 def _bridge_identity() -> tuple[Path, str, str, str, str]:
     """Load and validate the configured Host Bridge identity."""
 
-    socket_text = os.environ.get(_SOCKET_ENV)
-    if socket_text is None:
-        raise RuntimeError(f"host-bridge 模式缺少 {_SOCKET_ENV}")
-    token = os.environ.get(_TOKEN_ENV)
-    boot_id = os.environ.get(_BOOT_ID_ENV)
-    release_commit = os.environ.get(_RELEASE_COMMIT_ENV)
-    toolchain_digest = os.environ.get(_TOOLCHAIN_DIGEST_ENV)
+    socket_text = roxy_env(_SOCKET_ENV)
+    if not socket_text:
+        raise RuntimeError("host-bridge 模式缺少 ROXY_HOST_BRIDGE_SOCKET")
+    token = roxy_env(_TOKEN_ENV)
+    boot_id = roxy_env(_BOOT_ID_ENV)
+    release_commit = roxy_env(_RELEASE_COMMIT_ENV)
+    toolchain_digest = roxy_env(_TOOLCHAIN_DIGEST_ENV)
     if not token or not boot_id or not release_commit or not toolchain_digest:
         raise RuntimeError(
-            f"配置 {_SOCKET_ENV} 时必须同时提供 token、boot 和 release identity"
+            "配置 ROXY_HOST_BRIDGE_SOCKET 时必须同时提供 "
+            "token、boot 和 release identity"
         )
     socket_path = Path(socket_text)
     if not socket_path.is_absolute():
-        raise RuntimeError(f"{_SOCKET_ENV} 必须是绝对路径")
+        raise RuntimeError("ROXY_HOST_BRIDGE_SOCKET 必须是绝对路径")
     return socket_path, boot_id, token, release_commit, toolchain_digest
 
 
@@ -101,11 +102,11 @@ def build_file_bridge() -> HostBridgeShellProcessManager | None:
 def build_skill_capability_checker() -> HostBridgeSkillCapabilityChecker | None:
     """Build the host requirement checker only in explicit bridge mode."""
 
-    mode = os.environ.get(_MODE_ENV, "local")
+    mode = roxy_env(_MODE_ENV, "local")
     if mode == "local":
         return None
     if mode != "host-bridge":
-        raise RuntimeError(f"{_MODE_ENV} 只能是 local 或 host-bridge")
+        raise RuntimeError("ROXY_EXECUTION_MODE 只能是 local 或 host-bridge")
     socket_path, boot_id, token, release_commit, toolchain_digest = _bridge_identity()
     return HostBridgeSkillCapabilityChecker(
         socket_path, boot_id, token, release_commit, toolchain_digest

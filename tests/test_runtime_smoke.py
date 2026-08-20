@@ -323,6 +323,10 @@ def test_workspace_selection_prefers_cli_then_env_then_config(
         config_path,
     ) == environment_workspace.resolve()
 
+    canonical_workspace = tmp_path / "roxy-environment-workspace"
+    monkeypatch.setenv("ROXY_WORKSPACE", str(canonical_workspace))
+    assert main._workspace_from_args([], config_path) == canonical_workspace.resolve()
+
     cli_workspace = tmp_path / "cli-workspace"
     assert main._workspace_from_args(
         ["--workspace", str(cli_workspace)],

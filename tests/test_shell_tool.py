@@ -879,8 +879,12 @@ def test_shell_env_exports_plugin_rollout_owner_turn(
 ) -> None:
     monkeypatch.setenv("AKASHIC_PLUGIN_ROLLOUT_OWNER_TURN", "stale")
     monkeypatch.setenv("AKASHIC_PLUGIN_ROLLOUT_CAPABILITY", "stale")
+    monkeypatch.setenv("ROXY_PLUGIN_ROLLOUT_OWNER_TURN", "stale")
+    monkeypatch.setenv("ROXY_PLUGIN_ROLLOUT_CAPABILITY", "stale")
     assert "AKASHIC_PLUGIN_ROLLOUT_OWNER_TURN" not in _shell_env()
     assert "AKASHIC_PLUGIN_ROLLOUT_CAPABILITY" not in _shell_env()
+    assert "ROXY_PLUGIN_ROLLOUT_OWNER_TURN" not in _shell_env()
+    assert "ROXY_PLUGIN_ROLLOUT_CAPABILITY" not in _shell_env()
 
     from agent.control.context import (
         register_plugin_child_capability_minter,
@@ -898,6 +902,12 @@ def test_shell_env_exports_plugin_rollout_owner_turn(
             "turn:context-pressure-uninstall"
         )
         assert _shell_env()["AKASHIC_PLUGIN_ROLLOUT_CAPABILITY"] == (
+            "capability-for:turn:context-pressure-uninstall"
+        )
+        assert _shell_env()["ROXY_PLUGIN_ROLLOUT_OWNER_TURN"] == (
+            "turn:context-pressure-uninstall"
+        )
+        assert _shell_env()["ROXY_PLUGIN_ROLLOUT_CAPABILITY"] == (
             "capability-for:turn:context-pressure-uninstall"
         )
     finally:

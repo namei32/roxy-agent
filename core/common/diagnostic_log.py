@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 import sys
 from contextlib import contextmanager
@@ -9,6 +8,8 @@ from contextvars import ContextVar
 from typing import Any, Iterator, Mapping, cast
 
 from pythonjsonlogger.json import JsonFormatter
+
+from agent.identity import roxy_env
 
 _DIAG_FIELDS = (
     "event",
@@ -97,8 +98,8 @@ diagnostic_execution: ContextVar[str | None] = ContextVar(
 )
 
 
-class AkashicJsonFormatter(JsonFormatter):
-    """Apply the Akashic field and redaction policy before library serialization."""
+class RoxyJsonFormatter(JsonFormatter):
+    """Apply the Roxy field and redaction policy before library serialization."""
 
     def process_log_record(self, log_data: dict[str, Any]) -> dict[str, Any]:
         """Reduce library-extracted data to the owned diagnostic schema."""
@@ -142,8 +143,8 @@ class AkashicJsonFormatter(JsonFormatter):
                 document["operation"] = diagnostic.group("operation")
 
         # 3. Add immutable process identity supplied by the runtime.
-        release_commit = os.environ.get("AKASHIC_RUNTIME_COMMIT")
-        boot_id = os.environ.get("AKASHIC_BOOT_ID")
+        release_commit = roxy_env("RUNTIME_COMMIT")
+        boot_id = roxy_env("BOOT_ID")
         if release_commit and "release_commit" not in document:
             document["release_commit"] = release_commit
         if boot_id and "boot_id" not in document:
@@ -151,17 +152,21 @@ class AkashicJsonFormatter(JsonFormatter):
         return document
 
 
+# 旧导入名属于公开测试与插件兼容面，不用它表示新运行时身份。
+AkashicJsonFormatter = RoxyJsonFormatter
+
+
 def configure_logging() -> None:
     """Configure stderr logging from the process environment."""
 
-    level_name = os.environ.get("AKASHIC_LOG_LEVEL", "INFO").upper()
+    level_name = roxy_env("LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, None)
     if not isinstance(level, int):
-        raise ValueError(f"AKASHIC_LOG_LEVEL 无效: {level_name}")
+        raise ValueError(f"ROXY_LOG_LEVEL 无效: {level_name}")
     handler = logging.StreamHandler(sys.stderr)
-    if os.environ.get("AKASHIC_LOG_FORMAT", "text").lower() == "json":
+    if roxy_env("LOG_FORMAT", "text").lower() == "json":
         handler.setFormatter(
-            AkashicJsonFormatter(
+            RoxyJsonFormatter(
                 ("levelname", "name", "message", "process"),
                 rename_fields={
                     "levelname": "level",
@@ -170,7 +175,7 @@ def configure_logging() -> None:
                     "exc_info": "exception",
                 },
                 static_fields={
-                    "service": os.environ.get("AKASHIC_SERVICE_NAME", "akashic")
+                    "service": roxy_env("SERVICE_NAME", "roxy")
                 },
                 timestamp=True,
                 json_ensure_ascii=False,

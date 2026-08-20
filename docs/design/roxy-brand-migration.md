@@ -89,7 +89,9 @@ staging；目标和源均保持原状。目标存在时拒绝合并，不会覆�
 
 `agent.identity.roxy_env*` 在读取时给予 `ROXY_*` 优先级。由当前 runtime 启动的子进程会
 写入 Roxy 环境变量，并镜像旧变量，避免尚未升级的 helper 失去 workspace 或 lifecycle
-信息。短路径 Socket 回退仍使用 `/tmp/roxy-sockets`，不退回 TCP。
+信息。Supervisor、Host Bridge、插件 MCP/managed service、回放时钟、日志与 readiness 均使用这一边界。
+Host Bridge 发布 `roxy-runtime` 为主启动器，同目录保留 `akashic-runtime` 内容等价的兼容启动器。
+短路径 Socket 回退仍使用 `/tmp/roxy-sockets`，不退回 TCP。
 
 桌面 Dashboard 同时发布 Roxy 与旧的 import-map、全局、刷新事件、theme cookie/event 和
 插件 DOM 标记。Mobile 将旧 `AkashicNative` / `AkashicMobile` 与 Roxy 对象绑定为同一实例，

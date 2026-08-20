@@ -235,6 +235,7 @@ async def test_mcp_candidate_uses_isolated_data_and_exact_read_only_surface(
             candidate.contributions.mcp_servers["runtime_probe"]["env"],
         )
         assert candidate_env["AKA_PLUGIN_DATA_DIR"] == str(validation_data)
+        assert candidate_env["ROXY_WORKSPACE"] == str(validation_workspace)
         assert candidate_env["AKASHIC_WORKSPACE"] == str(validation_workspace)
         assert not (tmp_path / "workspace" / "candidate-mcp-started.json").exists()
         assert (validation_workspace / "candidate-mcp-started.json").is_file()
@@ -536,6 +537,8 @@ async def test_exclusive_service_candidate_uses_isolated_port_then_formal_switch
     assert candidate_port != "18765"
     assert f":{candidate_port}/ready" in str(candidate_service["readiness_url"])
     assert "runtime/plugin-validation" in candidate_env["AKA_PLUGIN_DATA_DIR"]
+    assert "runtime/plugin-validation" in candidate_env["ROXY_WORKSPACE"]
+    assert candidate_env["ROXY_WORKSPACE"].endswith("/workspace")
     assert "runtime/plugin-validation" in candidate_env["AKASHIC_WORKSPACE"]
     assert candidate_env["AKASHIC_WORKSPACE"].endswith("/workspace")
 

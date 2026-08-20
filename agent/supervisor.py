@@ -23,6 +23,7 @@ from agent.background.boot_guardian import (
     _pid_exists,
     _reap_adopted_children,
 )
+from agent.identity import roxy_env, unset_roxy_env_in
 from utils.process_guard import (
     ProcessRef,
     open_process_ref,
@@ -332,12 +333,12 @@ def run_supervisor(
             os.set_blocking(lifecycle_read_fd, False)
             guardian_env = os.environ.copy()
             for name in (
-                "AKASHIC_SUPERVISED",
-                "AKASHIC_BOOT_ID",
-                "AKASHIC_LIFECYCLE_FD",
-                "AKASHIC_RESTART_NONCE",
+                "SUPERVISED",
+                "BOOT_ID",
+                "LIFECYCLE_FD",
+                "RESTART_NONCE",
             ):
-                guardian_env.pop(name, None)
+                unset_roxy_env_in(guardian_env, name)
             try:
                 guardian = subprocess.Popen(
                     [
@@ -658,17 +659,17 @@ def _start_settings_server(
 
     from bootstrap.web_shell import create_web_shell_server
 
-    host = os.environ.get("AKASHIC_WEB_HOST", "127.0.0.1")
-    allow_non_loopback = os.environ.get("AKASHIC_WEB_ALLOW_NON_LOOPBACK") == "1"
+    host = roxy_env("WEB_HOST", "127.0.0.1")
+    allow_non_loopback = roxy_env("WEB_ALLOW_NON_LOOPBACK") == "1"
     if host != "127.0.0.1" and not allow_non_loopback:
-        raise RuntimeError("AKASHIC_WEB_HOST 只允许 127.0.0.1")
-    raw_port = os.environ.get("AKASHIC_WEB_PORT", "2236")
+        raise RuntimeError("ROXY_WEB_HOST 只允许 127.0.0.1")
+    raw_port = roxy_env("WEB_PORT", "2236")
     try:
         port = int(raw_port)
     except ValueError as error:
-        raise RuntimeError("AKASHIC_WEB_PORT 必须是 1 到 65535 的整数") from error
+        raise RuntimeError("ROXY_WEB_PORT 必须是 1 到 65535 的整数") from error
     if not 1 <= port <= 65_535:
-        raise RuntimeError("AKASHIC_WEB_PORT 必须是 1 到 65535 的整数")
+        raise RuntimeError("ROXY_WEB_PORT 必须是 1 到 65535 的整数")
     server = create_web_shell_server(
         config_path,
         workspace,
@@ -687,5 +688,5 @@ def _start_settings_server(
         server.should_exit = True
         thread.join(timeout=1)
         raise RuntimeError(f"Web Shell 无法监听 {host}:{port}")
-    print(f"Akashic Web 已就绪: http://{host}:{port}", flush=True)
+    print(f"Roxy Web 已就绪: http://{host}:{port}", flush=True)
     return server, thread

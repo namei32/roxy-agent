@@ -22,6 +22,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import BaseModel, ValidationError
 
+from agent.identity import set_roxy_env_in
 from agent.plugins.manifest import (
     ensure_workspace_plugin_data_dir,
     load_package_manifest,
@@ -4659,6 +4660,21 @@ def _resolve_mobile_ui_asset(
     )
 
 
+def _plugin_process_environment(
+    declared: Mapping[str, str],
+    data_dir: Path,
+    workspace: Path,
+) -> dict[str, str]:
+    """构造插件子进程环境，新旧 runtime 同时可读 workspace。"""
+
+    environment = {
+        **declared,
+        "AKA_PLUGIN_DATA_DIR": str(data_dir),
+    }
+    set_roxy_env_in(environment, "WORKSPACE", str(workspace))
+    return environment
+
+
 def _resolve_managed_services(
     plugin_dir: Path,
     data_dir: Path,
@@ -4708,14 +4724,12 @@ def _resolve_managed_services(
                 venv_python = _venv_python(runtime_root / ".venv")
                 if venv_python.exists():
                     command[0] = str(venv_python)
+        service_env = _plugin_process_environment(spec.env, data_dir, workspace)
+        _fall_back_to_current_python(command, service_env)
         services[spec.id] = {
             "command": command,
             "cwd": cwd,
-            "env": {
-                **spec.env,
-                "AKA_PLUGIN_DATA_DIR": str(data_dir),
-                "AKASHIC_WORKSPACE": str(workspace),
-            },
+            "env": service_env,
             "readiness_url": spec.readiness_url,
             "startup_timeout_seconds": spec.startup_timeout_seconds,
             "revision": source_revision,
@@ -4766,17 +4780,14 @@ def _resolve_mcp_servers(
         )
         _require_plugin_path(plugin_root, resolved_cwd, "MCP cwd")
         cwd = str(resolved_cwd)
-        env = {
-            **spec.env,
-            "AKA_PLUGIN_DATA_DIR": str(data_dir),
-            "AKASHIC_WORKSPACE": str(workspace),
-        }
+        env = _plugin_process_environment(spec.env, data_dir, workspace)
         if _is_python_command(command[0]):
             runtime_root = _resolve_mcp_runtime_root(plugin_dir, cwd, command)
             if runtime_root is not None:
                 venv_python = _venv_python(runtime_root / ".venv")
                 if venv_python.exists():
                     command[0] = str(venv_python)
+        _fall_back_to_current_python(command, env)
         servers[spec.name] = {
             "command": command,
             "env": env,
@@ -4815,12 +4826,14 @@ def _validation_contributions(
         port = _allocate_validation_port()
         validation_env[port_env] = str(port)
         isolated = dict(spec)
-        isolated["env"] = {
-            **dict(spec.get("env") or {}),
-            port_env: str(port),
-            "AKA_PLUGIN_DATA_DIR": str(candidate.data_dir),
-            "AKASHIC_WORKSPACE": str(validation_workspace),
-        }
+        isolated["env"] = _plugin_process_environment(
+            {
+                **dict(spec.get("env") or {}),
+                port_env: str(port),
+            },
+            candidate.data_dir,
+            validation_workspace,
+        )
         isolated["readiness_url"] = _replace_url_port(readiness_url, port)
         validation_services[service_id] = isolated
 
@@ -4828,12 +4841,14 @@ def _validation_contributions(
     mcp_servers = {
         name: {
             **spec,
-            "env": {
-                **dict(spec.get("env") or {}),
-                **validation_env,
-                "AKA_PLUGIN_DATA_DIR": str(candidate.data_dir),
-                "AKASHIC_WORKSPACE": str(validation_workspace),
-            },
+            "env": _plugin_process_environment(
+                {
+                    **dict(spec.get("env") or {}),
+                    **validation_env,
+                },
+                candidate.data_dir,
+                validation_workspace,
+            ),
         }
         for name, spec in production.mcp_servers.items()
     }
@@ -4971,6 +4986,21 @@ def _require_plugin_path(plugin_dir: Path, path: Path, label: str) -> None:
 
 def _is_python_command(value: str) -> bool:
     return Path(value).name.lower() in {"python", "python3", "python.exe"}
+
+
+def _fall_back_to_current_python(
+    command: list[str],
+    environment: Mapping[str, str],
+) -> None:
+    """让没有 ``python`` shim 的开发机仍能运行声明为 Python 的插件。"""
+
+    executable = command[0]
+    if not _is_python_command(executable):
+        return
+    search_path = environment.get("PATH", os.environ.get("PATH"))
+    if Path(executable).is_absolute() or shutil.which(executable, path=search_path):
+        return
+    command[0] = sys.executable
 
 
 def _resolve_mcp_runtime_root(

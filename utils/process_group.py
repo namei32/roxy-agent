@@ -12,7 +12,12 @@ from pathlib import Path
 from typing import Any
 
 
-_RUNTIME_IDENTITY_ENV = ("AKASHIC_BOOT_ID", "AKASHIC_SUPERVISED")
+_RUNTIME_IDENTITY_ENV = (
+    "ROXY_BOOT_ID",
+    "ROXY_SUPERVISED",
+    "AKASHIC_BOOT_ID",
+    "AKASHIC_SUPERVISED",
+)
 
 
 def process_group_spawn_kwargs() -> dict[str, Any]:

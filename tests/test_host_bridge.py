@@ -313,10 +313,32 @@ def test_host_environment_exposes_release_runtime_cli(
         runtime_cli,
     )
 
+    assert env["ROXY_BOOT_ID"] == "boot-runtime-cli"
+    assert env["AKASHIC_BOOT_ID"] == "boot-runtime-cli"
+    assert env["ROXY_RUNTIME_CLI"] == str(runtime_cli)
     assert env["AKASHIC_RUNTIME_CLI"] == str(runtime_cli)
     assert env["PATH"].split(":", 1) == [str(runtime_cli.parent), "/usr/bin"]
     assert env.get("AKASHIC_RUNTIME_CHECKOUT") != "/attacker/checkout"
     assert env.get("AKASHIC_RUNTIME_COMMIT") != "f" * 40
+
+
+@pytest.mark.asyncio
+async def test_bridge_factory_prefers_complete_roxy_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    socket_path = tmp_path / "roxy-bridge.sock"
+    monkeypatch.setenv("ROXY_HOST_BRIDGE_SOCKET", str(socket_path))
+    monkeypatch.setenv("ROXY_EXECUTION_MODE", "host-bridge")
+    monkeypatch.setenv("ROXY_RUNTIME_COMMIT", "a" * 40)
+    monkeypatch.setenv("ROXY_HOST_TOOLCHAIN_DIGEST", "b" * 64)
+    monkeypatch.setenv("ROXY_HOST_BRIDGE_TOKEN", "roxy-token")
+    monkeypatch.setenv("ROXY_BOOT_ID", "roxy-boot")
+
+    manager = build_shell_process_manager()
+
+    assert isinstance(manager, HostBridgeShellProcessManager)
+    await manager.close_transport()
 
 
 def test_bridge_factory_requires_complete_identity(

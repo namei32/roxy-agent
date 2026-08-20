@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-import os
 import signal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -14,6 +13,7 @@ from agent.control.runtime import ConversationRuntime
 from agent.control.service import ControlService
 from agent.host_bridge.monitor import build_host_bridge_monitor
 from agent.host_bridge.monitor import claim_host_bridge_boot
+from agent.identity import roxy_env
 from agent.restart import RestartCoordinator
 from agent.config_models import Config
 from bootstrap.channel_host import ChannelHost
@@ -52,7 +52,7 @@ if TYPE_CHECKING:
 
 configure_logging()
 logging.getLogger("agent.plugins.manager").setLevel(
-    os.environ.get("AKASHIC_PLUGIN_LOG_LEVEL", "INFO").upper()
+    roxy_env("PLUGIN_LOG_LEVEL", "INFO").upper()
 )
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("telegram").setLevel(logging.WARNING)

@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from agent.control.context import mint_plugin_child_capability, running_turn_id
 from agent.host_bridge.factory import ShellProcessManagerProtocol
+from agent.identity import set_roxy_env_in, unset_roxy_env_in
 from agent.tools.base import Tool
 from agent.tools.shell_security import validate_command
 from agent.tools.shell_security import validate_network_command
@@ -30,8 +31,8 @@ logger = logging.getLogger(__name__)
 
 _MAX_OUTPUT = 30_000
 _LOCAL_OWNER_PREFIX = "local-shell"
-_PLUGIN_ROLLOUT_OWNER_TURN_ENV = "AKASHIC_PLUGIN_ROLLOUT_OWNER_TURN"
-_PLUGIN_ROLLOUT_CAPABILITY_ENV = "AKASHIC_PLUGIN_ROLLOUT_CAPABILITY"
+_PLUGIN_ROLLOUT_OWNER_TURN_ENV = "PLUGIN_ROLLOUT_OWNER_TURN"
+_PLUGIN_ROLLOUT_CAPABILITY_ENV = "PLUGIN_ROLLOUT_CAPABILITY"
 _REMOVED_SHELL_ARGUMENTS = frozenset({"run_in_background", "auto_promote"})
 _UNIFIED_EXEC_ENV = {
     "NO_COLOR": "1",
@@ -97,7 +98,7 @@ class ShellTool(Tool):
             "在 shell 中执行命令。命令在短等待窗口内结束时直接返回 exit_code；"
             "仍在运行时返回 execution_id，之后用 write_stdin 等待增量输出或向 PTY 输入。\n"
             "注意：\n"
-            "- execution_id 只标识这次命令执行，不是 OS PID 或 Akashic 对话 session\n"
+            "- execution_id 只标识这次命令执行，不是 OS PID 或 Roxy 对话 session\n"
             "- shell 默认使用当前用户的默认 shell；login 默认 true，可显式关闭\n"
             "- write_stdin 每次只返回上次读取后的新增输出，空 chars 可等待最长 300 秒\n"
             "- 需要交互输入时设置 tty=true；非 PTY 只允许用 Ctrl-C 中断\n"
@@ -467,15 +468,15 @@ def _shell_env() -> dict[str, str]:
     env = os.environ.copy()
     turn_id = running_turn_id.get()
     if turn_id:
-        env[_PLUGIN_ROLLOUT_OWNER_TURN_ENV] = turn_id
+        set_roxy_env_in(env, _PLUGIN_ROLLOUT_OWNER_TURN_ENV, turn_id)
         capability = mint_plugin_child_capability(turn_id)
         if capability:
-            env[_PLUGIN_ROLLOUT_CAPABILITY_ENV] = capability
+            set_roxy_env_in(env, _PLUGIN_ROLLOUT_CAPABILITY_ENV, capability)
         else:
-            env.pop(_PLUGIN_ROLLOUT_CAPABILITY_ENV, None)
+            unset_roxy_env_in(env, _PLUGIN_ROLLOUT_CAPABILITY_ENV)
     else:
-        env.pop(_PLUGIN_ROLLOUT_OWNER_TURN_ENV, None)
-        env.pop(_PLUGIN_ROLLOUT_CAPABILITY_ENV, None)
+        unset_roxy_env_in(env, _PLUGIN_ROLLOUT_OWNER_TURN_ENV)
+        unset_roxy_env_in(env, _PLUGIN_ROLLOUT_CAPABILITY_ENV)
     _prepend_existing_path_entries(env, _discover_user_path_entries(env))
     env.update(_UNIFIED_EXEC_ENV)
     return env

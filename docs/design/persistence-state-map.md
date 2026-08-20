@@ -1,4 +1,4 @@
-# Akashic Agent 持久化状态地图
+# Roxy Agent 持久化状态地图
 
 - 状态：accepted target / implementation
 - 核对基线：`origin/main@31b976d82cbd5766e6450d7e287ceda71d9b7573`
@@ -19,7 +19,7 @@
 
 ## 2. Workspace 到底是什么
 
-`<workspace>` 是一个显式选中的 **Akashic 运行实例工作区**，也是该实例主要的持久数据根。启动时按 `--workspace PATH`、`AKASHIC_WORKSPACE`、`config.toml:[runtime].workspace` 的优先级选出一个目录。此后，Akashic 在这个目录里继续同一批会话、记忆、调度和自主流程状态。
+`<workspace>` 是一个显式选中的 **Roxy 运行实例工作区**，也是该实例主要的持久数据根。启动时按 `--workspace PATH`、`ROXY_WORKSPACE`（只为旧安装兼容读取 `AKASHIC_WORKSPACE`）、`config.toml:[runtime].workspace` 的优先级选出一个目录。此后，Roxy 在这个目录里继续同一批会话、记忆、调度和自主流程状态。
 
 它不是源码仓库，也不是 Git checkout 或 Git worktree：
 
@@ -27,7 +27,7 @@
 Git repository / worktree
 └── 代码、测试、项目工作手册、Git 历史
 
-Akashic <workspace>
+Roxy <workspace>
 ├── 用户与 Agent 的对话：sessions.db、uploads/
 ├── 记忆：memory/*.md、memory2.db、akasha.db
 ├── 自主运行：proactive.db、wake_proactive.db、drift/drift.db
@@ -150,7 +150,7 @@ workspace 仍不是完整运行环境的全部。模型 Provider credential 已�
 ## 4. 再看上层所有权
 
 ```text
-启动参数 / AKASHIC_WORKSPACE / config.toml
+启动参数 / ROXY_WORKSPACE（AKASHIC_* 兼容别名）/ config.toml
                     │
                     ▼
              ┌──────────────┐
@@ -174,9 +174,11 @@ workspace 仍不是完整运行环境的全部。模型 Provider credential 已�
 workspace 之外还有两组明确的全局状态：
 
 ```text
-~/.akashic/auth.json              旧模型迁移输入与非模型兼容凭据
-~/.akashic-plugin/manifest.toml   已安装/启用插件目录
-~/.akashic-plugin/cache/          已安装插件代码缓存
+~/.roxy/auth.json                 新的全局 JSON 凭据根
+~/.roxy-plugin/manifest.toml      新的已安装/启用插件目录
+~/.roxy-plugin/cache/             新的已安装插件代码缓存
+~/.akashic/{auth.json,...}        旧安装的只读兼容输入与恢复证据
+~/.akashic-plugin/                Roxy 根不存在时继续使用的旧插件根
 ```
 
 因此，“整个 workspace 已备份”可以覆盖已迁移模型及其凭据，但仍不能推出“系统已完整备份”。显式 `config.toml`、旧或非模型全局凭据、全局插件清单和插件 canonical source 仍在 workspace 之外。
@@ -185,12 +187,12 @@ workspace 之外还有两组明确的全局状态：
 
 | 对象 | 当前代码事实 | 上层 owner | 当前含义 |
 |---|---|---|---|
-| `--workspace PATH` | 最高优先级；`main.py::_workspace_from_args` 解析并写入 `AKASHIC_WORKSPACE` | `main.py` | 本次进程使用的状态根 |
-| `AKASHIC_WORKSPACE` | 未给 CLI 参数时使用 | `main.py` | 显式环境级 workspace 选择 |
+| `--workspace PATH` | 最高优先级；`main.py::_workspace_from_args` 解析并把 `ROXY_WORKSPACE` 与旧别名写入当前受控进程环境 | `main.py` | 本次进程使用的状态根 |
+| `ROXY_WORKSPACE` / `AKASHIC_WORKSPACE` | 未给 CLI 参数时使用；两者并存时 Roxy 优先 | `main.py`、`agent.identity` | 显式环境级 workspace 选择；旧名只是兼容输入 |
 | `config.toml:[runtime].workspace` | CLI 和环境变量都为空时使用 | `main.py`、`agent.config` | 默认 workspace 选择 |
 | 显式 `--config` | 可把主配置放在任意路径 | `main.py`、setup | 运行配置根，不保证位于 workspace |
-| `AKASHIC_PLUGIN_HOME` | 未设置时回退 `~/.akashic-plugin` | `agent.plugins.manifest` | 全局插件安装根 |
-| `~/.akashic/auth.json` | 旧配置或显式 JSON store 使用；已迁移模型不再回退读取 | `agent.model_runtime.auth` 兼容边界 | 迁移输入、恢复证据与非模型兼容凭据 |
+| `ROXY_PLUGIN_HOME` / `AKASHIC_PLUGIN_HOME` | 显式值优先；未设置时选新 `~/.roxy-plugin`，只在新根不存在且旧根存在时继续使用 `~/.akashic-plugin` | `agent.plugins.manifest`、`agent.identity` | 全局插件安装根；旧名只是兼容输入 |
+| `~/.roxy/auth.json` / `~/.akashic/auth.json` | 新 store 写 Roxy 文件；默认 store 在新文件不存在时可读旧文件，兼容读取不修改旧文件 | `agent.model_runtime.auth` 兼容边界 | 新全局 JSON 凭据、旧输入与恢复证据 |
 
 **F-001：** runtime 的大部分可写状态已经从显式 workspace 派生。模型 credential 属于 workspace connection；旧或非模型全局凭据与插件安装状态是有意保留的例外，而不是 workspace 内的隐式目录。
 

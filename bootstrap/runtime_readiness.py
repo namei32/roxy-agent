@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 
+from agent.identity import roxy_env
 from agent.restart import SupervisorCommitChannel
 
 
@@ -40,8 +41,8 @@ class RuntimeReadiness:
             "pid": self.pid,
             "state": "ready",
         }
-        runtime_commit = os.environ.get("AKASHIC_RUNTIME_COMMIT", "")
-        runtime_checkout = os.environ.get("AKASHIC_RUNTIME_CHECKOUT", "")
+        runtime_commit = roxy_env("RUNTIME_COMMIT")
+        runtime_checkout = roxy_env("RUNTIME_CHECKOUT")
         if runtime_commit:
             payload["sourceCommit"] = runtime_commit
         if runtime_checkout:

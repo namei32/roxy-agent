@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import json
 import logging
-import os
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -15,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal, cast
 
 import agent.core.passive_support as support
 from agent.control.context import running_turn_id
+from agent.identity import roxy_env
 from core.common.diagnostic_log import (
     diagnostic_context,
     diagnostic_line,
@@ -127,16 +127,17 @@ logger = logging.getLogger(__name__)
 
 
 def _host_runtime_execution_hint() -> str:
-    if os.environ.get("AKASHIC_EXECUTION_MODE", "local") != "host-bridge":
+    if roxy_env("EXECUTION_MODE", "local") != "host-bridge":
         return ""
-    commit = os.environ.get("AKASHIC_RUNTIME_COMMIT", "")
-    checkout = os.environ.get("AKASHIC_RUNTIME_CHECKOUT", "")
+    commit = roxy_env("RUNTIME_COMMIT")
+    checkout = roxy_env("RUNTIME_CHECKOUT")
     if not commit or not checkout:
         raise RuntimeError("host-bridge 模式缺少运行时 commit/checkout")
     return (
         "【容器运行时】当前 Core commit="
         f"{commit}，宿主只读参考源码={checkout}。Shell 在宿主执行；"
-        "调用当前运行时控制命令必须使用 akashic-runtime（或 $AKASHIC_RUNTIME_CLI），"
+        "调用当前运行时控制命令必须使用 roxy-runtime（或 $ROXY_RUNTIME_CLI）；"
+        "旧 akashic-runtime/$AKASHIC_RUNTIME_CLI 仅作兼容别名。"
         "不要用 host 的 python 直接运行 checkout/main.py。调试修复请从该 commit 新建 worktree。"
     )
 

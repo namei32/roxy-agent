@@ -299,7 +299,8 @@ async def test_agent_restart_requires_current_attempt_search_grant() -> None:
 
 def test_supervisor_commit_channel_uses_inherited_fd(monkeypatch: pytest.MonkeyPatch) -> None:
     read_fd, write_fd = os.pipe()
-    monkeypatch.setenv("AKASHIC_SUPERVISED", "1")
+    monkeypatch.delenv("AKASHIC_SUPERVISED", raising=False)
+    monkeypatch.setenv("ROXY_SUPERVISED", "1")
     monkeypatch.setenv("AKASHIC_BOOT_ID", "boot-a")
     monkeypatch.setenv("AKASHIC_RESTART_NONCE", "n" * 64)
     monkeypatch.setenv("AKASHIC_LIFECYCLE_FD", str(write_fd))
