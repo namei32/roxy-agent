@@ -160,6 +160,7 @@ async def test_opencode_go_request_mappings_cross_real_http_boundary() -> None:
                 200_000,
             ),
             ("deepseek-v4-pro", {"reasoning_effort": "xhigh"}, 200_000),
+            ("qwen3.6-plus", {"enable_thinking": True}, 200_000),
             ("mimo-v2.5-pro", {}, 200_000),
             ("grok-4.5", {}, 200_000),
         ]
@@ -187,7 +188,79 @@ async def test_opencode_go_request_mappings_cross_real_http_boundary() -> None:
     assert by_model["kimi-k2.6"]["thinking"] == {"type": "disabled"}
     assert "reasoning_effort" not in by_model["kimi-k2.6"]
     assert by_model["deepseek-v4-pro"]["reasoning_effort"] == "max"
+    assert by_model["qwen3.6-plus"]["enable_thinking"] is True
     assert by_model["mimo-v2.5-pro"]["max_tokens"] == 131_072
+
+
+@pytest.mark.asyncio
+async def test_opencode_go_qwen_preserves_multimodal_content_and_disables_thinking() -> None:
+    payloads: list[dict[str, Any]] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            length = int(self.headers["Content-Length"])
+            payloads.append(json.loads(self.rfile.read(length)))
+            body = json.dumps(
+                {
+                    "id": "chatcmpl-vl",
+                    "object": "chat.completion",
+                    "created": 1,
+                    "model": "qwen3.6-plus",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "orange"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                }
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    image = "data:image/png;base64,AA=="
+    try:
+        host = server.server_address[0]
+        port = server.server_address[1]
+        provider = LLMProvider(
+            api_key="secret",
+            base_url=f"http://{host}:{port}/v1",
+            provider_name="opencode-go",
+            extra_body={"enable_thinking": True},
+            max_retries=0,
+        )
+        result = await provider.chat(
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "颜色？"},
+                        {"type": "image_url", "image_url": {"url": image}},
+                    ],
+                }
+            ],
+            [],
+            "qwen3.6-plus",
+            64,
+            disable_thinking=True,
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+    assert result.content == "orange"
+    assert payloads[0]["messages"][0]["content"][1]["image_url"]["url"] == image
+    assert payloads[0]["enable_thinking"] is False
 
 
 @pytest.mark.asyncio

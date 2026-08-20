@@ -20,6 +20,7 @@ from agent.model_runtime.provider_profiles import (
 class OpenCodeGoModel:
     slug: str
     supported_reasoning_efforts: tuple[str, ...] = ()
+    input_modalities: tuple[str, ...] = ("text",)
 
 
 _OPENCODE_PROVIDER_PREFIX = "opencode-go/"
@@ -183,6 +184,13 @@ class OpenCodeGoModelCatalog:
                                 model_id,
                                 base_url=self.base_url,
                             )
+                        ),
+                        input_modalities=(
+                            ("text", "image")
+                            if OPENCODE_GO_PROFILE.supports_modalities(
+                                model_id, ("text", "image")
+                            )
+                            else ("text",)
                         ),
                     )
                 )

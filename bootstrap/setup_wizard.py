@@ -450,7 +450,7 @@ def _phase_vl_model(a: WizardAnswers) -> None:
     a.vl_model = click.prompt("视觉模型名")
     a.vl_provider, a.vl_base_url, a.vl_api_key = _phase_role_endpoint(
         a,
-        allow_opencode_go=False,
+        allow_opencode_go=True,
     )
     a.vl_auth_id = "vl_default"
     a.vl_context_window = click.prompt(

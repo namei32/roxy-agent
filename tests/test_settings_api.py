@@ -5,6 +5,7 @@ import tomllib
 from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,6 +16,8 @@ from agent.model_runtime.errors import RetryableTransportError
 from agent.model_runtime.store import ModelRegistryStore
 from bootstrap.settings_api import create_settings_app
 from bootstrap.settings_api import _new_config
+from bootstrap.settings_api import _validate_live_candidate
+from bootstrap.setup_wizard import WizardAnswers
 
 
 def _config(secret: str = "saved-secret") -> str:
@@ -851,9 +854,15 @@ def test_opencode_go_models_expose_reasoning_efforts(
     config_path.write_text(_config(), encoding="utf-8")
 
     class FakeModel:
-        def __init__(self, slug: str, efforts: tuple[str, ...]) -> None:
+        def __init__(
+            self,
+            slug: str,
+            efforts: tuple[str, ...],
+            input_modalities: tuple[str, ...] = ("text",),
+        ) -> None:
             self.slug = slug
             self.supported_reasoning_efforts = efforts
+            self.input_modalities = input_modalities
 
     class FakeCatalog:
         def __init__(self, api_key: str, *, base_url: str) -> None:
@@ -862,7 +871,7 @@ def test_opencode_go_models_expose_reasoning_efforts(
         async def list_models(self):
             return [
                 FakeModel("deepseek-v4-pro", ("low", "medium", "high", "max")),
-                FakeModel("kimi-k3", ()),
+                FakeModel("qwen3.6-plus", (), ("text", "image")),
             ]
 
     monkeypatch.setattr("bootstrap.settings_api.OpenCodeGoModelCatalog", FakeCatalog)
@@ -885,7 +894,46 @@ def test_opencode_go_models_expose_reasoning_efforts(
         "high",
         "max",
     ]
-    assert models["kimi-k3"]["supportedReasoningEfforts"] == []
+    assert models["deepseek-v4-pro"]["inputModalities"] == ["text"]
+    assert models["qwen3.6-plus"]["supportedReasoningEfforts"] == []
+    assert models["qwen3.6-plus"]["inputModalities"] == ["text", "image"]
+
+
+@pytest.mark.asyncio
+async def test_live_candidate_uses_image_probe_for_multimodal(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    class FakeProvider:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def chat(self, messages, tools, model, max_tokens, **kwargs):
+            calls.append(
+                {
+                    "messages": messages,
+                    "tools": tools,
+                    "model": model,
+                    "max_tokens": max_tokens,
+                    **kwargs,
+                }
+            )
+
+    monkeypatch.setattr("bootstrap.settings_api.LLMProvider", FakeProvider)
+    answers = WizardAnswers(
+        provider="opencode-go",
+        api_key="secret",
+        model="qwen3.6-plus",
+        base_url="https://opencode.ai/zen/go/v1",
+        multimodal=True,
+    )
+
+    await _validate_live_candidate(answers, CredentialStore())
+
+    messages = cast(list[dict[str, Any]], calls[0]["messages"])
+    content = messages[0]["content"]
+    assert content[1]["type"] == "image_url"
+    assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert calls[0]["disable_thinking"] is True
 
 
 def test_custom_api_model_uses_litellm_capability_registry(tmp_path: Path) -> None:

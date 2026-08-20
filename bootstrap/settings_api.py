@@ -214,6 +214,7 @@ def create_settings_app(
                     "models": [
                         {
                             "id": entry.slug,
+                            "inputModalities": list(entry.input_modalities),
                             "supportedReasoningEfforts": list(
                                 entry.supported_reasoning_efforts
                             ),
@@ -1099,7 +1100,7 @@ async def _connection_answers(
                 update={
                     "model": entry.slug,
                     "source_id": source_id,
-                    "input_modalities": ["text"],
+                    "input_modalities": list(entry.input_modalities),
                 }
             )
             answers = _answers(item, config_path, workspace, store)
@@ -1156,11 +1157,34 @@ async def _validate_live_candidate(
         provider_name=answers.provider,
         max_retries=0,
     )
+    messages: list[dict[str, object]] = [
+        {"role": "user", "content": "Reply with OK."}
+    ]
+    if answers.multimodal:
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Reply with OK."},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": (
+                                "data:image/png;base64,"
+                                "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR42u3NQQ0A"
+                                "AAgEoNP+nTWFDzcoQE1udQQCgUAgEAgEAsGTYAGjxAE/G/Q2tQAAAABJRU5ErkJggg=="
+                            )
+                        },
+                    },
+                ],
+            }
+        ]
     await provider.chat(
-        [{"role": "user", "content": "Reply with OK."}],
+        messages,
         [],
         answers.model,
-        8,
+        64 if answers.multimodal else 8,
+        disable_thinking=answers.multimodal,
     )
 
 

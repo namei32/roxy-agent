@@ -252,6 +252,24 @@ class OpenCodeGoStrategy(ProviderStrategy):
         return raw, text, {"reasoning_content": text}
 
 
+class OpenCodeGoQwenStrategy(OpenCodeGoStrategy, DashScopeStrategy):
+    """保留 Qwen 图片块，并映射 Go 端点接受的 thinking 开关。"""
+
+    def prepare_request(
+        self,
+        kwargs: dict[str, Any],
+        extra_body: dict[str, Any],
+        *,
+        disable_thinking: bool,
+    ) -> None:
+        DashScopeStrategy.prepare_request(
+            self,
+            kwargs,
+            extra_body,
+            disable_thinking=disable_thinking,
+        )
+
+
 class OpenCodeGoGLMStrategy(OpenCodeGoStrategy):
     def prepare_request(
         self,
@@ -1506,6 +1524,8 @@ def _select_provider_strategy(
         normalized_model = model.strip().lower()
         if normalized_model.startswith("deepseek-"):
             return DeepSeekStrategy()
+        if normalized_model.startswith("qwen"):
+            return OpenCodeGoQwenStrategy()
         if normalized_model.startswith("glm-"):
             return OpenCodeGoGLMStrategy()
         if normalized_model.startswith("kimi-"):
