@@ -8,7 +8,7 @@ import {
   Smartphone,
 } from "lucide-react";
 import { memo } from "react";
-import { akashicBrandIcon } from "./akashic-brand";
+import { roxyBrandIcon } from "./roxy-brand";
 import { ConversationNavigation, type ConversationSession } from "./conversation-navigation";
 import { MobilePluginSlot } from "./mobile-plugin-runtime";
 
@@ -53,10 +53,10 @@ export const DesktopSidebar = memo(function DesktopSidebar({
         <header className="chat-sidebar-brand">
           <span
             className="chat-sidebar-brand__mark"
-            style={{ WebkitMaskImage: `url(${akashicBrandIcon})`, maskImage: `url(${akashicBrandIcon})` }}
+            style={{ WebkitMaskImage: `url(${roxyBrandIcon})`, maskImage: `url(${roxyBrandIcon})` }}
             aria-hidden="true"
           />
-          <span><strong>Akashic</strong><small>Dashboard</small></span>
+          <span><strong>Roxy</strong><small>Dashboard</small></span>
         </header>
       ) : null}
       <ConversationNavigation

@@ -957,7 +957,7 @@ export function ModelExperienceShowcase() {
   return (
     <main className="model-experience-showcase">
       <header className="mx-showcase-header">
-        <div><span className="mx-overline">AKASHIC · INTERACTION STUDY</span><h1>模型体验，五个等权方向</h1><p>每版都覆盖多凭据配置、模糊表单、保存 Toast，以及聊天框上方的动态模型选择。</p></div>
+        <div><span className="mx-overline">ROXY · INTERACTION STUDY</span><h1>模型体验，五个等权方向</h1><p>每版都覆盖多凭据配置、模糊表单、保存 Toast，以及聊天框上方的动态模型选择。</p></div>
         <div className="mx-surface-switch" role="tablist" aria-label="预览页面">
           <button type="button" role="tab" aria-selected={surface === "chat"} onClick={() => setSurface("chat")}>对话选模</button>
           <button type="button" role="tab" aria-selected={surface === "settings"} onClick={() => setSurface("settings")}>模型配置</button>

@@ -13,17 +13,21 @@ const EXPECTED_METHODS = [
   "shareText", "saveComposerDraft", "commitSharedText", "rejectSharedText", "sendMessage",
   "copyText", "performActionHaptic", "sendCommand", "refreshRuntimeInspection",
   "openRuntimeDocument", "openRuntimeMcp", "openRuntimeJob", "clearRuntimeInspectionDetail",
-  "stopTurn", "queryPluginUi", "cancelPluginUiOwner", "reportHealthy",
+  "stopTurn", "queryPluginUi", "cancelPluginUiOwner", "setTheme", "setModelSelection", "reportHealthy",
 ];
 
-function installFor(url) {
+function installFor(url, transportName = "RoxyNativeTransport") {
   const messages = [];
   globalThis.window = {
     location: { href: url },
-    AkashicNativeTransport: { postMessage: (message) => messages.push(JSON.parse(message)) },
+    [transportName]: { postMessage: (message) => messages.push(JSON.parse(message)) },
   };
   installMobileBridge();
-  return { bridge: window.AkashicNative, messages };
+  return {
+    bridge: window.RoxyNative,
+    legacyBridge: window.AkashicNative,
+    messages,
+  };
 }
 
 test("embedded and remote WebUI install one generation-bound native surface", () => {
@@ -31,6 +35,8 @@ test("embedded and remote WebUI install one generation-bound native surface", ()
   const embedded = installFor("file:///android_asset/mobile.html?generation_id=embedded&nonce=baseline");
   assert.deepEqual(Object.keys(remote.bridge).sort(), [...EXPECTED_METHODS].sort());
   assert.deepEqual(Object.keys(embedded.bridge).sort(), [...EXPECTED_METHODS].sort());
+  assert.equal(remote.legacyBridge, remote.bridge);
+  assert.equal(embedded.legacyBridge, embedded.bridge);
 
   assert.throws(() => remote.bridge.selectSession(), /expects 1 args/);
   remote.bridge.requestSnapshot();
@@ -49,5 +55,37 @@ test("embedded and remote WebUI install one generation-bound native surface", ()
     method: "reportHealthy",
     args: [],
   });
+  delete globalThis.window;
+});
+
+test("legacy native transport remains an alias of the Roxy bridge", () => {
+  const installed = installFor(
+    "file:///android_asset/mobile.html?generation_id=legacy&nonce=legacy-nonce",
+    "AkashicNativeTransport",
+  );
+  assert.equal(installed.legacyBridge, installed.bridge);
+  installed.bridge.requestSnapshot();
+  assert.equal(installed.messages[0].generation_id, "legacy");
+  delete globalThis.window;
+});
+
+test("an injected direct bridge is mirrored across both names", () => {
+  const canonical = { requestSnapshot() {} };
+  globalThis.window = {
+    location: { href: "file:///android_asset/mobile.html" },
+    RoxyNative: canonical,
+  };
+  installMobileBridge();
+  assert.equal(window.RoxyNative, canonical);
+  assert.equal(window.AkashicNative, canonical);
+
+  const legacy = { requestSnapshot() {} };
+  globalThis.window = {
+    location: { href: "file:///android_asset/mobile.html" },
+    AkashicNative: legacy,
+  };
+  installMobileBridge();
+  assert.equal(window.RoxyNative, legacy);
+  assert.equal(window.AkashicNative, legacy);
   delete globalThis.window;
 });

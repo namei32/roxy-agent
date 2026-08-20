@@ -5,21 +5,26 @@ import * as UI from "./sdk";
 
 // The shared runtime handed to dynamically-imported plugin modules. The static
 // shim files under /assets/sdk/*.js read these off window so that plugins and
-// the host resolve react / react-dom / @akashic/dashboard-ui to one instance.
-export interface AkashicRuntime {
+// the host resolve react / react-dom / @roxy/dashboard-ui to one instance.
+export interface RoxyRuntime {
   React: typeof React;
   ReactJSXRuntime: typeof ReactJSXRuntime;
   ReactDOMClient: typeof ReactDOMClient;
   UI: typeof UI;
 }
 
+export type AkashicRuntime = RoxyRuntime;
+
 declare global {
   interface Window {
-    __akashicRuntime?: AkashicRuntime;
+    __roxyRuntime?: RoxyRuntime;
+    __akashicRuntime?: RoxyRuntime;
   }
 }
 
 // Publish the runtime before any plugin is imported.
 export function exposeRuntime(): void {
-  window.__akashicRuntime = { React, ReactJSXRuntime, ReactDOMClient, UI };
+  const runtime = { React, ReactJSXRuntime, ReactDOMClient, UI };
+  window.__roxyRuntime = runtime;
+  window.__akashicRuntime = runtime;
 }

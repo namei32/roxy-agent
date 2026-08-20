@@ -30,6 +30,7 @@ const entryParams = new URLSearchParams(window.location.search);
 const preview = entryParams.get("preview");
 const embeddedShell = entryParams.get("embedded") === "1";
 const embeddedRuntime = embeddedShell && entryParams.get("surface") === "runtime";
+document.title = "Roxy Chat";
 if (embeddedShell) document.documentElement.dataset.embeddedShell = "true";
 initializeTheme();
 startCrossPortThemeSync();
@@ -41,7 +42,10 @@ if (embeddedShell) {
   window.addEventListener("message", (event: MessageEvent<unknown>) => {
     if (!parentOrigins.has(event.origin) || typeof event.data !== "object" || event.data === null) return;
     const message = event.data as Record<string, unknown>;
-    if (message.type !== "akashic.theme" || typeof message.themeId !== "string") return;
+    if (
+      (message.type !== "roxy.theme" && message.type !== "akashic.theme")
+      || typeof message.themeId !== "string"
+    ) return;
     setTheme(message.themeId, false);
   });
 }

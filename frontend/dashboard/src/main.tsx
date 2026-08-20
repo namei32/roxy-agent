@@ -45,6 +45,7 @@ const pluginPreset = document.createElement("link");
 pluginPreset.rel = "stylesheet";
 pluginPreset.href = "/dashboard/assets/sdk/preset.css";
 document.head.appendChild(pluginPreset);
+document.title = "Roxy Dashboard";
 initializeTheme();
 startCrossPortThemeSync();
 
@@ -187,7 +188,7 @@ function App(): React.ReactElement {
 
   const syncFrameTheme = useCallback((frame: HTMLIFrameElement | null): void => {
     frame?.contentWindow?.postMessage(
-      { type: "akashic.theme", themeId: theme.id },
+      { type: "roxy.theme", themeId: theme.id },
       serviceOrigin,
     );
   }, [serviceOrigin, theme.id]);
@@ -207,10 +208,10 @@ function App(): React.ReactElement {
         || typeof payload !== "object"
         || payload === null
         || !("type" in payload)
-        || payload.type !== "akashic.settings.applied"
+        || (payload.type !== "roxy.settings.applied" && payload.type !== "akashic.settings.applied")
       ) return;
       chatFrameRef.current?.contentWindow?.postMessage(
-        { type: "akashic.models.changed" },
+        { type: "roxy.models.changed" },
         serviceOrigin,
       );
       setShellStatus("starting");
@@ -246,8 +247,8 @@ function App(): React.ReactElement {
 
   return (
     <div className="unified-shell">
-      <aside className="primary-rail" aria-label="Akashic 主导航">
-        <div className="primary-rail-brand" title="Akashic">
+      <aside className="primary-rail" aria-label="Roxy 主导航">
+        <div className="primary-rail-brand" title="Roxy">
           <img src={notificationIcon} alt="" />
         </div>
         <nav className="primary-rail-nav" aria-label="主要功能">
@@ -272,7 +273,7 @@ function App(): React.ReactElement {
           {shellStatus === "ready" ? <DashboardWorkspace /> : <RuntimeUnavailable status={shellStatus} />}
         </section>
         <section className={`shell-view ${shellView === "chat" ? "is-active" : ""}`} aria-hidden={shellView !== "chat"}>
-          <iframe ref={chatFrameRef} title="Akashic 聊天" src="/chat?embedded=1" onLoad={() => syncFrameTheme(chatFrameRef.current)} />
+          <iframe ref={chatFrameRef} title="Roxy 聊天" src="/chat?embedded=1" onLoad={() => syncFrameTheme(chatFrameRef.current)} />
         </section>
         <section className={`shell-view ${shellView === "runtime" ? "is-active" : ""}`} aria-hidden={shellView !== "runtime"}>
           {shellStatus === "ready"
@@ -565,8 +566,12 @@ function DashboardWorkspace(): React.ReactElement {
     const refresh = (): void => {
       void run(refreshCurrentView);
     };
+    window.addEventListener("roxy-dashboard-refresh", refresh);
     window.addEventListener("akashic-dashboard-refresh", refresh);
-    return () => window.removeEventListener("akashic-dashboard-refresh", refresh);
+    return () => {
+      window.removeEventListener("roxy-dashboard-refresh", refresh);
+      window.removeEventListener("akashic-dashboard-refresh", refresh);
+    };
   }, [refreshCurrentView, run]);
 
   useEffect(() => () => {
@@ -649,8 +654,12 @@ function DashboardWorkspace(): React.ReactElement {
       if (!key) return;
       gotoSession(key);
     };
+    window.addEventListener("roxy:goto-session", onGoto);
     window.addEventListener("akashic:goto-session", onGoto);
-    return () => window.removeEventListener("akashic:goto-session", onGoto);
+    return () => {
+      window.removeEventListener("roxy:goto-session", onGoto);
+      window.removeEventListener("akashic:goto-session", onGoto);
+    };
   }, []);
 
   const sort = (scope: "messages" | "proactive", key: string): void => {
@@ -753,7 +762,7 @@ function DashboardWorkspace(): React.ReactElement {
         <div className="brand">
           <img className="brand-mark" src={notificationIcon} alt="" />
           <div>
-            <div className="brand-title">Akashic</div>
+            <div className="brand-title">Roxy</div>
             <div className="brand-sub">Dashboard</div>
           </div>
         </div>
@@ -1644,7 +1653,13 @@ function gridTemplate(columns: DashboardColumn[]): string {
 
 function formatPluginCell(plugin: PluginConfig, column: DashboardColumn, item: Record<string, unknown>): string {
   const value = item[column.key];
-  const formatter = plugin.formatters?.[column.fmt || ""] ?? (window as Window & { AkashicDashboard?: { _formatters: Record<string, (value: unknown, item?: Record<string, unknown>) => string> } }).AkashicDashboard?._formatters[column.fmt || "text"];
+  const dashboard = window as Window & {
+    RoxyDashboard?: { _formatters: Record<string, (value: unknown, item?: Record<string, unknown>) => string> };
+    AkashicDashboard?: { _formatters: Record<string, (value: unknown, item?: Record<string, unknown>) => string> };
+  };
+  const formatter = plugin.formatters?.[column.fmt || ""]
+    ?? dashboard.RoxyDashboard?._formatters[column.fmt || "text"]
+    ?? dashboard.AkashicDashboard?._formatters[column.fmt || "text"];
   return formatter ? formatter(value, item) : String(value ?? "");
 }
 

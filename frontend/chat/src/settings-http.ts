@@ -6,7 +6,7 @@ export async function requestSettingsJson<T>(url: string, init: RequestInit = {}
       headers: { "Content-Type": "application/json", "X-Akasic-CSRF": "1", ...init.headers },
     });
   } catch (reason) {
-    if (reason instanceof TypeError) throw new Error("无法连接 Akashic。请确认服务仍在运行，然后重试。", { cause: reason });
+    if (reason instanceof TypeError) throw new Error("无法连接 Roxy。请确认服务仍在运行，然后重试。", { cause: reason });
     throw reason;
   }
   const text = await response.text();

@@ -93,10 +93,12 @@ staging；目标和源均保持原状。目标存在时拒绝合并，不会覆�
 Host Bridge 发布 `roxy-runtime` 为主启动器，同目录保留 `akashic-runtime` 内容等价的兼容启动器。
 短路径 Socket 回退仍使用 `/tmp/roxy-sockets`，不退回 TCP。
 
-桌面 Dashboard 同时发布 Roxy 与旧的 import-map、全局、刷新事件、theme cookie/event 和
-插件 DOM 标记。Mobile 将旧 `AkashicNative` / `AkashicMobile` 与 Roxy 对象绑定为同一实例，
-因此历史 Android 壳不会产生第二个状态分支。新的 WebUI、SDK 文档、内建 Skill、插件工具名和
-Interview Coach 参数全部以 Roxy 名称为准。
+桌面 Dashboard 同时发布 Roxy 与旧的全局、刷新事件、theme cookie/event 和插件 DOM 标记。
+插件源码可使用 `@roxy/dashboard-ui`；构建边界会把它归一为旧 import map 已有的
+`@akashic/dashboard-ui` specifier，使新旧插件共用同一套 React/UI 单例。Mobile 将旧
+`AkashicNative` / `AkashicMobile` 与 Roxy 对象绑定为同一实例，因此历史 Android 壳不会产生
+第二个状态分支。新的 WebUI、SDK 文档、内建 Skill、插件工具名和 Interview Coach 参数全部以
+Roxy 名称为准。
 
 ## 6. 失败、回滚与外部边界
 

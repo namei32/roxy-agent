@@ -5,7 +5,7 @@ import { ChatMessageView } from "./message-view";
 import "./shared-chat-showcase.css";
 
 const PHASE_DELAYS = [500, 1_100, 1_700, 2_700, 3_300, 3_900, 4_500, 5_100, 5_700];
-const LONG_REPORT_URL = "https://preview.akashic.local/validation/shared-webui/desktop-and-android/message-rendering?fixture=thinking-tool-markdown-gif&viewport=1440x900&mode=offline-production-component";
+const LONG_REPORT_URL = "https://preview.roxy.local/validation/shared-webui/desktop-and-android/message-rendering?fixture=thinking-tool-markdown-gif&viewport=1440x900&mode=offline-production-component";
 const PREVIEW_GIF_URL = "data:image/gif;base64,R0lGODlhoABaAPMAABk4bkwweR5Fd0RAf1pimEFLhJtf7aN074J6sW2MtJ+p1rXJ6svg/Mba+ImJugAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQARgAAACwAAAAAoABaAAAE/5DJSau9OOvNu/9gKI5kaZ5oqq5s675wLM90bd94ru987//AoHBILBqPyKRyyWw6n9CodEqtWq/YrHbL7Xq/4LB4TC6bz+i0es1uu9/wuHxOr6sWUQW+CegDBAR7EgsEAQEEDhIOBBIAggwKBSILAYMLlA2DAQgMAoCcFgqMEwsAAQoUBYmREgQJFQmjRQB6C5ECma2BtqcMi42PCgKTlQyxDAOovgQFkQW9obIMpdASqpCSGMdGtBMNAokNhQIJmQ4FAgMFhb3MzwED0/CHDQiG6oEOhvoSxwSgBBQcSpCgmD5DAlQRYEfOlANAApx5KuZqGgEA66QN6TZhIQNmC//XfXxlz0EDAAOYBbD1bIGAQ8IWEgDkqkCBBeICeOrjSVKDAOIELHAwYOg6mgsPgTvkEEACnPT0vaq4sIFLjUI46mLQTZQhmwp+ndR5ydeAAA5MoRIo6ulKtJouxboEVNTHSjIRufp5zubUtGgBZKK0asCwvY76YQ2idWSpPzsJocPYYGxEewPOPlwJyZDnt4kY/FTcSlSiZy8nfkZ7FBUih8M6rx0AwLFgRYuBaP2GCoC+ynj4FXrlMGUDYadM4WG7l25oSqR96bP16Wa6ttMiMfsLYGFsSrMPl0tsLPcPWpec6UrJTGCBBlK5Viow4PjZSCuvegdJH2ehUDZ9hMjuAJwkwF4C+pwTQAIRMaWPUF4RAN+CIwloFSBH+PGHhBIEdRY8zKTznnydBUAfWpR4Uo49CEl4ED8WbHKSHr2Uwk4g2hFwVkN3GRLQTC9lUpE4G5pnRkV2HIFkkkUsyeSTUEYp5ZRUVmnllVhmqeWWXHbp5ZdghinmmD4cd4ABByiQC5koLGDAm3Aa8AibI7gZZ5xz0vlBA3f2uaaeHyjQ553KAPrBmYPCeYChICR6J6OHOvrmopB2IKikhVaqAZ+S/qlpBnYOmuenGISKJ6l7KnBmmp6i6uqrsMYq66y01mrrrbjmquuuvPbqa68RAAAh+QQARgAAACwAAAAAoABaAINQMHprUJJZO4KKc62bX+2nc++bh7yvns3GsujXyvDl2/wAAAAAAAAAAAAAAAAAAAAE/1DJSau9OOvNu/9gKI5kaZ5oqq5s675wLM90bd94ru987//AoHBILBqPyKRyyWw6n9CodEqtWq/YrHbL7Xq/4LB4TC6bz+i0es1uu9/wuHxOr9ujiQAAEDhIDAEsCQAUCAAJEoYDEwGLFgeBFQB+EwJ+BwJdjQgJB5MKgIKEFJZ/AZkSAAgXkBaflZeoW6oTBwagjQCluLq3CgADALcDAgKOoMUGoxMDjn0Cq4Z/xQGIkMQBq7+UEqWYXQMBBtp/n8QKhtGHvwMJCeGIjQqY8csSrYMKA7eh9PqBnm55QvSqWywvB4gBQxQK3ShECdL90rYrn7hE9hTka9WqjwKPqf86yfJYUIE3WV7yBGqYT1+xYKvW/dpDM0HFjB8T3hrE0yTNPQhaSbi4y+A8lFg8FSLEkmm1VDERmSQXz5e0CgYMCJAqLhJIjfMi5fzoC+rRLgL6dJLX9J8EmL+kwnN5dJUeCwiKTdDqCBDDTJ6ioVJ2IOKpe0ixvBOgq2+kfHkak5Tqko9UrQKUXQA2QeI0PqsgBRhNTquup2fvqF7NurXr17Bjy55Nu7bt27hz697Nu7fv38CD70ZQgEABcsJNICDAvDkB5MlDLHfuHHp0D9SzX5eenbr17RmKd29eADz28c7NdxCPvrz6DdPRf39fAT1z+hziZ5+Pv1B3/v1VQJwccQAGaOCBCCao4IIMNujggxBGKOGEFFZoIW0RAAA7";
 const FINAL_CONTENT = [
   "## WebUI 统一结果\n\n",
@@ -64,7 +64,7 @@ export function SharedChatShowcase() {
     >
       <header className="shared-chat-showcase-header">
         <div>
-          <span>AKASHIC · SHARED WEBUI</span>
+          <span>ROXY · SHARED WEBUI</span>
           <h1>生产消息组件离线验收</h1>
           <p>不连接 Runtime，不读取正式会话；下面直接渲染桌面与 Android 共用的 ChatMessageView。</p>
         </div>

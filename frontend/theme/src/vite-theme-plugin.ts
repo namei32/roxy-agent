@@ -8,8 +8,13 @@ const catalogPath = resolve(here, "theme-catalog.json");
 
 export function emitThemeCatalog(): Plugin {
   return {
-    name: "akashic-theme-catalog",
+    name: "roxy-theme-catalog",
     generateBundle() {
+      this.emitFile({
+        type: "asset",
+        fileName: "roxy-theme-catalog.json",
+        source: readFileSync(catalogPath, "utf8"),
+      });
       this.emitFile({
         type: "asset",
         fileName: "akashic-theme-catalog.json",

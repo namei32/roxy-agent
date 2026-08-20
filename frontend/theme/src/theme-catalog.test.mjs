@@ -23,7 +23,7 @@ const domainRoles = [
   "info", "onInfo", "infoContainer", "onInfoContainer",
 ];
 
-test("every Akashic theme owns the complete Material and domain semantic roles", () => {
+test("every Roxy theme owns the complete Material and domain semantic roles", () => {
   assert.equal(catalog.version, 2);
   assert.ok(catalog.themes.some((theme) => theme.id === catalog.defaultThemeId));
   for (const theme of catalog.themes) {
@@ -32,8 +32,10 @@ test("every Akashic theme owns the complete Material and domain semantic roles",
   }
 });
 
-test("theme runtime publishes Material, Akashic domain, and legacy compatibility namespaces", () => {
+test("theme runtime publishes Roxy and legacy compatibility namespaces", () => {
   assert.match(runtime, /colorDeclarations\("md-sys-color"/);
+  assert.match(runtime, /colorDeclarations\("roxy-sys-color"/);
+  assert.match(runtime, /colorDeclarations\("roxy-color"/);
   assert.match(runtime, /colorDeclarations\("ak-sys-color"/);
   assert.match(runtime, /colorDeclarations\("ak-color"/);
 });

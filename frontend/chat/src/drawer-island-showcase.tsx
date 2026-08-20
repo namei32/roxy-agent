@@ -15,7 +15,7 @@ import "./drawer-island-showcase.css";
 const SESSIONS = [
   {
     id: "heart-rate",
-    title: "akashic 帮我看看现在心率怎么样",
+    title: "roxy 帮我看看现在心率怎么样",
     preview: "好像手坠到了肩膀那块…",
     updatedLabel: "昨天",
     active: true,
@@ -23,7 +23,7 @@ const SESSIONS = [
   {
     id: "mobile-link",
     title: "请只回复：手机端链路验证通过",
-    preview: "可以看到吗 Akashic",
+    preview: "可以看到吗 Roxy",
     updatedLabel: "7/15",
     active: false,
   },
@@ -42,7 +42,7 @@ export function DrawerIslandShowcase() {
     <main className="legacy-drawer-showcase">
       <header className="legacy-drawer-showcase__header">
         <h1>统一前的移动端抽屉</h1>
-        <p>取自 akashic-mobile v0.8.15（315b4ba）。共享组件保留新能力，视觉层级恢复旧版。</p>
+        <p>取自 roxy-mobile v0.8.15（315b4ba）。共享组件保留新能力，视觉层级恢复旧版。</p>
       </header>
 
       <section className="legacy-drawer-device" aria-label="v0.8.15 抽屉复刻">

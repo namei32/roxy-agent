@@ -276,7 +276,14 @@ export function mobileComposerActionMode({
 
 export function isMobileImageViewerHistoryState(state: unknown, attachmentId: string) {
   if (typeof state !== "object" || state === null) return false;
-  return "akashicImageViewer" in state && state.akashicImageViewer === attachmentId;
+  const value = state as {
+    roxyImageViewer?: unknown;
+    akashicImageViewer?: unknown;
+  };
+  return (
+    value.roxyImageViewer === attachmentId
+    || value.akashicImageViewer === attachmentId
+  );
 }
 
 export function normalizeMobileSearchText(value: string) {
@@ -323,7 +330,7 @@ export function formatMobileReplyNavigationAnnouncement(
   message: MobileReplyNavigationMessage,
   formatTime: (createdAt: number) => string,
 ) {
-  return `已跳到${message.role === "assistant" ? "Akashic" : "你"} ${formatTime(message.createdAt)} 的消息`;
+  return `已跳到${message.role === "assistant" ? "Roxy" : "你"} ${formatTime(message.createdAt)} 的消息`;
 }
 
 /** 把原生草稿解析为当前会话可展示的文字与引用。 */
@@ -438,7 +445,7 @@ export function formatMobileSelectionCopyText(
   const copyable = messages.filter(mobileMessageHasCopyContent);
   if (copyable.length === 1) return mobileMessageCopyBody(copyable[0]);
   return copyable.map((message) => [
-    `${message.role === "assistant" ? "Akashic" : "你"} · ${formatTimestamp(message.createdAt)}`,
+    `${message.role === "assistant" ? "Roxy" : "你"} · ${formatTimestamp(message.createdAt)}`,
     mobileMessageCopyBody(message),
   ].join("\n")).join("\n\n");
 }

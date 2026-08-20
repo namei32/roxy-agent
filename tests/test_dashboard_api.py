@@ -134,6 +134,48 @@ def create_dashboard_app(tmp_path, **kwargs):
     return _create_dashboard_app(tmp_path, **kwargs)
 
 
+def test_dashboard_panel_build_normalizes_roxy_sdk_import(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Roxy SDK import 在构建边界映射到旧 import map 的共享单例。"""
+
+    calls: list[list[str]] = []
+
+    class Result:
+        returncode = 0
+        stderr = ""
+
+    def run(command, **_kwargs):
+        calls.append(command)
+        return Result()
+
+    monkeypatch.setattr(dashboard_api.subprocess, "run", run)
+    dashboard_api._run_esbuild(
+        ["esbuild"],
+        tmp_path / "dashboard_panel.tsx",
+        tmp_path / "dashboard_panel.js",
+        "test/dashboard_panel",
+    )
+
+    assert len(calls) == 1
+    assert "--alias:@roxy/dashboard-ui=@akashic/dashboard-ui" in calls[0]
+    assert "--external:@akashic/dashboard-ui" in calls[0]
+
+
+def test_dashboard_runtime_uses_roxy_identity(tmp_path: Path) -> None:
+    """Dashboard 应公开 Roxy 标题与隔离模块前缀。"""
+
+    app = create_dashboard_app(tmp_path)
+    try:
+        assert app.title == "Roxy Dashboard API"
+        assert dashboard_api._dashboard_module_name(tmp_path).startswith(
+            "roxy_dashboard_plugin_"
+        )
+    finally:
+        app.state.memory_admin.close()
+
+
 def _seed_explicit_interaction(
     workspace: Path,
     *,

@@ -1013,23 +1013,30 @@ function parseMobilePluginResult(value: unknown) {
   };
 }
 
+type MobileBridgeCallbacks = {
+  receiveSnapshot(snapshot: unknown): void;
+  receiveStreamPatch(patch: unknown): void;
+  receiveStatePatch(patch: unknown): void;
+  receivePluginCatalog(catalog: unknown): void;
+  receivePluginUiResult(result: unknown): void;
+  receiveSendResult(requestId: string, accepted: boolean): void;
+  receiveShareResult(requestId: string, launched: boolean): void;
+  receiveSharedText(draftId: string, sessionId: string, text: string): void;
+  navigateBack(): boolean;
+};
+
 declare global {
   interface Window {
+    RoxyNativeTransport?: {
+      postMessage(message: string): void;
+    };
     AkashicNativeTransport?: {
       postMessage(message: string): void;
     };
+    RoxyNative?: NativeBridge;
     AkashicNative?: NativeBridge;
-    AkashicMobile?: {
-      receiveSnapshot(snapshot: unknown): void;
-      receiveStreamPatch(patch: unknown): void;
-      receiveStatePatch(patch: unknown): void;
-      receivePluginCatalog(catalog: unknown): void;
-      receivePluginUiResult(result: unknown): void;
-      receiveSendResult(requestId: string, accepted: boolean): void;
-      receiveShareResult(requestId: string, launched: boolean): void;
-      receiveSharedText(draftId: string, sessionId: string, text: string): void;
-      navigateBack(): boolean;
-    };
+    RoxyMobile?: MobileBridgeCallbacks;
+    AkashicMobile?: MobileBridgeCallbacks;
   }
 }
 
@@ -1095,7 +1102,7 @@ function MobileNativeApp() {
 
   const saveComposerDraft = useCallback((draft: MobileComposerDraftWrite) => {
     optimisticComposerDraftsRef.current.set(draft.sessionId, draft);
-    window.AkashicNative?.saveComposerDraft(
+    window.RoxyNative?.saveComposerDraft(
       draft.sessionId,
       draft.text,
       draft.replyToMessageId ?? "",
@@ -1168,7 +1175,7 @@ function MobileNativeApp() {
     if (!current || current.sessionId !== sessionId) return false;
 
     if (appliedSharedTextIdsRef.current.has(draftId)) {
-      window.AkashicNative?.commitSharedText(
+      window.RoxyNative?.commitSharedText(
         draftId,
         sessionId,
         current.text,
@@ -1180,7 +1187,7 @@ function MobileNativeApp() {
     // 1. 复用当前会话草稿 owner，并保留已有引用目标
     const merged = mergeMobileComposerDraft(current.text, text);
     if (merged === null) {
-      window.AkashicNative?.rejectSharedText(draftId, "当前输入空间不足，请精简草稿后重试");
+      window.RoxyNative?.rejectSharedText(draftId, "当前输入空间不足，请精简草稿后重试");
       return true;
     }
     const next = {
@@ -1216,7 +1223,7 @@ function MobileNativeApp() {
     selectionActiveRef.current = false;
     setSelectedMessageIds(new Set());
     appliedSharedTextIdsRef.current.add(draftId);
-    window.AkashicNative?.commitSharedText(
+    window.RoxyNative?.commitSharedText(
       draftId,
       sessionId,
       next.text,
@@ -1231,7 +1238,7 @@ function MobileNativeApp() {
     let snapshotAccepted = false;
     const requestSnapshot = () => {
       if (snapshotAccepted) return;
-      window.AkashicNative?.requestSnapshot();
+      window.RoxyNative?.requestSnapshot();
       requestTimer = window.setTimeout(requestSnapshot, 250);
     };
     const previousScrollRestoration = window.history.scrollRestoration;
@@ -1243,7 +1250,7 @@ function MobileNativeApp() {
       setSurface(next);
     };
     window.addEventListener("popstate", handlePopState);
-    window.AkashicMobile = {
+    const mobileCallbacks: MobileBridgeCallbacks = {
       receiveSnapshot(next) {
         let nextSnapshot: MobileSnapshot;
         try {
@@ -1291,7 +1298,7 @@ function MobileNativeApp() {
         }
         const current = streamSnapshotRef.current;
         if (current === null) {
-          window.AkashicNative?.requestSnapshot();
+          window.RoxyNative?.requestSnapshot();
           return;
         }
         const previousMessage = current.messages[parsed.messageIndex];
@@ -1313,7 +1320,7 @@ function MobileNativeApp() {
           : parsed;
         const applied = applyMobileStreamPatch(current, reconciledPatch);
         if (applied === null || previousMessage === undefined) {
-          window.AkashicNative?.requestSnapshot();
+          window.RoxyNative?.requestSnapshot();
           return;
         }
         let nextSnapshot = applied;
@@ -1362,7 +1369,7 @@ function MobileNativeApp() {
           || projected.selectedSessionId !== patch.selectedSessionId
           || projected.projectionGeneration !== patch.projectionGeneration
         ) {
-          window.AkashicNative?.requestSnapshot();
+          window.RoxyNative?.requestSnapshot();
           return;
         }
         const { protocolVersion, ...state } = patch;
@@ -1375,7 +1382,7 @@ function MobileNativeApp() {
               current.selectedSessionId !== patch.selectedSessionId ||
               current.projectionGeneration !== patch.projectionGeneration
             ) {
-              window.AkashicNative?.requestSnapshot();
+              window.RoxyNative?.requestSnapshot();
               return current;
             }
             return { ...current, ...state };
@@ -1453,7 +1460,7 @@ function MobileNativeApp() {
         if (
           typeof historyState === "object" &&
           historyState !== null &&
-          "akashicImageViewer" in historyState
+          ("roxyImageViewer" in historyState || "akashicImageViewer" in historyState)
         ) {
           window.history.back();
           return true;
@@ -1463,21 +1470,23 @@ function MobileNativeApp() {
         return true;
       },
     };
+    window.RoxyMobile = mobileCallbacks;
+    window.AkashicMobile = mobileCallbacks;
     const receiveNativeMessage = (event: MessageEvent<unknown>) => {
       if (typeof event.data !== "string") return;
       try {
         const message = requireRecord(JSON.parse(event.data), "nativeMessage");
         const type = requireString(message.type, "nativeMessage.type");
         if (type === "mobile.snapshot") {
-          window.AkashicMobile?.receiveSnapshot(message.payload);
+          window.RoxyMobile?.receiveSnapshot(message.payload);
           return;
         }
         if (type === "mobile.stream-patch") {
-          window.AkashicMobile?.receiveStreamPatch(message.payload);
+          window.RoxyMobile?.receiveStreamPatch(message.payload);
           return;
         }
         if (type === "mobile.state-patch") {
-          window.AkashicMobile?.receiveStatePatch(message.payload);
+          window.RoxyMobile?.receiveStatePatch(message.payload);
           return;
         }
         if (type === "mobile.theme") {
@@ -1485,11 +1494,11 @@ function MobileNativeApp() {
           return;
         }
         if (type === "plugin.catalog") {
-          window.AkashicMobile?.receivePluginCatalog(message.payload);
+          window.RoxyMobile?.receivePluginCatalog(message.payload);
           return;
         }
         if (type === "plugin.result") {
-          window.AkashicMobile?.receivePluginUiResult(message.payload);
+          window.RoxyMobile?.receivePluginUiResult(message.payload);
           return;
         }
         throw new Error(`nativeMessage.type 无效: ${type}`);
@@ -1505,14 +1514,15 @@ function MobileNativeApp() {
       window.removeEventListener("message", receiveNativeMessage);
       window.history.scrollRestoration = previousScrollRestoration;
       streamStore.clear();
-      delete window.AkashicMobile;
+      if (window.RoxyMobile === mobileCallbacks) delete window.RoxyMobile;
+      if (window.AkashicMobile === mobileCallbacks) delete window.AkashicMobile;
     };
   }, [applySharedText, clearAcceptedComposerDraft, flushComposerDraft, streamStore]);
 
   useEffect(() => {
     if (!snapshot) return;
     const frame = window.requestAnimationFrame(() => {
-      window.AkashicNative?.reportHealthy();
+      window.RoxyNative?.reportHealthy();
     });
     return () => window.cancelAnimationFrame(frame);
   }, [snapshot]);
@@ -1685,7 +1695,7 @@ function MobileNativeApp() {
     if (!snapshot.messages.some((message) => message.id === target.messageId)) return;
     handledNavigationTargetRef.current = key;
     jumpToMessage(target.messageId, true);
-    window.AkashicNative?.navigationTargetHandled(target.messageId);
+    window.RoxyNative?.navigationTargetHandled(target.messageId);
   }, [jumpToMessage, snapshot?.messages, snapshot?.navigationTarget, snapshot?.selectedSessionId]);
 
   // 必要 effect：搜索目标自动选中（维护有效 searchTargetId，渲染期调整会改变“仍有效则不动”语义）
@@ -1749,7 +1759,7 @@ function MobileNativeApp() {
   }, [input]);
 
   const copyMessage = useCallback((message: MobileMessage) => {
-    window.AkashicNative?.copyText(message.content);
+    window.RoxyNative?.copyText(message.content);
     setCopiedMessageId(message.id);
     if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current);
     copiedTimerRef.current = window.setTimeout(() => {
@@ -1811,8 +1821,8 @@ function MobileNativeApp() {
   }, [jumpToMessage]);
   const retryMessageDelivery = useCallback((messageId: string) => {
     setRecoveringMessageIds((current) => new Set(current).add(messageId));
-    window.AkashicNative?.performActionHaptic();
-    window.AkashicNative?.retryFailedMessage(messageId);
+    window.RoxyNative?.performActionHaptic();
+    window.RoxyNative?.retryFailedMessage(messageId);
   }, []);
   const replyToMessage = useCallback((message: MobileMessage) => {
     updateComposerDraft(composerInputRef.current, message);
@@ -1847,7 +1857,7 @@ function MobileNativeApp() {
     const attachmentsReady = allMobileAttachmentsReady(snapshot.composer.attachments);
     if (sendPending || !snapshot.composer.canSend || snapshot.composer.canStop || !attachmentsReady) return;
     if (!text && snapshot.composer.attachments.length === 0) return;
-    const native = window.AkashicNative;
+    const native = window.RoxyNative;
     const sessionId = snapshot.selectedSessionId;
     if (!native) return;
     if (!sessionId) throw new Error("发送消息缺少当前会话 owner");
@@ -1874,7 +1884,7 @@ function MobileNativeApp() {
   const stop = () => {
     if (!snapshot.composer.canStop || stopRequested) return;
     setStopRequested(true);
-    window.AkashicNative?.stopTurn();
+    window.RoxyNative?.stopTurn();
   };
   const closeDrawer = () => {
     setDrawerOpen(false);
@@ -1943,8 +1953,8 @@ function MobileNativeApp() {
       selectedMessages,
       (createdAt) => `${formatMessageDate(createdAt)} ${formatMessageTime(createdAt)}`,
     );
-    window.AkashicNative?.copyText(text);
-    window.AkashicNative?.performActionHaptic();
+    window.RoxyNative?.copyText(text);
+    window.RoxyNative?.performActionHaptic();
     clearSelection();
   };
   const shareSelection = () => {
@@ -1956,7 +1966,7 @@ function MobileNativeApp() {
     pendingShareRequestRef.current = requestId;
     setSharePending(true);
     setShareStatus("正在打开系统分享");
-    window.AkashicNative?.shareText(requestId, text);
+    window.RoxyNative?.shareText(requestId, text);
   };
   const replyToSelection = () => {
     const target = selectedMessages.length === 1 ? selectedMessages[0] : undefined;
@@ -2020,7 +2030,7 @@ function MobileNativeApp() {
           snapshot={snapshot}
           pluginCount={pluginDashboards.length}
           onOpenRuntime={() => {
-            window.AkashicNative?.refreshRuntimeInspection();
+            window.RoxyNative?.refreshRuntimeInspection();
             navigateToSurface({ kind: "runtime" });
             closeDrawer();
           }}
@@ -2029,13 +2039,13 @@ function MobileNativeApp() {
             closeDrawer();
           }}
           onOpenSettings={() => {
-            window.AkashicNative?.openSettings();
+            window.RoxyNative?.openSettings();
             closeDrawer();
           }}
           onRestartPairing={() => {
             flushMobileComposerBeforePairing(
               flushComposerDraft,
-              () => window.AkashicNative?.restartPairing(),
+              () => window.RoxyNative?.restartPairing(),
             );
           }}
           onClose={closeDrawer}
@@ -2052,7 +2062,7 @@ function MobileNativeApp() {
                   <strong>连接出现问题</strong>
                   <small>{snapshot.connection.error}</small>
                 </span>
-                <button type="button" onClick={() => window.AkashicNative?.dismissError()}>关闭</button>
+                <button type="button" onClick={() => window.RoxyNative?.dismissError()}>关闭</button>
               </div>
             ) : null}
             {pluginLoadError ? (
@@ -2071,17 +2081,17 @@ function MobileNativeApp() {
         {surface.kind === "runtime" ? (
           <RuntimeInspectionDirectory
             inspection={snapshot.runtimeInspection}
-            onRefresh={() => window.AkashicNative?.refreshRuntimeInspection()}
+            onRefresh={() => window.RoxyNative?.refreshRuntimeInspection()}
             onOpenDocument={(documentId) => {
-              window.AkashicNative?.openRuntimeDocument(documentId);
+              window.RoxyNative?.openRuntimeDocument(documentId);
               navigateToSurface({ kind: "runtime-detail", detailKind: "document", key: documentId });
             }}
             onOpenMcp={(ownerId, name) => {
-              window.AkashicNative?.openRuntimeMcp(ownerId, name);
+              window.RoxyNative?.openRuntimeMcp(ownerId, name);
               navigateToSurface({ kind: "runtime-detail", detailKind: "mcp", key: `${ownerId}/${name}` });
             }}
             onOpenJob={(jobId) => {
-              window.AkashicNative?.openRuntimeJob(jobId);
+              window.RoxyNative?.openRuntimeJob(jobId);
               navigateToSurface({ kind: "runtime-detail", detailKind: "schedule", key: jobId });
             }}
           />
@@ -2404,7 +2414,7 @@ const MobilePlainMessageView = React.memo(function MobilePlainMessageView({ role
 });
 
 function copyToolDetail(text: string) {
-  window.AkashicNative?.copyText(text);
+  window.RoxyNative?.copyText(text);
 }
 
 function MobilePluginTopBar({ title, onBack }: { title: string; onBack: () => void }) {
@@ -2585,7 +2595,7 @@ function MobileTopBar({
         type="button"
         onClick={() => {
           const next = cycleTheme();
-          window.AkashicNative?.setTheme(next.requestedThemeId);
+          window.RoxyNative?.setTheme(next.requestedThemeId);
         }}
         aria-label={`切换主题，当前为${theme.label}`}
         title={`当前主题：${theme.label}`}
@@ -2702,7 +2712,7 @@ function MobileDrawer({
             ) : session.id === snapshot.selectedSessionId ? <Check size={18} /> : null,
         }))}
         onSessionActivate={(sessionId) => {
-          window.AkashicNative?.selectSession(sessionId);
+          window.RoxyNative?.selectSession(sessionId);
           onClose();
         }}
         sessionAfterContent={<MobilePluginSlot name="drawer.panel" sessionId={snapshot.selectedSessionId} />}
@@ -2713,7 +2723,7 @@ function MobileDrawer({
             icon: <FileText size={18} />,
             label: "导出诊断报告",
             onActivate: () => {
-              window.AkashicNative?.exportDiagnostics();
+              window.RoxyNative?.exportDiagnostics();
               onClose();
             },
           },
@@ -2724,7 +2734,7 @@ function MobileDrawer({
             disabled: !snapshot.composer.canResync,
             onActivate: () => {
               if (window.confirm("清除本机已同步消息和附件缓存，并从电脑重新拉取？连接状态会保留。")) {
-                window.AkashicNative?.reloadFromServer();
+                window.RoxyNative?.reloadFromServer();
                 onClose();
               }
             },
@@ -2736,7 +2746,7 @@ function MobileDrawer({
             label: "新聊天",
             primary: true,
             onActivate: () => {
-              window.AkashicNative?.createSession();
+              window.RoxyNative?.createSession();
               onClose();
             },
           },
@@ -2945,7 +2955,7 @@ function UnavailableSessionFooter({ session }: { session: MobileSession }) {
           <strong>电脑端已不存在</strong>
           <small>未发送的消息或附件仍保留在本机；已停止发送，避免重新创建会话。</small>
         </span>
-        <button className="new-session" type="button" onClick={() => window.AkashicNative?.createSession()}>
+        <button className="new-session" type="button" onClick={() => window.RoxyNative?.createSession()}>
           新聊天
         </button>
       </div>
@@ -2979,8 +2989,8 @@ function UnavailableSessionFooter({ session }: { session: MobileSession }) {
                 className="destructive"
                 type="button"
                 onClick={() => {
-                  window.AkashicNative?.performActionHaptic();
-                  window.AkashicNative?.removeUnavailableSession(session.id);
+                  window.RoxyNative?.performActionHaptic();
+                  window.RoxyNative?.removeUnavailableSession(session.id);
                 }}
               >
                 移除
@@ -3089,7 +3099,7 @@ function MobileComposer({
           selectedRuntimeId={snapshot.modelCatalog.selectedRuntimeId}
           selectedEffort={snapshot.modelCatalog.selectedReasoningEffort}
           disabled={snapshot.modelCatalog.loading || sendPending}
-          onChange={(runtimeId, effort) => window.AkashicNative?.setModelSelection(runtimeId, effort)}
+          onChange={(runtimeId, effort) => window.RoxyNative?.setModelSelection(runtimeId, effort)}
         />
       ) : null}
       <div className={`mobile-composer-frame ${replyTarget ? "has-reply" : ""}`}>
@@ -3132,7 +3142,7 @@ function MobileComposer({
             }
           }}
         />
-        <button className="mobile-icon-button" type="button" disabled={sendPending || !hasOwner} onClick={() => window.AkashicNative?.chooseAttachments()} aria-label="添加附件">
+        <button className="mobile-icon-button" type="button" disabled={sendPending || !hasOwner} onClick={() => window.RoxyNative?.chooseAttachments()} aria-label="添加附件">
           <Paperclip size={22} />
         </button>
         {actionMode === "stop" ? (
@@ -3402,7 +3412,7 @@ function TransferBanner({ status }: { status: MobileTransferStatus }) {
       <span className="transfer-banner__percent">{status.progressPercent}%</span>
       <div className="transfer-banner__track"><span style={{ inlineSize: `${status.progressPercent}%` }} /></div>
       {status.requiresMeteredApproval ? (
-        <button type="button" onClick={() => window.AkashicNative?.continueMeteredTransfer()}>使用当前网络继续</button>
+        <button type="button" onClick={() => window.RoxyNative?.continueMeteredTransfer()}>使用当前网络继续</button>
       ) : null}
     </section>
   );
@@ -3429,7 +3439,7 @@ function CommandSheet({ open, commands, onClose }: { open: boolean; commands: Mo
           <button type="button" className="command-row" key={item.command} tabIndex={open ? 0 : -1} onClick={() => {
             if (dispatchedRef.current) return;
             dispatchedRef.current = true;
-            window.AkashicNative?.sendCommand(`/${item.command}`);
+            window.RoxyNative?.sendCommand(`/${item.command}`);
             onClose();
           }}>
             <span className="command-row__description">{item.description}</span>
@@ -3466,8 +3476,8 @@ function DraftAttachments({ attachments, disabled }: { attachments: MobileAttach
     const next = new Map(operationsRef.current).set(attachmentId, operation);
     operationsRef.current = next;
     setOperations(next);
-    if (operation === "retry") window.AkashicNative?.retryAttachment(attachmentId);
-    else window.AkashicNative?.removeAttachment(attachmentId);
+    if (operation === "retry") window.RoxyNative?.retryAttachment(attachmentId);
+    else window.RoxyNative?.removeAttachment(attachmentId);
   };
 
   return (
@@ -3545,14 +3555,14 @@ function MobileMessageAttachment({ attachment }: { attachment: MobileAttachment 
       if (!viewerOpenRef.current) return;
       viewerOpenRef.current = false;
       setViewerOpen(false);
-      window.AkashicNative?.setWebHistoryActive(false);
+      window.RoxyNative?.setWebHistoryActive(false);
     };
     window.addEventListener("popstate", closeFromHistory);
     return () => {
       window.removeEventListener("popstate", closeFromHistory);
       if (!viewerOpenRef.current) return;
       viewerOpenRef.current = false;
-      window.AkashicNative?.setWebHistoryActive(false);
+      window.RoxyNative?.setWebHistoryActive(false);
       if (isMobileImageViewerHistoryState(window.history.state, attachment.id)) window.history.back();
     };
   }, [attachment.id]);
@@ -3560,23 +3570,23 @@ function MobileMessageAttachment({ attachment }: { attachment: MobileAttachment 
   const changeViewer = (open: boolean) => {
     if (open) {
       if (viewerOpenRef.current) return;
-      window.history.pushState({ akashicImageViewer: attachment.id }, "");
+      window.history.pushState({ roxyImageViewer: attachment.id }, "");
       viewerOpenRef.current = true;
       setViewerOpen(true);
-      window.AkashicNative?.setWebHistoryActive(true);
-      window.AkashicNative?.touchDownloadedAttachment(attachment.id);
+      window.RoxyNative?.setWebHistoryActive(true);
+      window.RoxyNative?.touchDownloadedAttachment(attachment.id);
       return;
     }
     if (isMobileImageViewerHistoryState(window.history.state, attachment.id)) {
       viewerOpenRef.current = false;
       setViewerOpen(false);
-      window.AkashicNative?.setWebHistoryActive(false);
+      window.RoxyNative?.setWebHistoryActive(false);
       window.history.back();
       return;
     }
     viewerOpenRef.current = false;
     setViewerOpen(false);
-    window.AkashicNative?.setWebHistoryActive(false);
+    window.RoxyNative?.setWebHistoryActive(false);
   };
   const status = attachment.state === "pending"
     ? "等待下载"
@@ -3613,7 +3623,7 @@ function MobileMessageAttachment({ attachment }: { attachment: MobileAttachment 
           className="message-attachment-main"
           type="button"
           disabled={!cached}
-          onClick={() => window.AkashicNative?.openDownloadedAttachment(attachment.id)}
+          onClick={() => window.RoxyNative?.openDownloadedAttachment(attachment.id)}
         >
           <FileText size={20} />
           <span>
@@ -3636,12 +3646,12 @@ function MobileMessageAttachment({ attachment }: { attachment: MobileAttachment 
           aria-label={`${attachment.state === "remote" ? "下载" : "重试"} ${attachment.filename}`}
           className="message-attachment-action"
           type="button"
-          onClick={() => window.AkashicNative?.retryDownloadedAttachment(attachment.id)}
+          onClick={() => window.RoxyNative?.retryDownloadedAttachment(attachment.id)}
         >
           {attachment.state === "remote" ? "下载" : "重试"}
         </button>
       ) : cached ? (
-        <button className="message-attachment-action icon" type="button" onClick={() => window.AkashicNative?.shareDownloadedAttachment(attachment.id)} aria-label={`分享 ${attachment.filename}`}><Share2 size={18} /></button>
+        <button className="message-attachment-action icon" type="button" onClick={() => window.RoxyNative?.shareDownloadedAttachment(attachment.id)} aria-label={`分享 ${attachment.filename}`}><Share2 size={18} /></button>
       ) : null}
     </div>
   );
@@ -3703,8 +3713,8 @@ function ImageViewer({ attachment, onClose }: { attachment: MobileAttachment; on
       <header className="image-viewer-toolbar">
         <button type="button" onClick={onClose} aria-label="返回会话"><ArrowLeft size={22} /></button>
         <strong title={attachment.filename}>{attachment.filename}</strong>
-        <button type="button" onClick={() => window.AkashicNative?.saveDownloadedAttachment(attachment.id)} aria-label={`保存 ${attachment.filename}`}><Download size={21} /></button>
-        <button type="button" onClick={() => window.AkashicNative?.shareDownloadedAttachment(attachment.id)} aria-label={`分享 ${attachment.filename}`}><Share2 size={21} /></button>
+        <button type="button" onClick={() => window.RoxyNative?.saveDownloadedAttachment(attachment.id)} aria-label={`保存 ${attachment.filename}`}><Download size={21} /></button>
+        <button type="button" onClick={() => window.RoxyNative?.shareDownloadedAttachment(attachment.id)} aria-label={`分享 ${attachment.filename}`}><Share2 size={21} /></button>
       </header>
       <div
         className="image-viewer-stage"
@@ -3881,7 +3891,7 @@ const MessageSelectionTarget = React.forwardRef<
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null;
       suppressNextClick();
-      window.AkashicNative?.performActionHaptic();
+      window.RoxyNative?.performActionHaptic();
       onEnterSelection();
     }, 420);
   };
@@ -3942,7 +3952,7 @@ const MessageSelectionTarget = React.forwardRef<
         if (suppressClickRef.current) return;
         if (!selectionActive) {
           suppressNextClick();
-          window.AkashicNative?.performActionHaptic();
+          window.RoxyNative?.performActionHaptic();
           onEnterSelection();
         }
       }}
@@ -4212,7 +4222,7 @@ const MobileVirtualConversation = React.forwardRef<MobileConversationHandle, Mob
           const key = `${sessionId}\u001ftail\u001f${latestAssistantAt}`;
           if (key !== lastSavedRef.current) {
             lastSavedRef.current = key;
-            window.AkashicNative?.markSessionReadThrough(sessionId, latestAssistantAt);
+            window.RoxyNative?.markSessionReadThrough(sessionId, latestAssistantAt);
           }
           return;
         }
@@ -4224,7 +4234,7 @@ const MobileVirtualConversation = React.forwardRef<MobileConversationHandle, Mob
         const key = `${sessionId}\u001f${message.id}\u001f${offsetPx}`;
         if (key === lastSavedRef.current) return;
         lastSavedRef.current = key;
-        window.AkashicNative?.saveReadingPosition(sessionId, message.id, offsetPx);
+        window.RoxyNative?.saveReadingPosition(sessionId, message.id, offsetPx);
       };
       const schedulePersist = () => {
         if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
@@ -4262,7 +4272,7 @@ const MobileVirtualConversation = React.forwardRef<MobileConversationHandle, Mob
           {snapshot.messages.length === 0 ? (
             <div className="mobile-empty">
               <h1>开始一段新对话</h1>
-              <p>消息会通过电脑上的 Akashic 实时处理。</p>
+              <p>消息会通过电脑上的 Roxy 实时处理。</p>
             </div>
           ) : (
             <div
@@ -4480,7 +4490,7 @@ function MobileSearchTextHighlight({ query, messageId }: { query: string; messag
     // 1. 清理旧高亮并确认平台能力与当前目标
     const registry = (CSS as unknown as { highlights?: { set(name: string, value: unknown): void; delete(name: string): void } }).highlights;
     const HighlightConstructor = (window as Window & { Highlight?: new (...ranges: Range[]) => unknown }).Highlight;
-    registry?.delete("akashic-search-match");
+    registry?.delete("roxy-search-match");
     if (!registry || !HighlightConstructor || !messageId || !query.trim()) return;
     const rawNeedle = query.trim();
     const needle = normalizeMobileSearchText(rawNeedle);
@@ -4515,14 +4525,14 @@ function MobileSearchTextHighlight({ query, messageId }: { query: string; messag
           offset = index + needle.length;
         }
       }
-      if (ranges.length > 0) registry.set("akashic-search-match", new HighlightConstructor(...ranges));
+      if (ranges.length > 0) registry.set("roxy-search-match", new HighlightConstructor(...ranges));
     };
 
     // 3. 下一帧等待虚拟行落位，并在目标变化或卸载时原子清理
     retryFrame = requestAnimationFrame(register);
     return () => {
       if (retryFrame !== null) cancelAnimationFrame(retryFrame);
-      registry.delete("akashic-search-match");
+      registry.delete("roxy-search-match");
     };
   }, [messageId, query]);
   return null;
@@ -4632,6 +4642,7 @@ function syncMobileViewportHeight() {
 
 syncMobileViewportHeight();
 window.addEventListener("resize", syncMobileViewportHeight);
+document.title = "Roxy Mobile";
 initializeTheme();
 installMobileBridge();
 

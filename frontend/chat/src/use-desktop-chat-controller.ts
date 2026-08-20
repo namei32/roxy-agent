@@ -210,7 +210,7 @@ export function useDesktopChatController() {
         || typeof payload !== "object"
         || payload === null
         || !("type" in payload)
-        || payload.type !== "akashic.models.changed"
+        || (payload.type !== "roxy.models.changed" && payload.type !== "akashic.models.changed")
       ) return;
       void loadModels(activeSessionRef.current).catch((error: unknown) => reportError(error));
     };

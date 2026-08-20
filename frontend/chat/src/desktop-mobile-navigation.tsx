@@ -25,7 +25,7 @@ export function DesktopMobileNavigation(props: DesktopSidebarProps) {
           triggerRef.current?.focus();
         }}
       >
-        <DialogTitle className="sr-only">Akashic 导航</DialogTitle>
+        <DialogTitle className="sr-only">Roxy 导航</DialogTitle>
         <DesktopSidebar
           {...props}
           onSelectSession={(sessionId) => closeThen(() => props.onSelectSession(sessionId))}

@@ -73,7 +73,7 @@ export function SettingsApp() {
     setNotice(firstConnection ? `${sourceName} 已保存，接下来配置记忆` : `${sourceName} 已保存，密钥不会显示在页面中`);
     setSelection(null);
     if (isEmbeddedShell && !firstConnection) {
-      window.parent.postMessage({ type: "akashic.settings.applied" }, window.location.origin);
+      window.parent.postMessage({ type: "roxy.settings.applied" }, window.location.origin);
     }
   }, [refresh, setNotice]);
 
@@ -95,7 +95,7 @@ export function SettingsApp() {
         onNotice={setNotice}
         onComplete={(message) => {
           setNotice(message);
-          if (isEmbeddedShell) window.parent.postMessage({ type: "akashic.settings.applied" }, window.location.origin);
+          if (isEmbeddedShell) window.parent.postMessage({ type: "roxy.settings.applied" }, window.location.origin);
           window.setTimeout(() => {
             if (isEmbeddedShell) window.parent.location.href = "/";
             else window.location.href = "/";

@@ -22,12 +22,12 @@ function scalarNode(value: unknown): HTMLElement {
       const summary = document.createElement("summary");
       summary.textContent = `${value.slice(0, 160).replace(/\s+/g, " ")}…`;
       const content = document.createElement("div");
-      content.className = "ak-markdown";
+      content.className = "roxy-markdown ak-markdown";
       content.innerHTML = renderMarkdown(value);
       details.append(summary, content);
       return details;
     }
-    span.className = "jt-str ak-markdown";
+    span.className = "jt-str roxy-markdown ak-markdown";
     span.innerHTML = renderMarkdown(value);
     return span;
   }
@@ -123,12 +123,12 @@ export function attachJsonViewers(container: ParentNode): void {
 // ---------------------------------------------------------------------------
 
 const UI_TONES: Record<UiTone, string> = {
-  neutral: "ak-chip--neutral",
-  success: "ak-chip--success",
-  warning: "ak-chip--warning",
-  danger: "ak-chip--danger",
-  muted: "ak-chip--muted",
-  accent: "ak-chip--accent",
+  neutral: "roxy-chip--neutral ak-chip--neutral",
+  success: "roxy-chip--success ak-chip--success",
+  warning: "roxy-chip--warning ak-chip--warning",
+  danger: "roxy-chip--danger ak-chip--danger",
+  muted: "roxy-chip--muted ak-chip--muted",
+  accent: "roxy-chip--accent ak-chip--accent",
 };
 
 const UI_TONE_DOTS: Record<UiTone, string> = {
@@ -141,28 +141,32 @@ const UI_TONE_DOTS: Record<UiTone, string> = {
 };
 
 const UI_BTN_SIZES: Record<UiBtnSize, string> = {
-  sm: "ak-control-button--sm",
-  md: "ak-control-button--md",
-  lg: "ak-control-button--lg",
+  sm: "roxy-control-button--sm ak-control-button--sm",
+  md: "roxy-control-button--md ak-control-button--md",
+  lg: "roxy-control-button--lg ak-control-button--lg",
 };
 
 const UI_BTN_VARIANTS: Record<UiBtnVariant, string> = {
-  primary: "ak-control-button--primary",
-  secondary: "ak-control-button--secondary",
-  ghost: "ak-control-button--ghost",
-  danger: "ak-control-button--danger",
+  primary: "roxy-control-button--primary ak-control-button--primary",
+  secondary: "roxy-control-button--secondary ak-control-button--secondary",
+  ghost: "roxy-control-button--ghost ak-control-button--ghost",
+  danger: "roxy-control-button--danger ak-control-button--danger",
 };
 
-const UI_STACK = "ak-plugin-stack";
-const UI_GRID = "ak-plugin-grid";
-const UI_PANEL = "ak-plugin-panel";
-const UI_TOOLBAR = "ak-plugin-toolbar";
-const UI_BADGE_BASE = "ak-chip inline-flex items-center gap-1.5 px-2.5 py-1 font-sans text-[11px] tabular-nums";
-const UI_BTN_BASE = "ak-control-button inline-flex select-none items-center gap-2 font-medium disabled:cursor-not-allowed disabled:opacity-40";
-const UI_INPUT = "ak-control-input w-full text-[13px]";
+const UI_STACK = "roxy-plugin-stack ak-plugin-stack";
+const UI_GRID = "roxy-plugin-grid ak-plugin-grid";
+const UI_PANEL = "roxy-plugin-panel ak-plugin-panel";
+const UI_TOOLBAR = "roxy-plugin-toolbar ak-plugin-toolbar";
+const UI_BADGE_BASE = "roxy-chip ak-chip inline-flex items-center gap-1.5 px-2.5 py-1 font-sans text-[11px] tabular-nums";
+const UI_BTN_BASE = "roxy-control-button ak-control-button inline-flex select-none items-center gap-2 font-medium disabled:cursor-not-allowed disabled:opacity-40";
+const UI_INPUT = "roxy-control-input ak-control-input w-full text-[13px]";
 const UI_TILE = "relative rounded-xl bg-surface-2 p-5";
 const UI_LABEL = "font-sans text-[11px] font-medium tracking-wide text-subtle";
 const UI_MONO = "font-mono tabular-nums";
+
+function gridClass(columns: 2 | 3 | 4): string {
+  return `${UI_GRID} roxy-plugin-grid-${columns} ak-plugin-grid-${columns}`;
+}
 
 function badgeClass(tone: UiTone = "neutral"): string {
   return `${UI_BADGE_BASE} ${UI_TONES[tone]}`;
@@ -193,7 +197,8 @@ function createDashboardUi(): DashboardUi {
     },
     grid(columns = 2, className) {
       const div = document.createElement("div");
-      div.className = className ? `${UI_GRID} ${UI_GRID}-${columns} ${className}` : `${UI_GRID} ${UI_GRID}-${columns}`;
+      const classes = gridClass(columns);
+      div.className = className ? `${classes} ${className}` : classes;
       return div;
     },
     panel(className) {
@@ -236,7 +241,7 @@ function createDashboardUi(): DashboardUi {
     cx: {
       stack: UI_STACK,
       grid(columns = 2) {
-        return `${UI_GRID} ${UI_GRID}-${columns}`;
+        return gridClass(columns);
       },
       panel: UI_PANEL,
       toolbar: UI_TOOLBAR,
@@ -275,6 +280,7 @@ export function installDashboardGlobals(onRegister: (plugin: PluginConfig) => vo
   };
 
   const target = window as Window & {
+    RoxyDashboard: DashboardGlobal;
     AkashicDashboard: DashboardGlobal;
     api: typeof api;
     escapeHtml: typeof escapeHtml;
@@ -284,6 +290,7 @@ export function installDashboardGlobals(onRegister: (plugin: PluginConfig) => vo
     jvPlaceholder: typeof jvPlaceholder;
     attachJsonViewers: typeof attachJsonViewers;
   };
+  target.RoxyDashboard = dashboard;
   target.AkashicDashboard = dashboard;
   target.api = api;
   target.escapeHtml = escapeHtml;
@@ -321,9 +328,8 @@ export async function loadPluginAssets(): Promise<void> {
       const jsVersion = panel.js_version as string | undefined;
       const v = jsVersion ? `?v=${encodeURIComponent(jsVersion)}` : "";
       if (panel.has_css) injectStylesheet(`/plugins/${plugin.id}/${panelName}.css${v}`);
-      // ESM modules: bare react / @akashic/dashboard-ui specifiers resolve via
-      // the host import map to shared singletons. The module registers itself
-      // as a side-effect of import.
+      // ESM modules: bare react 与 dashboard UI specifier 由构建边界归一后，
+      // 通过 host import map 解析为共享单例。模块通过 import 副作用注册。
       await importPanel(`/plugins/${plugin.id}/${panelName}.js${v}`);
     }
   }

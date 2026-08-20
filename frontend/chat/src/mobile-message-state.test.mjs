@@ -293,7 +293,7 @@ test("multiple selection copies only copyable messages in conversation order", (
 
   assert.equal(
     formatMobileSelectionCopyText(messages, () => "昨天 11:02"),
-    "你 · 昨天 11:02\n问题\n\nAkashic · 昨天 11:02\n回答",
+    "你 · 昨天 11:02\n问题\n\nRoxy · 昨天 11:02\n回答",
   );
 });
 
@@ -322,7 +322,7 @@ test("reply navigation announces user and assistant identity with message time",
   );
   assert.equal(
     formatMobileReplyNavigationAnnouncement(selectableMessage("answer", "assistant", "回答"), () => "10:22"),
-    "已跳到Akashic 10:22 的消息",
+    "已跳到Roxy 10:22 的消息",
   );
 });
 
@@ -515,6 +515,8 @@ test("pending native share freezes the complete selection action group", () => {
 });
 
 test("image viewer owns only its matching history entry", () => {
+  assert.equal(isMobileImageViewerHistoryState({ roxyImageViewer: "image-1" }, "image-1"), true);
+  assert.equal(isMobileImageViewerHistoryState({ roxyImageViewer: "image-2" }, "image-1"), false);
   assert.equal(isMobileImageViewerHistoryState({ akashicImageViewer: "image-1" }, "image-1"), true);
   assert.equal(isMobileImageViewerHistoryState({ akashicImageViewer: "image-2" }, "image-1"), false);
   assert.equal(isMobileImageViewerHistoryState(null, "image-1"), false);

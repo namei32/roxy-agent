@@ -32,8 +32,17 @@ const METHOD_ARITY: Record<(typeof METHODS)[number], number> = {
 };
 
 export function installMobileBridge(): void {
-  const transport = window.AkashicNativeTransport as NativeTransport | undefined;
-  if (!transport || typeof transport.postMessage !== "function") return;
+  const transport = (
+    window.RoxyNativeTransport ?? window.AkashicNativeTransport
+  ) as NativeTransport | undefined;
+  if (!transport || typeof transport.postMessage !== "function") {
+    if (window.RoxyNative) {
+      window.AkashicNative = window.RoxyNative;
+    } else if (window.AkashicNative) {
+      window.RoxyNative = window.AkashicNative;
+    }
+    return;
+  }
   const url = new URL(window.location.href);
   const generationId = url.searchParams.get("generation_id");
   const nonce = url.searchParams.get("nonce");
@@ -56,5 +65,7 @@ export function installMobileBridge(): void {
       }));
     };
   }
-  window.AkashicNative = bridge as unknown as Window["AkashicNative"];
+  const nativeBridge = bridge as unknown as NonNullable<Window["RoxyNative"]>;
+  window.RoxyNative = nativeBridge;
+  window.AkashicNative = nativeBridge;
 }

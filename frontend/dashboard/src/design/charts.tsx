@@ -17,17 +17,17 @@ import { cn } from "./cn";
 export type ChartTone = "accent" | "success" | "warning" | "danger" | "muted";
 
 const TONE_RGB: Record<ChartTone, string> = {
-  accent: "var(--ak-color-action-primary-rgb)",
-  success: "var(--ak-color-status-success-rgb)",
-  warning: "var(--ak-color-status-warning-rgb)",
-  danger: "var(--ak-color-status-error-rgb)",
-  muted: "var(--ak-color-text-secondary-rgb)",
+  accent: "var(--roxy-color-action-primary-rgb)",
+  success: "var(--roxy-color-status-success-rgb)",
+  warning: "var(--roxy-color-status-warning-rgb)",
+  danger: "var(--roxy-color-status-error-rgb)",
+  muted: "var(--roxy-color-text-secondary-rgb)",
 };
 
 const toneColor = (tone: ChartTone): string => `rgb(${TONE_RGB[tone]})`;
 
-const AXIS_TICK = { fontSize: 10, fill: "rgb(var(--ak-color-text-muted-rgb) / 0.72)", fontFamily: "var(--sans)" };
-const GRID_STROKE = "rgb(var(--ak-color-border-default-rgb) / 0.72)";
+const AXIS_TICK = { fontSize: 10, fill: "rgb(var(--roxy-color-text-muted-rgb) / 0.72)", fontFamily: "var(--sans)" };
+const GRID_STROKE = "rgb(var(--roxy-color-border-default-rgb) / 0.72)";
 
 // Hand-rolled SVG pie — a compact two-slice hit/miss chart.
 export function Pie({
@@ -76,13 +76,13 @@ export function Pie({
         height={size}
         viewBox={`0 0 ${size} ${size}`}
       >
-        <circle cx={cx} cy={cx} r={r} fill="rgb(var(--ak-color-bg-surface-high-rgb))" />
+        <circle cx={cx} cy={cx} r={r} fill="rgb(var(--roxy-color-bg-surface-high-rgb))" />
         {shown >= 0.999 ? (
-          <circle cx={cx} cy={cx} r={r} fill="rgb(var(--ak-color-status-success-rgb))" />
+          <circle cx={cx} cy={cx} r={r} fill="rgb(var(--roxy-color-status-success-rgb))" />
         ) : shown > 0.001 ? (
-          <path d={slice} fill="rgb(var(--ak-color-status-success-rgb))" />
+          <path d={slice} fill="rgb(var(--roxy-color-status-success-rgb))" />
         ) : null}
-        <circle cx={cx} cy={cx} r={r} fill="none" stroke="var(--ak-color-border-strong)" strokeWidth={1} />
+        <circle cx={cx} cy={cx} r={r} fill="none" stroke="var(--roxy-color-border-strong)" strokeWidth={1} />
       </svg>
       <div className="flex w-full items-center justify-center gap-4 font-sans text-[11px] tabular-nums">
         <span className="flex items-center gap-1.5 text-success">
@@ -185,13 +185,13 @@ export function Sparkline({
 
 // Tooltip styled to the industrial tokens, shared by all recharts surfaces.
 const TOOLTIP_CONTENT_STYLE = {
-  background: "rgb(var(--ak-color-bg-surface-low-rgb))",
-  border: "1px solid var(--ak-color-border-strong)",
+  background: "rgb(var(--roxy-color-bg-surface-low-rgb))",
+  border: "1px solid var(--roxy-color-border-strong)",
   borderRadius: 8,
   fontSize: 11,
   fontFamily: "var(--sans)",
   padding: "6px 10px",
-  boxShadow: "0 2px 8px var(--ak-color-shadow)",
+  boxShadow: "0 2px 8px var(--roxy-color-shadow)",
 };
 
 // TrendChart — a recharts area/bar time series with a dashed horizontal grid,
@@ -239,8 +239,8 @@ export function TrendChart({
             <Tooltip
               cursor={{ stroke: GRID_STROKE }}
               contentStyle={TOOLTIP_CONTENT_STYLE}
-              labelStyle={{ color: "rgb(var(--ak-color-text-muted-rgb))", marginBottom: 2 }}
-              itemStyle={{ color: "rgb(var(--ak-color-text-primary-rgb))" }}
+              labelStyle={{ color: "rgb(var(--roxy-color-text-muted-rgb))", marginBottom: 2 }}
+              itemStyle={{ color: "rgb(var(--roxy-color-text-primary-rgb))" }}
               formatter={(v) => [valueFmt(Number(v)), ""] as [string, string]}
             />
             <Area type="monotone" dataKey="value" stroke={color} strokeWidth={1.5} fill={color} fillOpacity={0.08} dot={false} activeDot={{ r: 3, fill: color }} />
@@ -251,10 +251,10 @@ export function TrendChart({
             <XAxis dataKey="label" {...axisProps} minTickGap={28} />
             <YAxis {...axisProps} width={42} tickFormatter={valueFmt} />
             <Tooltip
-              cursor={{ fill: "rgb(var(--ak-color-bg-surface-high-rgb) / 0.4)" }}
+              cursor={{ fill: "rgb(var(--roxy-color-bg-surface-high-rgb) / 0.4)" }}
               contentStyle={TOOLTIP_CONTENT_STYLE}
-              labelStyle={{ color: "rgb(var(--ak-color-text-muted-rgb))", marginBottom: 2 }}
-              itemStyle={{ color: "rgb(var(--ak-color-text-primary-rgb))" }}
+              labelStyle={{ color: "rgb(var(--roxy-color-text-muted-rgb))", marginBottom: 2 }}
+              itemStyle={{ color: "rgb(var(--roxy-color-text-primary-rgb))" }}
               formatter={(v) => [valueFmt(Number(v)), ""] as [string, string]}
             />
             <Bar dataKey="value" fill={color} radius={[2, 2, 0, 0]} maxBarSize={28} />
