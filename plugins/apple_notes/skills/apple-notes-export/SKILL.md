@@ -1,6 +1,6 @@
 ---
 name: apple-notes-export
-description: Use when the user explicitly asks Akashic to save important content to Apple Notes, or when a system-scoped Interview Coach grant authorizes the current Telegram turn.
+description: Use when the user explicitly asks Roxy to save important content to Apple Notes, or when a system-scoped Interview Coach grant authorizes the current Telegram turn.
 ---
 
 # Apple Notes Export

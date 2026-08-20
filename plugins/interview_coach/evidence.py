@@ -36,12 +36,12 @@ class ProjectEvidenceService:
     def __init__(self, root: Path) -> None:
         self._root = root.expanduser().resolve(strict=True)
         if not self._root.is_dir():
-            raise ValueError(f"Akashic project_root 不是目录: {self._root}")
+            raise ValueError(f"Roxy project_root 不是目录: {self._root}")
         if shutil.which("git") is None or shutil.which("rg") is None:
-            raise RuntimeError("Akashic 项目证据工具需要 git 与 rg")
+            raise RuntimeError("Roxy 项目证据工具需要 git 与 rg")
         top = self._run(["git", "-C", str(self._root), "rev-parse", "--show-toplevel"])
         if Path(top.strip()).resolve(strict=True) != self._root:
-            raise ValueError(f"Akashic project_root 必须是 Git 根目录: {self._root}")
+            raise ValueError(f"Roxy project_root 必须是 Git 根目录: {self._root}")
 
     async def search(self, query: str, max_results: int) -> str:
         """按固定字符串搜索并绑定当前 Git revision。"""
@@ -122,7 +122,7 @@ class ProjectEvidenceService:
         )
         if completed.returncode not in {0, 1}:
             detail = completed.stderr.strip()[:500]
-            raise RuntimeError(f"Akashic 项目搜索失败: {detail}")
+            raise RuntimeError(f"Roxy 项目搜索失败: {detail}")
         hits: list[dict[str, Any]] = []
         for line in completed.stdout.splitlines():
             payload = json.loads(line)

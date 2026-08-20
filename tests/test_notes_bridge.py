@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import asdict
 import json
 from pathlib import Path
+import subprocess
 from typing import Any
 
 import pytest
@@ -14,7 +15,11 @@ from agent.config import _load_notes_bridge_config
 from agent.plugins.context import PluginContext, PluginKVStore
 from companion.mac_notes_bridge.executor import MacNotesExecutor
 from companion.mac_notes_bridge.client import MacNotesBridgeClient
-from companion.mac_notes_bridge.cli import _ssh_tunnel_program_arguments
+from companion.mac_notes_bridge.cli import (
+    _default_data_dir,
+    _load_keychain_token,
+    _ssh_tunnel_program_arguments,
+)
 from companion.mac_notes_bridge.store import MacNotesReceiptStore
 from infra.notes_bridge.auth import request_hash, sign_message, verify_message
 from infra.notes_bridge.broker import NotesBridgeBroker
@@ -158,7 +163,7 @@ def _operation(
         create_folder_if_missing=True,
         document_key="interview:batch-1",
         title="Interview",
-        html=f"<p>{body}</p><p>AKASHIC_EXPORT:{operation_id}</p>",
+        html=f"<p>{body}</p><p>ROXY_EXPORT:{operation_id}</p>",
     )
 
 
@@ -560,3 +565,34 @@ def test_ssh_tunnel_is_loopback_only_and_fail_closed(tmp_path: Path) -> None:
     assert "StrictHostKeyChecking=yes" in arguments
     assert "127.0.0.1:6330:127.0.0.1:6330" in arguments
     assert not any("token" in value.lower() for value in arguments)
+
+
+def test_companion_data_dir_preserves_legacy_state_until_explicit_migration(
+    tmp_path: Path,
+) -> None:
+    canonical = tmp_path / "Library" / "Application Support" / "Roxy" / "NotesBridge"
+    legacy = tmp_path / "Library" / "Application Support" / "Akashic" / "NotesBridge"
+
+    assert _default_data_dir(tmp_path) == str(canonical)
+    legacy.mkdir(parents=True)
+    assert _default_data_dir(tmp_path) == str(legacy)
+    canonical.mkdir(parents=True)
+    assert _default_data_dir(tmp_path) == str(canonical)
+
+
+def test_keychain_lookup_prefers_roxy_and_falls_back_to_legacy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    services: list[str] = []
+
+    def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        service = command[command.index("-s") + 1]
+        services.append(service)
+        if service == "io.roxy.notes-bridge":
+            return subprocess.CompletedProcess(command, 44, "", "missing")
+        return subprocess.CompletedProcess(command, 0, f"{_TOKEN}\n", "")
+
+    monkeypatch.setattr("companion.mac_notes_bridge.cli.subprocess.run", fake_run)
+
+    assert _load_keychain_token("mac-primary") == _TOKEN
+    assert services == ["io.roxy.notes-bridge", "io.akashic.notes-bridge"]

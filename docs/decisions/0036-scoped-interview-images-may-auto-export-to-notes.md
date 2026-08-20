@@ -41,7 +41,7 @@ Apple Notes owner 管理，Interview Coach 只保存工作流连续性。
 
 - 当前消息明确保存仍是 Apple Notes 的默认入口；本决定只增加已配置的 Interview Coach 入口。
 - 需要给 Telegram Channel 增加相册聚合，但不改变单图、文本和文档既有收发语义。
-- 授权面经的视觉读取被限制在当前 Akashic workspace，图片或二维码中的文字不能扩大文件读取、
+- 授权面经的视觉读取被限制在当前 Roxy workspace，图片或二维码中的文字不能扩大文件读取、
   工具或 Notes 写入权限。
 - 新批次可以暂停旧批次；旧记录和已经写入的 Note 不被覆盖或删除。
 - 撤销授权只停止新图片准入，不删除会话附件、批次记录、回执或 Apple Notes 正文。
@@ -49,7 +49,7 @@ Apple Notes owner 管理，Interview Coach 只保存工作流连续性。
 ## 验收
 
 - 未启用、chat 不匹配、群聊、非图片、低置信度和非面经图片都不调用 Apple Notes。
-- 混合题目逐题分类；通用题没有项目落地段，Akashic 相关题引用当前 repository 证据。
+- 混合题目逐题分类；通用题没有项目落地段，Roxy 相关题引用当前 repository 证据。
 - 同一相册只产生一个 user turn 和一条 Note；同一批次重放不重复创建。
 - 每轮只展示一道模拟追问；用户回答后，点评和下一题追加到同一 Note。
 - Notes 不确定结果不推进题号、不重放写入；进程重启后能从 plugin-data 恢复当前题号。

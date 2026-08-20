@@ -14,6 +14,7 @@ import subprocess
 import sys
 from typing import Sequence
 
+from agent.identity import roxy_env
 from plugins.apple_notes.bridge import AppleNotesBridge
 from plugins.apple_notes.config import AppleNotesConfig
 
@@ -21,9 +22,12 @@ from .client import MacNotesBridgeClient
 from .executor import MacNotesExecutor
 from .store import MacNotesReceiptStore
 
-_KEYCHAIN_SERVICE = "io.akashic.notes-bridge"
-_LAUNCHD_LABEL = "io.akashic.notes-bridge"
-_SSH_TUNNEL_LABEL = "io.akashic.notes-bridge.ssh-tunnel"
+_KEYCHAIN_SERVICE = "io.roxy.notes-bridge"
+_LEGACY_KEYCHAIN_SERVICE = "io.akashic.notes-bridge"
+_LAUNCHD_LABEL = "io.roxy.notes-bridge"
+_LEGACY_LAUNCHD_LABEL = "io.akashic.notes-bridge"
+_SSH_TUNNEL_LABEL = "io.roxy.notes-bridge.ssh-tunnel"
+_LEGACY_SSH_TUNNEL_LABEL = "io.akashic.notes-bridge.ssh-tunnel"
 _SSH_TARGET_RE = re.compile(r"[A-Za-z0-9_.-]+@[A-Za-z0-9_.:-]+")
 
 
@@ -61,7 +65,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"SSH 隧道 launchd 已安装并启动: {plist_path}")
         return 0
     if args.command == "uninstall-ssh-tunnel":
-        _uninstall_launchd_service(_SSH_TUNNEL_LABEL)
+        _uninstall_ssh_tunnel()
         print("SSH 隧道 launchd 已停止并移除")
         return 0
     if args.command == "probe":
@@ -77,7 +81,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 async def _run(args: argparse.Namespace) -> int:
     data_dir = Path(args.data_dir).expanduser().resolve()
     config = _notes_config(args)
-    token = os.environ.get("AKASHIC_NOTES_BRIDGE_TOKEN", "").strip()
+    token = roxy_env("NOTES_BRIDGE_TOKEN").strip()
     if not token:
         token = _load_keychain_token(args.bridge_id)
     bridge = AppleNotesBridge(
@@ -180,7 +184,7 @@ async def _reconcile(args: argparse.Namespace) -> int:
         / "notes.applescript",
         temp_dir=data_dir / "tmp",
     )
-    found = await bridge.find_marker(f"AKASHIC_EXPORT:{record.operation_id}")
+    found = await _find_existing_marker(bridge, record.operation_id)
     if found is None:
         print(
             json.dumps(
@@ -210,6 +214,19 @@ async def _reconcile(args: argparse.Namespace) -> int:
         )
     )
     return 0
+
+
+async def _find_existing_marker(
+    bridge: AppleNotesBridge,
+    operation_id: str,
+):
+    """优先识别 Roxy 导出；兼容既有 Akashic 笔记的幂等标识。"""
+
+    for prefix in ("ROXY_EXPORT", "AKASHIC_EXPORT"):
+        found = await bridge.find_marker(f"{prefix}:{operation_id}")
+        if found is not None:
+            return found
+    return None
 
 
 def _notes_config(args: argparse.Namespace) -> AppleNotesConfig:
@@ -287,43 +304,49 @@ def _store_keychain_token(bridge_id: str, token: str) -> None:
 
 
 def _load_keychain_token(bridge_id: str) -> str:
-    result = subprocess.run(
-        [
-            "/usr/bin/security",
-            "find-generic-password",
-            "-a",
-            bridge_id,
-            "-s",
-            _KEYCHAIN_SERVICE,
-            "-w",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    token = result.stdout.strip()
-    if len(token) < 32:
-        raise RuntimeError("Mac Keychain 中的 Notes Bridge token 无效")
-    return token
+    for service in (_KEYCHAIN_SERVICE, _LEGACY_KEYCHAIN_SERVICE):
+        result = subprocess.run(
+            [
+                "/usr/bin/security",
+                "find-generic-password",
+                "-a",
+                bridge_id,
+                "-s",
+                service,
+                "-w",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            continue
+        token = result.stdout.strip()
+        if len(token) < 32:
+            raise RuntimeError("Mac Keychain 中的 Notes Bridge token 无效")
+        return token
+    raise RuntimeError("Mac Keychain 中找不到 Notes Bridge token")
 
 
 def _delete_keychain_token(bridge_id: str) -> None:
-    _ = subprocess.run(
-        [
-            "/usr/bin/security",
-            "delete-generic-password",
-            "-a",
-            bridge_id,
-            "-s",
-            _KEYCHAIN_SERVICE,
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    for service in (_KEYCHAIN_SERVICE, _LEGACY_KEYCHAIN_SERVICE):
+        _ = subprocess.run(
+            [
+                "/usr/bin/security",
+                "delete-generic-password",
+                "-a",
+                bridge_id,
+                "-s",
+                service,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
 
 
 def _install_launchd(args: argparse.Namespace) -> Path:
+    _uninstall_launchd_service(_LEGACY_LAUNCHD_LABEL)
     data_path = Path(args.data_dir).expanduser().resolve()
     data_path.mkdir(parents=True, exist_ok=True)
     data_dir = str(data_path)
@@ -360,9 +383,11 @@ def _install_launchd(args: argparse.Namespace) -> Path:
 
 def _uninstall_launchd() -> None:
     _uninstall_launchd_service(_LAUNCHD_LABEL)
+    _uninstall_launchd_service(_LEGACY_LAUNCHD_LABEL)
 
 
 def _install_ssh_tunnel(args: argparse.Namespace) -> Path:
+    _uninstall_launchd_service(_LEGACY_SSH_TUNNEL_LABEL)
     target = str(args.ssh_target).strip()
     if _SSH_TARGET_RE.fullmatch(target) is None or target.startswith("-"):
         raise ValueError("ssh-target 必须是安全的 user@host")
@@ -395,6 +420,11 @@ def _install_ssh_tunnel(args: argparse.Namespace) -> Path:
         "StandardErrorPath": str(data_dir / "ssh-tunnel.stderr.log"),
     }
     return _install_launchd_payload(_SSH_TUNNEL_LABEL, payload)
+
+
+def _uninstall_ssh_tunnel() -> None:
+    _uninstall_launchd_service(_SSH_TUNNEL_LABEL)
+    _uninstall_launchd_service(_LEGACY_SSH_TUNNEL_LABEL)
 
 
 def _ssh_tunnel_program_arguments(
@@ -465,21 +495,35 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _default_data_dir(home: Path | None = None) -> str:
+    """新安装使用 Roxy 目录，旧 companion 状态存在时继续原位读取。"""
+
+    root = home if home is not None else Path.home()
+    canonical = root / "Library" / "Application Support" / "Roxy" / "NotesBridge"
+    legacy = root / "Library" / "Application Support" / "Akashic" / "NotesBridge"
+    if canonical.exists():
+        return str(canonical)
+    if legacy.exists():
+        return str(legacy)
+    return str(canonical)
+
+
 def _add_runtime_options(parser: argparse.ArgumentParser, *, include_url: bool) -> None:
     if include_url:
         parser.add_argument("--url", required=True)
     parser.add_argument("--bridge-id", default="mac-primary")
     parser.add_argument(
         "--data-dir",
-        default="~/Library/Application Support/Akashic/NotesBridge",
+        default=_default_data_dir(),
     )
     parser.add_argument("--account", default="default")
+    # Notes folder 是外部用户数据；升级不能在未授权时切换到第二个文件夹。
     parser.add_argument("--folder", default="Akashic")
     parser.add_argument("--no-create-folder", action="store_true")
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="akashic-mac-notes-bridge")
+    parser = argparse.ArgumentParser(prog="roxy-mac-notes-bridge")
     commands = parser.add_subparsers(dest="command", required=True)
     pair = commands.add_parser("pair", help="生成/保存共享 token 到 Mac Keychain")
     pair.add_argument("--bridge-id", default="mac-primary")
@@ -489,7 +533,7 @@ def _parser() -> argparse.ArgumentParser:
     status = commands.add_parser("status", help="查看本机进程与心跳快照")
     status.add_argument(
         "--data-dir",
-        default="~/Library/Application Support/Akashic/NotesBridge",
+        default=_default_data_dir(),
     )
     run = commands.add_parser("run", help="前台运行 Bridge")
     _add_runtime_options(run, include_url=True)
@@ -514,7 +558,7 @@ def _parser() -> argparse.ArgumentParser:
     tunnel.add_argument("--remote-port", type=int, default=6330)
     tunnel.add_argument(
         "--data-dir",
-        default="~/Library/Application Support/Akashic/NotesBridge",
+        default=_default_data_dir(),
     )
     _ = commands.add_parser(
         "uninstall-ssh-tunnel", help="停止并删除 Notes Bridge SSH 隧道"

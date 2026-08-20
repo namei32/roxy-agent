@@ -16,7 +16,7 @@ from .bridge import (
 )
 from .config import AppleNotesConfig
 
-_MARKER_RE = re.compile(r"AKASHIC_EXPORT:([A-Za-z0-9_-]{1,128})")
+_MARKER_RE = re.compile(r"(?:ROXY|AKASHIC)_EXPORT:([A-Za-z0-9_-]{1,128})")
 
 
 class RemoteAppleNotesBridge:
@@ -83,7 +83,14 @@ class RemoteAppleNotesBridge:
         return _mutation_receipt(result, stage="append")
 
     async def find_marker(self, marker: str) -> NotesMutationReceipt | None:
-        operation_id = marker.removeprefix("AKASHIC_EXPORT:").strip()
+        match = _MARKER_RE.fullmatch(marker)
+        if match is None:
+            raise NotesUnitFailed(
+                "notes_operation_marker_invalid",
+                "远程 Notes 核对缺少有效的 Roxy 操作标识",
+                stage="prepare_input",
+            )
+        operation_id = match.group(1)
         result = await self._broker.execute(
             NotesBridgeOperation(
                 operation_id=f"find-{operation_id}",

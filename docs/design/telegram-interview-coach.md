@@ -25,7 +25,7 @@ rollback: 关闭 auto_save_interview_images；保留已提交 Notes 与连续性
 ## 1. 用户可见目标
 
 受信任 Telegram 私聊收到图片后，系统先判断它是否为面经。高置信度面经按题目逐项区分
-Akashic 相关与通用问题：前者只用当前 repository 证据补充项目落地，后者不强行关联项目。
+Roxy 相关与通用问题：前者只用当前 repository 证据补充项目落地，后者不强行关联项目。
 系统回答并拓展每道题，把整理后的纯文字保存为一条 Apple Note，然后一次只问一道模拟追问；
 用户作答后的点评继续追加到同一条 Note。
 
@@ -74,13 +74,13 @@ Telegram 群组的负数 chat ID。Prompt module 只在同时满足下列条件�
 
 新图片加载 Skill 后才调用 `read_image_vision`。视觉结果必须给出不少于阈值的面经置信度、至少
 一个可核对信号和至少一道题，`interview_prepare` 会再次确定性校验这些字段。视觉工具只允许读取
-当前 Akashic workspace 内文件；图片和二维码内容都作为不可信数据，不产生授权或新指令。
+当前 Roxy workspace 内文件；图片和二维码内容都作为不可信数据，不产生授权或新指令。
 
 运行时 pre-tool hook 进一步保护 Interview Coach 自身工具和 `interview:` Notes 命名空间：来源必须
 是授权私聊的被动 turn，create 必须命中 prepared 批次，append 必须命中当前 active 批次，status
 只能核对 outcome_unknown。普通显式 Apple Notes document key 不受该自动化门禁影响。
 
-逐题只输出 `AKASHIC_RELATED`、`GENERAL` 或 `UNCERTAIN`。项目段必须先取得 repository
+逐题只输出 `ROXY_RELATED`、`GENERAL` 或 `UNCERTAIN`。项目段必须先取得 repository
 搜索或读取证据；无证据按通用题处理。证据结果同时带 Git revision、允许证据文件是否 dirty 和
 本次返回内容的 SHA-256 evidence hash。`UNCERTAIN` 不触发自动写入。
 

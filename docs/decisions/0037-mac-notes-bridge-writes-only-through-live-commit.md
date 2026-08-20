@@ -6,7 +6,7 @@
 
 ## 背景
 
-正式 Akashic Runtime 运行在 Linux 云服务器，Apple Notes 只能由用户自己的 macOS 主机通过
+正式 Roxy Runtime 运行在 Linux 云服务器，Apple Notes 只能由用户自己的 macOS 主机通过
 Apple Events 写入。用户要求 Mac 在线时保存，Mac 离线时仍返回完整内容，但不得排队或在稍后
 上线时补写。单纯依赖 `last_seen`、TCP 或心跳会留下检查与提交之间的竞态，也无法区分断线发生
 在外部效果前还是效果后。
