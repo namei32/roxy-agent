@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def _gate_module() -> ModuleType:
     path = ROOT / "docker" / "debug" / "gate.py"
-    spec = importlib.util.spec_from_file_location("akashic_change_gate", path)
+    spec = importlib.util.spec_from_file_location("roxy_change_gate", path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"无法加载 {path}")
     module = importlib.util.module_from_spec(spec)
@@ -214,7 +214,7 @@ def test_gate_temp_root_uses_explicit_existing_directory(
     tmp_path: Path,
 ) -> None:
     gate = _gate_module()
-    monkeypatch.setenv("AKASHIC_CHANGE_GATE_TMPDIR", str(tmp_path))
+    monkeypatch.setenv("ROXY_CHANGE_GATE_TMPDIR", str(tmp_path))
 
     assert gate._gate_temp_root() == tmp_path.resolve()
 
@@ -225,7 +225,7 @@ def test_gate_temp_root_rejects_missing_directory(
 ) -> None:
     gate = _gate_module()
     missing = tmp_path / "missing"
-    monkeypatch.setenv("AKASHIC_CHANGE_GATE_TMPDIR", str(missing))
+    monkeypatch.setenv("ROXY_CHANGE_GATE_TMPDIR", str(missing))
 
     with pytest.raises(gate.GateError, match="不是已存在目录"):
         gate._gate_temp_root()

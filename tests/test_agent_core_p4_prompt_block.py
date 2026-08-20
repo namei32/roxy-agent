@@ -132,7 +132,7 @@ def test_current_session_prompt_distinguishes_web_and_android_surfaces():
     assert "Client Device Context: 电脑网页端" in web
     assert "Channel: mobile" in mobile
     assert "Chat ID: phone-chat" in mobile
-    assert "Client Surface: Akashic Android" in mobile
+    assert "Client Surface: Roxy Android" in mobile
     assert "Client Device Context: Android 手机端" in mobile
 
 
@@ -147,7 +147,7 @@ def test_current_session_prompt_does_not_guess_unknown_channel_surface():
     assert "Client Surface: Unknown" in prompt
     assert "Client Device Context: Unknown" in prompt
     assert "Client Surface: WebChat" not in prompt
-    assert "Client Surface: Akashic Android" not in prompt
+    assert "Client Surface: Roxy Android" not in prompt
 
 
 def test_prompt_block_priorities_leave_spacing_for_future_inserts():

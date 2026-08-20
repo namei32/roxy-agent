@@ -33,7 +33,7 @@ class PreparedSkillCatalog:
 
 class SkillSnapshot:
     def __init__(self) -> None:
-        self.root = Path(tempfile.mkdtemp(prefix="akashic-skill-catalog-"))
+        self.root = Path(tempfile.mkdtemp(prefix="roxy-skill-catalog-"))
         self._finalizer = weakref.finalize(
             self,
             _remove_snapshot_tree,
@@ -81,7 +81,7 @@ class PluginSkillHost:
     ) -> PreparedSkillCatalog:
         self._validate_unique_names(normal_roots)
         self._validate_unique_names(drift_roots)
-        workspace = self._workspace or Path("/__akashic_no_workspace__")
+        workspace = self._workspace or Path("/__roxy_no_workspace__")
         snapshot = SkillSnapshot()
         snapshot_root = snapshot.root
         try:

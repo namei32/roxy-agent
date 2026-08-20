@@ -6,13 +6,13 @@ from contextvars import ContextVar
 # observe 的全局错误采集器在 logging 钩子里读取它，给错误打上 session 归属。
 # 放在 core 层是为了让主循环与 observe 插件共享同一个 ContextVar 对象。
 current_session_key: ContextVar[str | None] = ContextVar(
-    "akashic_current_session_key", default=None
+    "roxy_current_session_key", default=None
 )
 
 # 当前 turn 的客户端消息标识（mobile message.send 的 client_message_id），
 # 用于跨端 turn 时间链在 provider/context 里程碑处保持同一关联身份。
 current_client_message_id: ContextVar[str] = ContextVar(
-    "akashic_current_client_message_id", default=""
+    "roxy_current_client_message_id", default=""
 )
 
 # 一次逻辑 provider 调用的中性 telemetry 身份（唯一 neutral owner 定义在这里）。
@@ -22,11 +22,11 @@ current_client_message_id: ContextVar[str] = ContextVar(
 # provider_attempt=1/2 对应业务 provider retry；provider_operation 区分
 # business 与 compaction_summary。默认值不可被误当成真实身份。
 current_provider_call_id: ContextVar[str] = ContextVar(
-    "akashic_current_provider_call_id", default=""
+    "roxy_current_provider_call_id", default=""
 )
 current_provider_attempt: ContextVar[int] = ContextVar(
-    "akashic_current_provider_attempt", default=0
+    "roxy_current_provider_attempt", default=0
 )
 current_provider_operation: ContextVar[str] = ContextVar(
-    "akashic_current_provider_operation", default=""
+    "roxy_current_provider_operation", default=""
 )

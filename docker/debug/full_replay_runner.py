@@ -277,18 +277,18 @@ def prepare_profile(
         proactive_context=proactive_context,
     )
 
-    source_plugins_home = template / "home" / ".akashic-plugin"
+    source_plugins_home = template / "home" / ".roxy-plugin"
     entries = load_plugin_manifest(source_plugins_home)
     isolated = {plugin_id: plugin_id in ALLOWED_PLUGINS for plugin_id in entries}
     for plugin_id in ALLOWED_PLUGINS:
         isolated[plugin_id] = True
     _ = write_plugin_manifest(
         isolated,
-        plugins_home=layout.profile_root / "home" / ".akashic-plugin",
+        plugins_home=layout.profile_root / "home" / ".roxy-plugin",
     )
     _ = write_package_manifest(
         {"wake-proactive": True},
-        plugins_home=layout.profile_root / "home" / ".akashic-plugin",
+        plugins_home=layout.profile_root / "home" / ".roxy-plugin",
     )
     _patch_config(layout.profile_root / "config.toml")
 
@@ -493,13 +493,13 @@ def refresh_replay_eligibility(
 
 
 def start_runtime(profile: str, *, build: bool) -> str:
-    env = {**os.environ, "AKASHIC_DEBUG_PROFILE": profile}
-    env["AKASHIC_REPLAY_CHANNEL"] = _target_channel(
+    env = {**os.environ, "ROXY_DEBUG_PROFILE": profile}
+    env["ROXY_REPLAY_CHANNEL"] = _target_channel(
         ReplayLayout.for_profile(profile).profile_root / "config.toml"
     )
     if build:
         _ = subprocess.run(
-            ["docker", "compose", "-f", str(COMPOSE_FILE), "build", "akashic-debug"],
+            ["docker", "compose", "-f", str(COMPOSE_FILE), "build", "roxy-debug"],
             cwd=DEBUG_ROOT.parent.parent,
             env=env,
             check=True,
@@ -507,7 +507,7 @@ def start_runtime(profile: str, *, build: bool) -> str:
     result = subprocess.run(
         [
             "docker", "compose", "-f", str(COMPOSE_FILE), "run", "-d",
-            "--no-deps", "akashic-debug",
+            "--no-deps", "roxy-debug",
         ],
         cwd=DEBUG_ROOT.parent.parent,
         env=env,

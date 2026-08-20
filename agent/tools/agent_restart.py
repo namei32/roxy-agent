@@ -12,7 +12,7 @@ from core.error_context import current_session_key
 class AgentRestartTool(Tool):
     name = "agent_restart"
     description = (
-        "安全重启当前 Akashic Agent。仅在核心代码或主配置必须重新加载时使用；"
+        "安全重启当前 Roxy Agent。仅在核心代码或主配置必须重新加载时使用；"
         "MCP 与插件可热重载时不要调用。执行后会等待本轮回复持久化并送达。"
     )
     parameters = {

@@ -11,8 +11,8 @@
   max-width: min(86%, 38rem);
   border-radius: var(--md-sys-shape-corner-large) var(--md-sys-shape-corner-large) var(--md-sys-shape-corner-extra-small) var(--md-sys-shape-corner-large);
   padding: 12px 16px;
-  color: var(--ak-color-on-action-container);
-  background: var(--ak-color-action-container);
+  color: var(--roxy-color-on-action-container);
+  background: var(--roxy-color-action-container);
   font-size: var(--md-sys-typescale-body-large-size);
   line-height: 1.5;
   overflow-wrap: break-word;
@@ -33,7 +33,7 @@
 
 .agent-content :where(h1, h2, h3, h4) {
   margin-block: 1.35em 0.58em;
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
   font-weight: 650;
   line-height: 1.15;
   letter-spacing: -0.012em;
@@ -76,7 +76,7 @@
 }
 
 .agent-content li::marker {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
 }
 
 .agent-content li > p {
@@ -84,7 +84,7 @@
 }
 
 .agent-content a {
-  color: var(--ak-color-action-primary);
+  color: var(--roxy-color-action-primary);
   text-underline-position: from-font;
   text-decoration-thickness: from-font;
   text-decoration-skip-ink: auto;
@@ -99,7 +99,7 @@
 .agent-content img,
 .image-preview-full,
 .attachment-hover-image {
-  outline: 1px solid var(--ak-color-image-outline);
+  outline: 1px solid var(--roxy-color-image-outline);
   outline-offset: -1px;
 }
 
@@ -111,8 +111,8 @@
   margin: 0 0 10px;
   border: 0;
   padding: 7px 10px 7px 13px;
-  color: var(--ak-color-text-secondary);
-  background: color-mix(in oklch, var(--ak-color-action-primary) 8%, transparent);
+  color: var(--roxy-color-text-secondary);
+  background: color-mix(in oklch, var(--roxy-color-action-primary) 8%, transparent);
   font: inherit;
   text-align: start;
   transition: background-color 150ms cubic-bezier(0.2, 0, 0, 1);
@@ -120,16 +120,16 @@
 
 .message-reply-reference:hover,
 .message-reply-reference:active {
-  background: color-mix(in oklch, var(--ak-color-action-primary) 14%, transparent);
+  background: color-mix(in oklch, var(--roxy-color-action-primary) 14%, transparent);
 }
 
 .message-reply-reference:focus-visible {
-  outline: 2px solid var(--ak-color-action-primary);
+  outline: 2px solid var(--roxy-color-action-primary);
   outline-offset: 2px;
 }
 
 .message-reply-reference.unavailable > p {
-  color: var(--ak-color-action-primary);
+  color: var(--roxy-color-action-primary);
 }
 
 .message-reply-reference::before {
@@ -137,12 +137,12 @@
   inset: 5px auto 5px 0;
   width: 3px;
   border-radius: 2px;
-  background: var(--ak-color-action-primary);
+  background: var(--roxy-color-action-primary);
   content: "";
 }
 
 .message-reply-reference > span {
-  color: var(--ak-color-action-primary);
+  color: var(--roxy-color-action-primary);
   font-size: 0.75rem;
   font-weight: 650;
   line-height: 1.3;
@@ -159,7 +159,7 @@
 
 .process-trace {
   margin: 2px 0 18px;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.875rem;
   line-height: 1.55;
 }
@@ -174,7 +174,7 @@
 
 .process-trigger:hover,
 .process-trigger:active {
-  color: var(--ak-color-status-trace);
+  color: var(--roxy-color-status-trace);
 }
 
 .process-chevron {
@@ -192,7 +192,7 @@
   position: relative;
   padding: 2px 0 2px var(--process-content-inset);
   overflow: hidden;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   outline: none;
 }
 
@@ -211,7 +211,7 @@
   bottom: 0;
   left: calc((var(--process-rail-width) - 1px) / 2);
   width: 1px;
-  background: color-mix(in oklch, var(--ak-color-status-trace) 35%, var(--ak-color-border-default));
+  background: color-mix(in oklch, var(--roxy-color-status-trace) 35%, var(--roxy-color-border-default));
   content: "";
 }
 
@@ -236,8 +236,8 @@
   background-image: linear-gradient(
     180deg,
     transparent,
-    color-mix(in oklch, var(--ak-color-status-trace) 42%, transparent) 24%,
-    var(--ak-color-status-trace) 56%,
+    color-mix(in oklch, var(--roxy-color-status-trace) 42%, transparent) 24%,
+    var(--roxy-color-status-trace) 56%,
     transparent
   );
   background-position: center -36px;
@@ -268,8 +268,8 @@
   z-index: 1;
   justify-self: center;
   margin-top: 8px;
-  background: var(--ak-color-border-strong);
-  box-shadow: 0 0 0 4px var(--ak-color-bg-canvas);
+  background: var(--roxy-color-border-strong);
+  box-shadow: 0 0 0 4px var(--roxy-color-bg-canvas);
   transition: scale 160ms cubic-bezier(0.2, 0, 0, 1), background-color 160ms cubic-bezier(0.2, 0, 0, 1), box-shadow 160ms cubic-bezier(0.2, 0, 0, 1);
 }
 
@@ -286,8 +286,8 @@
 }
 
 .process-item.active .process-node {
-  background: var(--ak-color-status-trace);
-  box-shadow: 0 0 0 4px var(--ak-color-bg-canvas), 0 0 12px color-mix(in oklch, var(--ak-color-status-trace) 70%, transparent);
+  background: var(--roxy-color-status-trace);
+  box-shadow: 0 0 0 4px var(--roxy-color-bg-canvas), 0 0 12px color-mix(in oklch, var(--roxy-color-status-trace) 70%, transparent);
   animation: shared-trace-core 1.8s ease-in-out infinite;
 }
 
@@ -304,12 +304,12 @@
 }
 
 .process-item.error .process-node {
-  background: var(--ak-color-status-error);
+  background: var(--roxy-color-status-error);
 }
 
 .process-text {
   max-width: 72ch;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.875rem;
   line-height: 1.58;
   white-space: pre-wrap;
@@ -343,7 +343,7 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.875rem;
 }
@@ -359,7 +359,7 @@
   color: inherit;
   background: transparent;
   text-align: left;
-  transition: background-color var(--ak-sys-duration-short) var(--ak-sys-motion-standard);
+  transition: background-color var(--roxy-sys-duration-short) var(--roxy-sys-motion-standard);
 }
 
 .tool-step-summary-static {
@@ -368,7 +368,7 @@
 
 button.tool-step-summary:hover,
 button.tool-step-summary:active {
-  background: color-mix(in oklch, var(--ak-color-text-primary) 8%, transparent);
+  background: color-mix(in oklch, var(--roxy-color-text-primary) 8%, transparent);
 }
 
 .tool-step-heading {
@@ -383,7 +383,7 @@ button.tool-step-summary:active {
 .tool-step-description,
 .tool-step-state,
 .tool-step-chevron {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
 }
 
 .tool-step-description {
@@ -409,11 +409,11 @@ button.tool-step-summary:active {
 }
 
 .tool-step.active :is(.tool-step-state, .tool-step-chevron) {
-  color: var(--ak-color-status-trace-text);
+  color: var(--roxy-color-status-trace-text);
 }
 
 .tool-step.error :is(.tool-step-state, .tool-step-chevron) {
-  color: var(--ak-color-status-error);
+  color: var(--roxy-color-status-error);
 }
 
 .tool-step-disclosure {
@@ -435,9 +435,9 @@ button.tool-step-summary:active {
   display: grid;
   gap: 14px;
   margin-top: 6px;
-  border-left: 1px solid color-mix(in oklch, var(--ak-color-status-trace) 38%, var(--ak-color-border-default));
+  border-left: 1px solid color-mix(in oklch, var(--roxy-color-status-trace) 38%, var(--roxy-color-border-default));
   padding: 11px 12px 12px;
-  background: var(--ak-color-bg-surface-low);
+  background: var(--roxy-color-bg-surface-low);
 }
 
 .tool-detail-heading {
@@ -451,7 +451,7 @@ button.tool-step-summary:active {
 
 .tool-detail-section h4 {
   margin: 0;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.6875rem;
   letter-spacing: 0.045em;
 }
@@ -481,8 +481,8 @@ button.tool-step-summary:active {
 }
 
 .tool-detail-copy.copied {
-  color: var(--ak-sys-color-success);
-  background: color-mix(in srgb, var(--ak-sys-color-success) 12%, transparent);
+  color: var(--roxy-sys-color-success);
+  background: color-mix(in srgb, var(--roxy-sys-color-success) 12%, transparent);
 }
 
 .tool-parameter-list {
@@ -498,7 +498,7 @@ button.tool-step-summary:active {
 }
 
 .tool-parameter dt {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.75rem;
   line-height: 1.5;
 }
@@ -507,7 +507,7 @@ button.tool-step-summary:active {
 .tool-result {
   overflow-wrap: anywhere;
   margin: 0;
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.75rem;
   line-height: 1.55;
@@ -522,11 +522,11 @@ button.tool-step-summary:active {
 }
 
 .tool-result.error {
-  color: var(--ak-color-status-error);
+  color: var(--roxy-color-status-error);
 }
 
 .tool-step.active .tool-step-icon {
-  color: var(--ak-color-status-trace);
+  color: var(--roxy-color-status-trace);
 }
 
 .message-attachments {
@@ -542,8 +542,8 @@ button.tool-step-summary:active {
 }
 
 .message-attachments .group {
-  border-color: var(--ak-color-border-default);
-  background: var(--ak-color-bg-surface-low);
+  border-color: var(--roxy-color-border-default);
+  background: var(--roxy-color-bg-surface-low);
 }
 
 .previewable-attachment {
@@ -576,12 +576,12 @@ button.tool-step-summary:active {
   align-items: center;
   gap: 6px;
   padding: 4px 6px 4px 16px;
-  color: var(--ak-color-on-action-container);
-  background: color-mix(in oklch, var(--ak-color-action-container) 48%, var(--md-sys-color-surface-container-high));
+  color: var(--roxy-color-on-action-container);
+  background: color-mix(in oklch, var(--roxy-color-action-container) 48%, var(--md-sys-color-surface-container-high));
 }
 
 .composer-reply > svg {
-  color: var(--ak-color-action-primary);
+  color: var(--roxy-color-action-primary);
 }
 
 .composer-reply > div {
@@ -591,7 +591,7 @@ button.tool-step-summary:active {
 }
 
 .composer-reply strong {
-  color: var(--ak-color-on-action-container);
+  color: var(--roxy-color-on-action-container);
   font-size: var(--md-sys-typescale-label-medium-size);
   font-weight: 650;
   line-height: 1.35;
@@ -653,8 +653,8 @@ button.tool-step-summary:active {
 }
 
 .shared-message-actions button.copied {
-  color: var(--ak-sys-color-success);
-  background: color-mix(in srgb, var(--ak-sys-color-success) 12%, transparent);
+  color: var(--roxy-sys-color-success);
+  background: color-mix(in srgb, var(--roxy-sys-color-success) 12%, transparent);
 }
 
 @keyframes shared-trace-item-in {
@@ -719,13 +719,13 @@ button.tool-step-summary:active {
 .mobile-plugin-host--loading,
 .mobile-plugin-host--error {
   padding: 8px 0;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.8125rem;
   line-height: 1.4;
 }
 
 .mobile-plugin-host--error {
-  color: var(--ak-color-status-error);
+  color: var(--roxy-color-status-error);
 }
 
 .mobile-plugin-slot[data-slot="turn.before_reasoning"],
@@ -751,5 +751,5 @@ button.tool-step-summary:active {
   min-width: 0;
   gap: 12px;
   padding: 8px 10px 0;
-  background: var(--ak-color-bg-canvas);
+  background: var(--roxy-color-bg-canvas);
 }

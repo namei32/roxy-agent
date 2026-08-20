@@ -165,7 +165,7 @@ class PluginSkillLinker:
         link: Path,
         target: Path,
     ) -> None:
-        temporary = link.with_name(f".{link.name}.akashic-{secrets.token_hex(8)}")
+        temporary = link.with_name(f".{link.name}.roxy-{secrets.token_hex(8)}")
         try:
             temporary.symlink_to(target, target_is_directory=True)
             temporary.replace(link)

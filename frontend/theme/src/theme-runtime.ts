@@ -181,7 +181,10 @@ function colorDeclarations(namespace: string, role: string, value: string): stri
 }
 
 function installThemeCss(): void {
-  if (document.getElementById("roxy-theme-catalog")) return;
+  if (
+    document.getElementById("roxy-theme-catalog")
+    || document.getElementById("akashic-theme-catalog")
+  ) return;
   const style = document.createElement("style");
   style.id = "roxy-theme-catalog";
   style.textContent = themeCss();

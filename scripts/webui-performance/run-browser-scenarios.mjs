@@ -29,7 +29,7 @@ const baselinePath = resolve(here, "baseline.json");
 const updateBaseline = process.argv.includes("--update-baseline");
 const runCount = integerArgument("--runs", 5);
 const desktopStreamIntervalMs = numberArgument("--desktop-stream-interval-ms", 2.5, 0);
-const buildRoot = mkdtempSync(resolve(tmpdir(), "akashic-webui-browser-"));
+const buildRoot = mkdtempSync(resolve(tmpdir(), "roxy-webui-browser-"));
 const results = [];
 let browser;
 let ownsBrowser = false;
@@ -40,7 +40,7 @@ try {
   const desktopServer = await startDesktopFixtureServer(desktopOutput);
   const mobileServer = await startStaticFixtureServer(mobileOutput, { stripAssetsPrefix: false });
   try {
-    const cdpEndpoint = process.env.AKASHIC_PLAYWRIGHT_CDP;
+    const cdpEndpoint = process.env.ROXY_PLAYWRIGHT_CDP ?? process.env.AKASHIC_PLAYWRIGHT_CDP;
     browser = cdpEndpoint
       ? await chromium.connectOverCDP(cdpEndpoint)
       : await chromium.launch({ executablePath: chromiumExecutable(), headless: true });
@@ -97,8 +97,8 @@ async function measureDesktopHistory(browserInstance, origin) {
   const context = await browserInstance.newContext({ viewport: { width: 1440, height: 1000 } });
   const page = await context.newPage();
   await installPerformanceProbe(page);
-  await page.goto(`${origin}?akashic_perf=1`, { waitUntil: "networkidle" });
-  await page.evaluate(() => window.__resetAkashicPerf());
+  await page.goto(`${origin}?roxy_perf=1`, { waitUntil: "networkidle" });
+  await page.evaluate(() => window.__resetRoxyPerf());
   const startedAt = await page.evaluate(() => performance.now());
   await page.getByText("性能基线会话", { exact: true }).click();
   await page.getByRole("button", { name: "加载更早消息" }).click();
@@ -134,8 +134,8 @@ async function measureDesktopSessionSwitch(browserInstance, origin) {
     }
   });
   await installPerformanceProbe(page);
-  await page.goto(`${origin}?akashic_perf=1`, { waitUntil: "networkidle" });
-  await page.evaluate(() => window.__resetAkashicPerf());
+  await page.goto(`${origin}?roxy_perf=1`, { waitUntil: "networkidle" });
+  await page.evaluate(() => window.__resetRoxyPerf());
   requests.length = 0;
   const startedAt = await page.evaluate(() => performance.now());
   await page.getByText("纯文本性能会话", { exact: true }).click();
@@ -163,12 +163,12 @@ async function measureDesktopModelPicker(browserInstance, origin) {
   const context = await browserInstance.newContext({ viewport: { width: 1440, height: 1000 } });
   const page = await context.newPage();
   await installPerformanceProbe(page);
-  await page.goto(`${origin}?akashic_perf=1`, { waitUntil: "networkidle" });
+  await page.goto(`${origin}?roxy_perf=1`, { waitUntil: "networkidle" });
   const metric = {
     closedOptions: await page.locator(".model-capsule__option").count(),
     closedDomElements: await page.locator("*").count(),
   };
-  await page.evaluate(() => window.__resetAkashicPerf());
+  await page.evaluate(() => window.__resetRoxyPerf());
   const startedAt = await page.evaluate(() => performance.now());
   await page.getByRole("button", { name: /fixture：性能夹具/u }).click();
   await page.locator(".model-capsule__panel").waitFor();
@@ -201,7 +201,7 @@ async function measureDesktopComposer(browserInstance, origin) {
     if (new URL(request.url()).pathname === "/api/chat/uploads") uploadRequests += 1;
   });
   await installPerformanceProbe(page);
-  await page.goto(`${origin}?akashic_perf=1`, { waitUntil: "networkidle" });
+  await page.goto(`${origin}?roxy_perf=1`, { waitUntil: "networkidle" });
   await page.getByText("纯文本性能会话", { exact: true }).click();
   await page.locator('[data-message-id="desktop-plain-99"]').waitFor();
   await fetch(`${origin}/__fixture/reset`, { method: "POST" });
@@ -211,7 +211,7 @@ async function measureDesktopComposer(browserInstance, origin) {
     const received = await fetch(`${fixtureOrigin}/__fixture/received`).then((response) => response.json());
     return received.requests.some((request) => request.includes("/messages"));
   }, origin);
-  await page.evaluate(() => window.__resetAkashicPerf());
+  await page.evaluate(() => window.__resetRoxyPerf());
   const startedAt = await page.evaluate(() => performance.now());
   const text = "输入响应基线".repeat(40);
   await page.locator('textarea[name="message"]').pressSequentially(text);
@@ -258,7 +258,7 @@ async function measureDesktopPendingSendStop(browserInstance, origin) {
     window.WebSocket = StalledWebSocket;
   });
   const page = await context.newPage();
-  await page.goto(`${origin}?akashic_perf=1`, { waitUntil: "networkidle" });
+  await page.goto(`${origin}?roxy_perf=1`, { waitUntil: "networkidle" });
   await page.getByText("纯文本性能会话", { exact: true }).click();
   const text = "连接未完成时可撤回";
   await page.locator('textarea[name="message"]').fill(text);
@@ -284,7 +284,7 @@ async function measureDesktopPairing(browserInstance, origin) {
     if (new URL(request.url()).pathname === "/api/chat/mobile-pairing") abortedCreates += 1;
   });
   await installPerformanceProbe(page);
-  await page.goto(`${origin}?akashic_perf=1`, { waitUntil: "networkidle" });
+  await page.goto(`${origin}?roxy_perf=1`, { waitUntil: "networkidle" });
   const metric = {
     initialScripts: await page.locator('script[src]').count(),
     initialDomElements: await page.locator("*").count(),
@@ -301,7 +301,7 @@ async function measureDesktopPairing(browserInstance, origin) {
   if (metric.cancelledCreateRequests !== 1) {
     throw new Error(`closing pairing dialog did not abort its create request: ${metric.cancelledCreateRequests}`);
   }
-  await page.evaluate(() => window.__resetAkashicPerf());
+  await page.evaluate(() => window.__resetRoxyPerf());
   const startedAt = await page.evaluate(() => performance.now());
   await trigger.click();
   await page.getByAltText("Android 手机配对二维码").waitFor();
@@ -330,7 +330,7 @@ async function measureDesktopSettings(browserInstance, origin) {
   await installPerformanceProbe(page);
   await fetch(`${origin}/__fixture/reset`, { method: "POST" });
   const readyStartedAt = Date.now();
-  await page.goto(`${origin}/settings?akashic_perf=1`, { waitUntil: "networkidle" });
+  await page.goto(`${origin}/settings?roxy_perf=1`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "模型连接" }).waitFor();
   const metric = {
     initialReadyMs: Date.now() - readyStartedAt,
@@ -354,7 +354,7 @@ async function measureDesktopSettings(browserInstance, origin) {
   await closeButton.press("Shift+Tab");
   metric.focusTrapped = await page.evaluate(() => document.activeElement?.textContent?.includes("保存连接") ? 1 : 0);
   await nameInput.focus();
-  await page.evaluate(() => window.__resetAkashicPerf());
+  await page.evaluate(() => window.__resetRoxyPerf());
   const typingStartedAt = await page.evaluate(() => performance.now());
   await nameInput.pressSequentially("连接名称".repeat(30));
   Object.assign(metric, await readPerformanceProbe(page, typingStartedAt, ".settings-connection-card"));
@@ -401,7 +401,7 @@ async function measureDesktopMemorySettings(browserInstance, origin) {
   const context = await browserInstance.newContext({ viewport: { width: 1440, height: 1000 } });
   const page = await context.newPage();
   await fetch(`${origin}/__fixture/reset`, { method: "POST" });
-  await page.goto(`${origin}/settings?akashic_perf=1`, { waitUntil: "networkidle" });
+  await page.goto(`${origin}/settings?roxy_perf=1`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "语义记忆" }).waitFor();
   await page.locator(".settings-memory-engines label").filter({ hasText: "Akasha" }).click();
   await page.getByRole("button", { name: "保存记忆设置" }).click();
@@ -442,13 +442,13 @@ async function measureDesktopResponsive(browserInstance, origin) {
   });
   const page = await context.newPage();
 
-  await page.goto(`${origin}?akashic_perf=1`, { waitUntil: "networkidle" });
+  await page.goto(`${origin}?roxy_perf=1`, { waitUntil: "networkidle" });
   const navigationTrigger = page.getByRole("button", { name: "打开导航" });
   await navigationTrigger.click();
   await page.keyboard.press("Escape");
   const metric = { navigationFocusRestored: await navigationTrigger.evaluate((element) => document.activeElement === element ? 1 : 0) };
   await navigationTrigger.click();
-  await page.getByRole("dialog", { name: "Akashic 导航" }).getByRole("button", { name: /性能基线会话/u }).click();
+  await page.getByRole("dialog", { name: "Roxy 导航" }).getByRole("button", { name: /性能基线会话/u }).click();
   await page.locator(".web-message-anchor").last().waitFor();
   metric.chatOverflowPx = await horizontalOverflow(page);
   metric.composerVisible = await page.getByPlaceholder("有问题，尽管问").isVisible() ? 1 : 0;
@@ -456,12 +456,12 @@ async function measureDesktopResponsive(browserInstance, origin) {
   metric.modelPickerOverflowPx = await horizontalOverflow(page);
   await page.keyboard.press("Escape");
   await navigationTrigger.click();
-  await page.getByRole("dialog", { name: "Akashic 导航" }).getByRole("button", { name: "连接手机" }).click();
+  await page.getByRole("dialog", { name: "Roxy 导航" }).getByRole("button", { name: "连接手机" }).click();
   await page.getByRole("dialog", { name: "连接 Android 手机" }).waitFor();
   metric.pairingOverflowPx = await horizontalOverflow(page);
   await page.keyboard.press("Escape");
 
-  await page.goto(`${origin}/settings?akashic_perf=1`, { waitUntil: "networkidle" });
+  await page.goto(`${origin}/settings?roxy_perf=1`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "模型连接" }).waitFor();
   metric.settingsOverflowPx = await horizontalOverflow(page);
   await page.getByRole("button", { name: /自定义 API/u }).click();
@@ -469,7 +469,7 @@ async function measureDesktopResponsive(browserInstance, origin) {
   metric.settingsDialogOverflowPx = await horizontalOverflow(page);
   await page.keyboard.press("Escape");
 
-  await page.goto(`${origin}?surface=runtime&akashic_perf=1`, { waitUntil: "networkidle" });
+  await page.goto(`${origin}?surface=runtime&roxy_perf=1`, { waitUntil: "networkidle" });
   await page.locator(".runtime-directory__item").first().click();
   await page.locator(".runtime-detail__markdown").waitFor();
   metric.runtimeOverflowPx = await horizontalOverflow(page);
@@ -495,7 +495,7 @@ async function measureDesktopLazyRecovery(browserInstance, origin) {
       await route.continue();
     }
   });
-  await page.goto(`${origin}/settings?akashic_perf=1`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${origin}/settings?roxy_perf=1`, { waitUntil: "domcontentloaded" });
   const alert = page.getByRole("alert");
   await alert.getByRole("heading", { name: "界面加载失败" }).waitFor();
   const metric = {
@@ -530,7 +530,7 @@ async function measureDesktopAccessibility(browserInstance, origin) {
     }
   }
 
-  await page.goto(`${origin}?akashic_perf=1`, { waitUntil: "networkidle" });
+  await page.goto(`${origin}?roxy_perf=1`, { waitUntil: "networkidle" });
   await page.getByText("性能基线会话", { exact: true }).click();
   await page.locator(".web-message-anchor").last().waitFor();
   await scan("chat");
@@ -542,14 +542,14 @@ async function measureDesktopAccessibility(browserInstance, origin) {
   await page.waitForTimeout(250);
   await scan("pairing");
 
-  await page.goto(`${origin}/settings?akashic_perf=1`, { waitUntil: "networkidle" });
+  await page.goto(`${origin}/settings?roxy_perf=1`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "模型连接" }).waitFor();
   await scan("settings");
   await page.getByRole("button", { name: /自定义 API/u }).click();
   await page.getByRole("dialog", { name: "连接自定义 API" }).waitFor();
   await scan("settings-dialog");
 
-  await page.goto(`${origin}?surface=runtime&akashic_perf=1`, { waitUntil: "networkidle" });
+  await page.goto(`${origin}?surface=runtime&roxy_perf=1`, { waitUntil: "networkidle" });
   await page.locator(".runtime-detail__markdown").waitFor();
   await scan("runtime");
   if (violations.length > 0) throw new Error(`desktop accessibility violations: ${JSON.stringify(violations)}`);
@@ -575,7 +575,7 @@ async function measureDesktopStream(browserInstance, origin, intervalMs) {
     if (message.type() === "error") browserErrors.push(message.text());
   });
   await installPerformanceProbe(page);
-  await page.goto(`${origin}?akashic_perf=1`, { waitUntil: "networkidle" });
+  await page.goto(`${origin}?roxy_perf=1`, { waitUntil: "networkidle" });
   await page.getByText("性能基线会话", { exact: true }).click();
   await page.locator(".web-message-anchor").last().waitFor();
   const scrollStateBefore = await page.locator('.conversation-scroll').evaluate((element) => {
@@ -586,13 +586,13 @@ async function measureDesktopStream(browserInstance, origin, intervalMs) {
   });
   if (scrollStateBefore.distanceFromBottom <= 100) throw new Error("desktop stream fixture is not scrollable");
   await page.waitForTimeout(100);
-  await page.evaluate(() => window.__akashicWebTrace?.reset());
-  await page.evaluate(() => window.__resetAkashicPerf());
+  await page.evaluate(() => window.__roxyWebTrace?.reset());
+  await page.evaluate(() => window.__resetRoxyPerf());
   const startedAt = await page.evaluate(() => performance.now());
   const fixtureResponse = await fetch(`${origin}/__fixture/stream?count=600&interval_ms=${intervalMs}&terminal=0`, { method: "POST" });
   if (!fixtureResponse.ok) throw new Error(`桌面 WebSocket 夹具失败: ${fixtureResponse.status}`);
   await page.waitForFunction(() => document.querySelector(".web-message-anchor:last-child")?.textContent?.includes("片".repeat(600)), null, { timeout: 20_000 });
-  await page.waitForFunction(() => window.__akashicWebTrace?.snapshot().some((record) => record.event === "webui.next_frame_ready"));
+  await page.waitForFunction(() => window.__roxyWebTrace?.snapshot().some((record) => record.event === "webui.next_frame_ready"));
   const metric = await readPerformanceProbe(page, startedAt, ".web-message-anchor");
   const scrollStateAfter = await page.locator('.conversation-scroll').evaluate((element) => ({
     scrollTop: element.scrollTop,
@@ -608,7 +608,7 @@ async function measureDesktopStream(browserInstance, origin, intervalMs) {
   });
   metric.scrollReturnReachedBottom = 1;
   metric.trace = await page.evaluate(() => {
-    const records = window.__akashicWebTrace?.snapshot() ?? [];
+    const records = window.__roxyWebTrace?.snapshot() ?? [];
     const first = records.find((record) => record.event === "webui.frame_received" && record.kind === "answer");
     const committed = records.find((record) => record.event === "webui.react_committed" && record.kind === "answer");
     const nextFrame = records.find((record) => record.event === "webui.next_frame_ready" && record.kind === "answer");
@@ -637,12 +637,12 @@ async function measureDesktopRuntime(browserInstance, origin) {
   });
   await installPerformanceProbe(page);
   const startedAt = Date.now();
-  await page.goto(`${origin}?surface=runtime&akashic_perf=1`, { waitUntil: "networkidle" });
+  await page.goto(`${origin}?surface=runtime&roxy_perf=1`, { waitUntil: "networkidle" });
   await page.locator(".runtime-detail__markdown").waitFor();
   const initialReadyMs = Date.now() - startedAt;
   const initialDetailRequests = detailRequests.length;
   detailRequests.length = 0;
-  await page.evaluate(() => window.__resetAkashicPerf());
+  await page.evaluate(() => window.__resetRoxyPerf());
   const switchStartedAt = await page.evaluate(() => performance.now());
   await page.getByRole("tab", { name: "文档" }).focus();
   await page.getByRole("tab", { name: "文档" }).press("ArrowRight");
@@ -669,11 +669,11 @@ async function measureMobileHistory(browserInstance, origin) {
   const page = await context.newPage();
   await installPerformanceProbe(page);
   await page.goto(`${origin}/mobile.html`, { waitUntil: "networkidle" });
-  await page.waitForFunction(() => Boolean(window.AkashicMobile));
+  await page.waitForFunction(() => Boolean(window.RoxyMobile));
   const snapshot = mobileSnapshot(300);
-  await page.evaluate(() => window.__resetAkashicPerf());
+  await page.evaluate(() => window.__resetRoxyPerf());
   const startedAt = await page.evaluate(() => performance.now());
-  await page.evaluate((value) => window.AkashicMobile.receiveSnapshot(value), snapshot);
+  await page.evaluate((value) => window.RoxyMobile.receiveSnapshot(value), snapshot);
   await page.locator('[data-message-id="mobile-299"]').waitFor();
   const metric = await readPerformanceProbe(page, startedAt, ".mobile-message-anchor");
   metric.virtualRows = await page.locator(".mobile-virtual-row").count();
@@ -686,17 +686,17 @@ async function measureMobileStream(browserInstance, origin) {
   const page = await context.newPage();
   await installPerformanceProbe(page);
   await page.goto(`${origin}/mobile.html`, { waitUntil: "networkidle" });
-  await page.waitForFunction(() => Boolean(window.AkashicMobile));
+  await page.waitForFunction(() => Boolean(window.RoxyMobile));
   const snapshot = mobileSnapshot(300, { streaming: true });
-  await page.evaluate((value) => window.AkashicMobile.receiveSnapshot(value), snapshot);
+  await page.evaluate((value) => window.RoxyMobile.receiveSnapshot(value), snapshot);
   await page.locator('[data-message-id="mobile-299"]').waitFor();
-  await page.evaluate(() => window.__resetAkashicPerf());
+  await page.evaluate(() => window.__resetRoxyPerf());
   const startedAt = await page.evaluate(() => performance.now());
   const patches = Array.from({ length: 600 }, (_, index) => mobileStreamPatch(snapshot, index, "片"));
   const terminal = mobileTerminalPatch(snapshot, "片".repeat(600));
   await page.evaluate(({ deltas, finalPatch }) => {
-    for (const patch of deltas) window.AkashicMobile.receiveStreamPatch(patch);
-    window.AkashicMobile.receiveStreamPatch(finalPatch);
+    for (const patch of deltas) window.RoxyMobile.receiveStreamPatch(patch);
+    window.RoxyMobile.receiveStreamPatch(finalPatch);
   }, { deltas: patches, finalPatch: terminal });
   await page.waitForFunction(() => {
     const row = document.querySelector('[data-message-id="mobile-299"]');
@@ -716,8 +716,8 @@ async function mobileContext(browserInstance) {
     hasTouch: true,
   });
   await context.addInitScript(() => {
-    window.AkashicNativeTransport = { postMessage() {} };
-    window.AkashicNative = new Proxy({}, { get: () => () => {} });
+    window.RoxyNativeTransport = { postMessage() {} };
+    window.RoxyNative = new Proxy({}, { get: () => () => {} });
   });
   return context;
 }
@@ -733,13 +733,13 @@ async function installPerformanceProbe(page) {
       requestAnimationFrame(frame);
     };
     requestAnimationFrame(frame);
-    window.__resetAkashicPerf = () => {
+    window.__resetRoxyPerf = () => {
       state.longTasks.length = 0;
       state.shifts.length = 0;
       state.frameGaps.length = 0;
       state.previousFrame = 0;
     };
-    window.__readAkashicPerf = (startedAt, selector) => ({
+    window.__readRoxyPerf = (startedAt, selector) => ({
       durationMs: performance.now() - startedAt,
       longTaskCount: state.longTasks.length,
       longTaskTotalMs: state.longTasks.reduce((sum, value) => sum + value, 0),
@@ -760,7 +760,7 @@ async function installPerformanceProbe(page) {
 }
 
 async function readPerformanceProbe(page, startedAt, selector) {
-  return page.evaluate(({ start, rowSelector }) => window.__readAkashicPerf(start, rowSelector), { start: startedAt, rowSelector: selector });
+  return page.evaluate(({ start, rowSelector }) => window.__readRoxyPerf(start, rowSelector), { start: startedAt, rowSelector: selector });
 }
 
 function updateBrowserBaseline(report) {
@@ -852,9 +852,10 @@ function contentType(file) {
 }
 
 function chromiumExecutable() {
-  if (process.env.AKASHIC_PERF_CHROMIUM) return process.env.AKASHIC_PERF_CHROMIUM;
+  const configured = process.env.ROXY_PERF_CHROMIUM ?? process.env.AKASHIC_PERF_CHROMIUM;
+  if (configured) return configured;
   const candidate = ["/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/google-chrome"].find(existsSync);
-  if (!candidate) throw new Error("未找到 Chromium；请设置 AKASHIC_PERF_CHROMIUM 指向受控浏览器可执行文件");
+  if (!candidate) throw new Error("未找到 Chromium；请设置 ROXY_PERF_CHROMIUM 指向受控浏览器可执行文件");
   return candidate;
 }
 

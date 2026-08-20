@@ -1,10 +1,10 @@
-# Akashic Mobile 接入手册
+# Roxy Mobile 接入手册
 
-Akashic Mobile 是一个通过独立实时网关连接 Akashic Agent 的 Android 应用。本手册面向维护者和自动化 agent，使用 Cloudflare Tunnel 发布移动实时网关，并保留 Akashic 自己的扫码、确认码和设备密钥认证。
+Roxy Mobile 是一个通过独立实时网关连接 Roxy Agent 的 Android 应用。本手册面向维护者和自动化 agent，使用 Cloudflare Tunnel 发布移动实时网关，并保留 Roxy 自己的扫码、确认码和设备密钥认证。
 
 ## 1. 接入结构
 
-Akashic Agent 提供两个用途明确的端口。`2236` 是本机唯一 Web 入口，承载 Chat、设置、Dashboard 和配对管理页面；`6323` 承载手机使用的 WSS 实时协议与同源 HTTPS 插件查询。Cloudflare 只转发 `6323`。
+Roxy Agent 提供两个用途明确的端口。`2236` 是本机唯一 Web 入口，承载 Chat、设置、Dashboard 和配对管理页面；`6323` 承载手机使用的 WSS 实时协议与同源 HTTPS 插件查询。Cloudflare 只转发 `6323`。
 
 ```text
 ┌────────────┐  本机 HTTP   ┌────────────────────────┐
@@ -25,11 +25,12 @@ Cloudflare Tunnel 由本机的 `cloudflared` 主动向 Cloudflare 建立出站�
 
 ## 2. 准备条件
 
-- 一台持续运行 Akashic Agent 的 Linux 主机。
+- 一台持续运行 Roxy Agent 的 Linux 主机。
 - 一个已经接入 Cloudflare DNS 的域名，例如 `example.com`。
 - 可用且已解锁的 Linux Secret Service。移动网关只支持 `secret_service` 保存主密钥；服务不可用或 collection 被锁定时会明确启动失败。
-- 一台能安装当前 Akashic Mobile APK 的 Android 手机。
-- 当前 Akashic Mobile APK：<https://github.com/kachofugetsu09/akashic-mobile/releases/latest>。
+- 一台能安装当前 Roxy Mobile APK 的 Android 手机。
+- 当前 Roxy Mobile APK：<https://github.com/kachofugetsu09/akashic-mobile/releases/latest>。
+  Android 发布仓暂时沿用旧名称；不要据此把新 Core 配置写回旧运行时命名空间。
 - 当前版 `cloudflared`。安装方式以 [Cloudflare 下载页](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/) 为准。
 
 先确认 Agent 可以正常启动，并且本机 Web Chat 能打开：
@@ -62,16 +63,21 @@ enabled = true
 host = "0.0.0.0"
 port = 6323
 database = "data/mobile_realtime.db"
-lan_hostname = "akashic.local"
+lan_hostname = "roxy.local"
 public_url = "wss://mobile.example.com/ws"
 max_attachment_mb = 50
 inbox_retention_days = 7
 
 [mobile_realtime.key_encryption]
 provider = "secret_service"
-master_key_namespace = "akasic/mobile-realtime"
+master_key_namespace = "roxy/mobile-realtime"
 keyset_manifest = "data/mobile/keys/current.json"
 ```
+
+上面的 hostname 与密钥命名空间只用于新 keyset。若 workspace 已有不带
+`runtime_identity = "roxy"` 的历史 `current.json`，Runtime 会继续使用旧
+`akashic.local` 与 `akasic/mobile-realtime`，避免让已配对设备静默失效；不要为了改名
+手工改写或删除 keyset。只有显式新建的 Roxy keyset 才采用上面的值。
 
 `public_url` 必须使用 `wss`，路径必须是 `/ws`，不能携带用户名、密码、query 或 fragment。正式 Supervisor 的 Web Shell 固定使用 loopback `2236`，并提供统一 Dashboard 壳层与静态前端；Chat 与 Dashboard 的运行时 API 通过 Unix socket 接入，不再配置独立 HTTP 端口。
 
@@ -101,7 +107,7 @@ curl -k -sS -o /dev/null -w '%{http_code}\n' https://127.0.0.1:6323/
 
 1. 登录 Cloudflare Dashboard，进入 `Networking → Tunnels`。
 2. 选择 `Create a tunnel`，类型选择 `Cloudflared`。
-3. 给 tunnel 起一个能识别来源主机的名字，例如 `akashic-home`。
+3. 给 tunnel 起一个能识别来源主机的名字，例如 `roxy-home`。
 4. 选择主机系统，按页面提示安装 `cloudflared`。
 5. 保存页面给出的 tunnel token。token 可以启动该 tunnel，应按密钥管理，不能写入 Git、聊天记录或普通日志。
 
@@ -111,10 +117,10 @@ curl -k -sS -o /dev/null -w '%{http_code}\n' https://127.0.0.1:6323/
 
 ```bash
 install -d -m 700 "$HOME/.config/cloudflared"
-install -m 600 /dev/null "$HOME/.config/cloudflared/akashic-mobile.token"
-read -rsp 'Cloudflare Tunnel token: ' AKASHIC_TUNNEL_TOKEN
-printf '%s' "$AKASHIC_TUNNEL_TOKEN" > "$HOME/.config/cloudflared/akashic-mobile.token"
-unset AKASHIC_TUNNEL_TOKEN
+install -m 600 /dev/null "$HOME/.config/cloudflared/roxy-mobile.token"
+read -rsp 'Cloudflare Tunnel token: ' ROXY_TUNNEL_TOKEN
+printf '%s' "$ROXY_TUNNEL_TOKEN" > "$HOME/.config/cloudflared/roxy-mobile.token"
+unset ROXY_TUNNEL_TOKEN
 printf '\n'
 ```
 
@@ -122,7 +128,7 @@ printf '\n'
 
 ```bash
 cloudflared tunnel --protocol auto run \
-  --token-file "$HOME/.config/cloudflared/akashic-mobile.token"
+  --token-file "$HOME/.config/cloudflared/roxy-mobile.token"
 ```
 
 Dashboard 中的 tunnel 状态应变为 `Healthy`。Cloudflare 把 `auto` 作为默认协议；网络允许时可使用 QUIC，连接异常时会按自身策略选择可用传输。
@@ -137,24 +143,24 @@ Dashboard 中的 tunnel 状态应变为 `Healthy`。Cloudflare 把 `auto` 作为
 | Service URL | `https://127.0.0.1:6323` |
 | Path | 留空 |
 
-移动网关的 origin 使用 Akashic 生成的自签名 LAN 证书。在该 route 的 `Additional application settings → TLS` 中打开 `No TLS Verify`，让同机 `cloudflared` 可以连接这个 origin。这个开关只作用于 `cloudflared → 127.0.0.1:6323`；手机到 Cloudflare 仍使用公开域名的正常 TLS 证书，Akashic 还会核对扫码得到的服务端应用身份。
+移动网关的 origin 使用 Roxy 生成的自签名 LAN 证书。在该 route 的 `Additional application settings → TLS` 中打开 `No TLS Verify`，让同机 `cloudflared` 可以连接这个 origin。这个开关只作用于 `cloudflared → 127.0.0.1:6323`；手机到 Cloudflare 仍使用公开域名的正常 TLS 证书，Roxy 还会核对扫码得到的服务端应用身份。
 
 不要把 Service URL 写成 `http://127.0.0.1:6323`。移动网关只接受 TLS，协议写错通常会得到 `502 Bad Gateway` 或 TLS 握手错误。
 
-不要给该 hostname 添加要求浏览器登录的 Cloudflare Access 策略。当前 Android 客户端不处理 Access 登录页；访问控制由 Akashic 的一次性配对和设备签名负责。
+不要给该 hostname 添加要求浏览器登录的 Cloudflare Access 策略。当前 Android 客户端不处理 Access 登录页；访问控制由 Roxy 的一次性配对和设备签名负责。
 
 ### 4.3 作为用户服务运行
 
-前台验证成功后可以创建 `~/.config/systemd/user/akashic-mobile-tunnel.service`。先运行 `command -v cloudflared`；可执行文件不在 `/usr/bin/cloudflared` 时，修改下面的 `ExecStart`。
+前台验证成功后可以创建 `~/.config/systemd/user/roxy-mobile-tunnel.service`。先运行 `command -v cloudflared`；可执行文件不在 `/usr/bin/cloudflared` 时，修改下面的 `ExecStart`。
 
 ```ini
 [Unit]
-Description=Akashic Mobile Cloudflare Tunnel
+Description=Roxy Mobile Cloudflare Tunnel
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/bin/cloudflared tunnel --protocol auto run --token-file %h/.config/cloudflared/akashic-mobile.token
+ExecStart=/usr/bin/cloudflared tunnel --protocol auto run --token-file %h/.config/cloudflared/roxy-mobile.token
 Restart=always
 RestartSec=5
 
@@ -166,15 +172,15 @@ WantedBy=default.target
 
 ```bash
 systemctl --user daemon-reload
-systemctl --user enable --now akashic-mobile-tunnel.service
-systemctl --user status akashic-mobile-tunnel.service
+systemctl --user enable --now roxy-mobile-tunnel.service
+systemctl --user status roxy-mobile-tunnel.service
 ```
 
 用户服务默认在用户登录后运行。需要在未登录时也启动，请让系统管理员按主机策略为该用户启用 linger。
 
 ## 5. 验证公开 WSS
 
-公开域名根路径返回 `404` 只能证明 HTTP 请求到达移动网关。下面的检查会建立真实 WebSocket，并要求第一帧是 Akashic 的 `server.challenge`：
+公开域名根路径返回 `404` 只能证明 HTTP 请求到达移动网关。下面的检查会建立真实 WebSocket，并要求第一帧是 Roxy 的 `server.challenge`：
 
 ```bash
 uv run python - <<'PY'
@@ -202,7 +208,7 @@ PY
 
 ## 6. 安装并配对手机
 
-1. 从 [Akashic Mobile Releases](https://github.com/kachofugetsu09/akashic-mobile/releases/latest) 下载 APK 并安装。
+1. 从 [Roxy Mobile Releases](https://github.com/kachofugetsu09/akashic-mobile/releases/latest) 下载 APK 并安装。
 2. 在电脑上打开 `http://127.0.0.1:2236`，点击“连接手机”。
 3. 在 Android 客户端选择“扫描电脑”，扫描电脑页面上的二维码。
 4. 手机和电脑会显示六位确认码。逐位核对，数字一致后在电脑上选择“确认并连接”。
@@ -219,7 +225,7 @@ PY
 按下面的顺序检查，每一步只回答一个问题：
 
 ```text
-Akashic 是否 ready
+Roxy 是否 ready
         │
         ▼
 本机 6323 是否监听并返回 TLS 404
@@ -236,7 +242,7 @@ Cloudflare Tunnel 是否 Healthy
 
 | 现象 | 检查 |
 |---|---|
-| 启动时报 Secret Service 不可用或已锁定 | 解锁当前用户的 Secret Service，再启动 Akashic。不要改成明文密钥或删除 keyset 绕过错误。 |
+| 启动时报 Secret Service 不可用或已锁定 | 解锁当前用户的 Secret Service，再启动 Roxy。不要改成明文密钥或删除 keyset 绕过错误。 |
 | `6323` 没有监听 | 检查 `[mobile_realtime].enabled`、启动日志和配置校验错误。 |
 | Tunnel 显示 `Inactive` 或 `Down` | 检查 `cloudflared` 进程、用户服务和 token 文件权限。 |
 | 公开地址返回 `502` | 核对 Service URL 是 `https://127.0.0.1:6323`，端口已监听，并已为自签名 origin 打开 `No TLS Verify`。 |

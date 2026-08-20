@@ -235,7 +235,7 @@ test("registry stays bounded and evicts the oldest turn", () => {
   assert.equal(recorded, true);
 });
 
-test("console payload is a single [akashic-trace] line with fixed content-free fields", () => {
+test("console payload is a single [roxy-trace] line with fixed content-free fields", () => {
   const logs = [];
   const original = console.log;
   console.log = (message) => { logs.push(message); };
@@ -254,8 +254,8 @@ test("console payload is a single [akashic-trace] line with fixed content-free f
     console.log = original;
   }
   assert.equal(logs.length, 1);
-  assert.match(logs[0], /^\[akashic-trace\] \{/);
-  const payload = JSON.parse(logs[0].slice("[akashic-trace] ".length));
+  assert.match(logs[0], /^\[roxy-trace\] \{/);
+  const payload = JSON.parse(logs[0].slice("[roxy-trace] ".length));
   assert.deepEqual(
     Object.keys(payload).sort(),
     ["client_message_id", "event", "kind", "origin", "performance_ms", "session_id", "turn_id", "wall_ms"],
@@ -266,7 +266,7 @@ test("console payload is a single [akashic-trace] line with fixed content-free f
   );
 });
 
-test("identity conflict diagnostic is a single content-free [akashic-trace] line", () => {
+test("identity conflict diagnostic is a single content-free [roxy-trace] line", () => {
   const logs = [];
   const original = console.log;
   console.log = (message) => { logs.push(message); };
@@ -286,8 +286,8 @@ test("identity conflict diagnostic is a single content-free [akashic-trace] line
     console.log = original;
   }
   assert.equal(logs.length, 1);
-  assert.match(logs[0], /^\[akashic-trace\] \{/);
-  const payload = JSON.parse(logs[0].slice("[akashic-trace] ".length));
+  assert.match(logs[0], /^\[roxy-trace\] \{/);
+  const payload = JSON.parse(logs[0].slice("[roxy-trace] ".length));
   assert.equal(payload.event, "webui.identity_conflict");
   assert.equal(payload.client_message_id, "client-1");
   assert.equal(payload.incoming_client_message_id, "client-2");
@@ -591,7 +591,7 @@ test("a throwing trace sink cannot block identity binding or milestone delivery"
     });
     assert.ok(diagnostics.length >= 3);
     for (const line of diagnostics) {
-      const payload = JSON.parse(line.slice("[akashic-trace] ".length));
+      const payload = JSON.parse(line.slice("[roxy-trace] ".length));
       assert.equal(payload.event, "webui.trace_sink_error");
       assert.equal(payload.error_type, "Error");
       assert.ok(!line.includes("content"));

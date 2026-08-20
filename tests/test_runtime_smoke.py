@@ -81,13 +81,14 @@ def test_plugin_uninstall_passes_active_turn_owner(
         }
 
     monkeypatch.setattr(main, "_request_plugin_uninstall", request)
+    monkeypatch.delenv("ROXY_PLUGIN_ROLLOUT_OWNER_TURN", raising=False)
     monkeypatch.delenv("AKASHIC_PLUGIN_ROLLOUT_OWNER_TURN", raising=False)
     outside = main._uninstall_via_runtime(
         str(config_path),
         "context_pressure@github",
         tmp_path / "workspace",
     )
-    monkeypatch.setenv("AKASHIC_PLUGIN_ROLLOUT_OWNER_TURN", "turn:owner")
+    monkeypatch.setenv("ROXY_PLUGIN_ROLLOUT_OWNER_TURN", "turn:owner")
     inside = main._uninstall_via_runtime(
         str(config_path),
         "context_pressure@github",
@@ -102,7 +103,7 @@ def test_plugin_uninstall_passes_active_turn_owner(
 def test_agent_turn_rejects_internal_plugin_commands(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("AKASHIC_PLUGIN_ROLLOUT_OWNER_TURN", "turn:owner")
+    monkeypatch.setenv("ROXY_PLUGIN_ROLLOUT_OWNER_TURN", "turn:owner")
 
     with pytest.raises(ValueError, match="Core 内部维护动作"):
         main._reject_agent_internal_plugin_action("plugin-promote")
@@ -310,6 +311,7 @@ def test_workspace_selection_prefers_cli_then_env_then_config(
         encoding="utf-8",
     )
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("ROXY_WORKSPACE", raising=False)
     monkeypatch.delenv("AKASHIC_WORKSPACE", raising=False)
 
     assert main._workspace_from_args([], config_path) == (
@@ -340,6 +342,7 @@ def test_workspace_selection_uses_default_only_for_bootstrap(
 ) -> None:
     config_path = tmp_path / "missing.toml"
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("ROXY_WORKSPACE", raising=False)
     monkeypatch.delenv("AKASHIC_WORKSPACE", raising=False)
 
     assert main._workspace_from_args(
@@ -978,14 +981,14 @@ def test_init_workspace_creates_expected_assets(tmp_path):
     assert "[channels.chat]" in config_text
     assert "6322" not in config_text
     assert '[runtime]\n' in config_text
-    assert 'workspace = "~/.akashic/workspace"' in config_text
+    assert 'workspace = "~/.roxy/workspace"' in config_text
     assert any("http://127.0.0.1:2236" in step for step in summary.next_steps)
     assert (workspace / "sessions.db").exists()
     assert (workspace / "observe").is_dir()
     assert (workspace / "memory" / "consolidation_writes.db").exists()
     assert not (workspace / "memory" / "journal").exists()
     assert (workspace / "memory" / "memory2.db").exists()
-    assert "你是 Akashic" in (
+    assert "你是 Roxy" in (
         workspace / "memory" / "VEDA.md"
     ).read_text(encoding="utf-8")
     assert "Proactive Context" in (

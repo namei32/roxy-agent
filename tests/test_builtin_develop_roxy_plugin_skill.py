@@ -8,13 +8,13 @@ from pathlib import Path
 from agent.skills import SkillsLoader
 
 REPO_ROOT = Path(__file__).parents[1]
-SKILL_ROOT = REPO_ROOT / "skills" / "develop-akashic-plugin"
+SKILL_ROOT = REPO_ROOT / "skills" / "develop-roxy-plugin"
 
 
-def test_develop_akashic_plugin_is_discoverable_builtin(tmp_path: Path) -> None:
+def test_develop_roxy_plugin_is_discoverable_builtin(tmp_path: Path) -> None:
     loader = SkillsLoader(tmp_path, builtin_skills_dir=REPO_ROOT / "skills")
 
-    record = loader.load_skill_record("develop-akashic-plugin")
+    record = loader.load_skill_record("develop-roxy-plugin")
 
     assert record is not None
     assert record.source == "builtin"
@@ -30,14 +30,14 @@ def test_develop_akashic_plugin_is_discoverable_builtin(tmp_path: Path) -> None:
         assert trigger in record.description
 
 
-def test_develop_akashic_plugin_preserves_validation_contract(tmp_path: Path) -> None:
+def test_develop_roxy_plugin_preserves_validation_contract(tmp_path: Path) -> None:
     loader = SkillsLoader(tmp_path, builtin_skills_dir=REPO_ROOT / "skills")
-    body = loader.load_skill_body("develop-akashic-plugin")
+    body = loader.load_skill_body("develop-roxy-plugin")
 
     assert body is not None
     for contract in (
         "canonical source",
-        "不要直接编辑 `~/.akashic-plugin/cache`",
+        "不要直接编辑 `~/.roxy-plugin/cache`",
         "不要指定 `--runtime`",
         "默认不沉淀语义记忆",
         "不能只问“你能否看到”",
@@ -49,7 +49,22 @@ def test_develop_akashic_plugin_preserves_validation_contract(tmp_path: Path) ->
         assert contract in body
 
 
-def test_develop_akashic_plugin_references_are_complete() -> None:
+def test_legacy_develop_akashic_plugin_skill_routes_to_roxy_contract(
+    tmp_path: Path,
+) -> None:
+    loader = SkillsLoader(tmp_path, builtin_skills_dir=REPO_ROOT / "skills")
+
+    record = loader.load_skill_record("develop-akashic-plugin")
+    body = loader.load_skill_body("develop-akashic-plugin")
+
+    assert record is not None
+    assert record.available is True
+    assert body is not None
+    assert "../develop-roxy-plugin/SKILL.md" in body
+    assert ".akashic-plugin" in body
+
+
+def test_develop_roxy_plugin_references_are_complete() -> None:
     body = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
     authoring = (SKILL_ROOT / "references" / "plugin-authoring.md").read_text(
         encoding="utf-8"
@@ -288,4 +303,4 @@ def test_plugin_system_routes_source_development_to_new_skill(tmp_path: Path) ->
     body = loader.load_skill_body("plugin-system")
 
     assert body is not None
-    assert "先加载 `develop-akashic-plugin`" in body
+    assert "先加载 `develop-roxy-plugin`" in body

@@ -39,7 +39,7 @@ class ProbePaths:
 
     @property
     def socket(self) -> Path:
-        return self.profile_dir / "akashic.sock"
+        return self.profile_dir / "roxy.sock"
 
     @property
     def observe_db(self) -> Path:
@@ -73,7 +73,7 @@ def _repo_root() -> Path:
 
 
 def _run_compose(paths: ProbePaths, args: list[str]) -> None:
-    env = {"AKASHIC_DEBUG_PROFILE": paths.profile}
+    env = {"ROXY_DEBUG_PROFILE": paths.profile}
     _ = subprocess.run(
         ["docker", "compose", "-f", str(paths.debug_dir / "docker-compose.yml"), *args],
         cwd=paths.repo,
@@ -494,7 +494,7 @@ async def _run_probe(args: argparse.Namespace) -> None:
         if args.reset_workspace:
             _run_compose(
                 paths,
-                ["run", "--rm", "akashic-debug", "reset-workspace"],
+                ["run", "--rm", "roxy-debug", "reset-workspace"],
             )
         if args.start_agent:
             proc = subprocess.Popen(
@@ -504,12 +504,12 @@ async def _run_probe(args: argparse.Namespace) -> None:
                     "-f",
                     str(paths.debug_dir / "docker-compose.yml"),
                     "up",
-                    "akashic-debug",
+                    "roxy-debug",
                 ],
                 cwd=paths.repo,
                 env={
                     **dict(os.environ),
-                    "AKASHIC_DEBUG_PROFILE": paths.profile,
+                    "ROXY_DEBUG_PROFILE": paths.profile,
                 },
                 stdout=subprocess.DEVNULL if args.quiet_agent else None,
                 stderr=subprocess.STDOUT if args.quiet_agent else None,

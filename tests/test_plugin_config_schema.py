@@ -53,7 +53,7 @@ def _get_instance(name: str):
 @pytest.mark.asyncio
 async def test_plugin_config_model_validates_and_injects_config(tmp_path: Path):
     _write_typed_plugin(tmp_path)
-    plugins_home = tmp_path / ".akashic-plugin"
+    plugins_home = tmp_path / ".roxy-plugin"
     workspace = tmp_path / "workspace"
     data_dir = workspace / "plugin-data" / "typed-builtin"
     data_dir.mkdir(parents=True)
@@ -78,7 +78,7 @@ async def test_plugin_config_model_validates_and_injects_config(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_plugin_config_model_failure_skips_plugin(tmp_path: Path):
     _write_typed_plugin(tmp_path)
-    plugins_home = tmp_path / ".akashic-plugin"
+    plugins_home = tmp_path / ".roxy-plugin"
     workspace = tmp_path / "workspace"
     data_dir = workspace / "plugin-data" / "typed-builtin"
     data_dir.mkdir(parents=True)

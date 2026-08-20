@@ -200,9 +200,9 @@ async def test_candidate_gate_publishes_unique_generation(tmp_path: Path):
     gate = manager.latest_gate("candidate")
     assert generation is not None
     assert gate is not None and gate.status == "passed"
-    assert generation.module_path.startswith("akasic_plugin_plugins_candidate__g")
+    assert generation.module_path.startswith("roxy_plugin_plugins_candidate__g")
     assert generation.generation_id == generation.instance.context.generation_id
-    assert plugin_registry.get_instance("akasic_plugin_plugins_candidate") is generation.instance
+    assert plugin_registry.get_instance("roxy_plugin_plugins_candidate") is generation.instance
     assert generation.contributions.manifest["name"] == "candidate"
 
 
@@ -302,7 +302,7 @@ async def test_failed_candidate_never_prepares(
     assert failed_check in {check.check_id for check in gate.checks if check.status == "failed"}
     assert not marker.exists()
     assert tools.get_registered_names() == set()
-    assert not any(module.startswith(f"akasic_plugin_plugins_{name}__g") for module in sys.modules)
+    assert not any(module.startswith(f"roxy_plugin_plugins_{name}__g") for module in sys.modules)
 
 
 @pytest.mark.asyncio
@@ -315,7 +315,7 @@ async def test_import_failure_returns_gate_result(tmp_path: Path):
     gate = manager.latest_gate("broken")
     assert gate is not None and gate.status == "failed"
     assert gate.checks[0].check_id == "import"
-    assert not any(module.startswith("akasic_plugin_plugins_broken__g") for module in sys.modules)
+    assert not any(module.startswith("roxy_plugin_plugins_broken__g") for module in sys.modules)
 
 
 @pytest.mark.asyncio
@@ -613,13 +613,13 @@ async def test_generation_module_tree_is_removed_on_config_failure_and_terminate
     generation = manager.generation("module_tree")
     assert generation is not None
     assert f"{generation.module_path}.child" in sys.modules
-    stable_child = importlib.import_module("akasic_plugin_plugins_module_tree.child")
+    stable_child = importlib.import_module("roxy_plugin_plugins_module_tree.child")
     assert stable_child.value == 1
 
     await manager.terminate_all()
 
     assert not any("plugins_module_tree__g" in name for name in sys.modules)
-    assert "akasic_plugin_plugins_module_tree.child" not in sys.modules
+    assert "roxy_plugin_plugins_module_tree.child" not in sys.modules
 
 
 @pytest.mark.asyncio
@@ -915,7 +915,7 @@ async def test_terminating_one_manager_keeps_newer_stable_alias(tmp_path: Path):
     first_manager = _manager(tmp_path)
     second_manager = _manager(tmp_path)
     await first_manager.load_all()
-    stable_alias = "akasic_plugin_plugins_shared_alias"
+    stable_alias = "roxy_plugin_plugins_shared_alias"
     first_child = importlib.import_module(f"{stable_alias}.child")
     assert first_child.value == "v1"
     _ = child.write_text("value = 'v2'\n", encoding="utf-8")
@@ -2787,7 +2787,7 @@ async def test_snapshot_compile_failure_does_not_publish_plugin(
     assert manager.current_snapshot is current
     assert manager.loaded_count == 1
     assert manager.generation("second_snapshot") is None
-    assert plugin_registry.get_instance("akasic_plugin_plugins_second_snapshot") is None
+    assert plugin_registry.get_instance("roxy_plugin_plugins_second_snapshot") is None
     state = tmp_path / "workspace" / "plugin-data" / "second_snapshot-builtin" / ".kv.json"
     assert not state.exists()
     await manager.terminate_all()
@@ -3661,7 +3661,7 @@ async def test_repeated_disable_with_retained_snapshot_keeps_unique_id_and_alias
     plugins_home = tmp_path / "home"
     write_plugin_manifest({"retained_topology": True}, plugins_home=plugins_home)
     await manager.load_all()
-    alias = "akasic_plugin_plugins_retained_topology"
+    alias = "roxy_plugin_plugins_retained_topology"
 
     write_plugin_manifest({"retained_topology": False}, plugins_home=plugins_home)
     await manager.reconcile_changed()
@@ -4003,7 +4003,7 @@ async def test_publish_cancellation_after_store_commit_keeps_manager_consistent(
         await publishing
 
     active = manager.generation("commit_cancel")
-    alias = "akasic_plugin_plugins_commit_cancel"
+    alias = "roxy_plugin_plugins_commit_cancel"
     assert active is candidate
     assert manager.prepared_generation("commit_cancel") is None
     assert manager.current_snapshot is candidate.runtime_snapshot

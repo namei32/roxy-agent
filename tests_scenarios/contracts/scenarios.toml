@@ -399,7 +399,7 @@ command = [
   "tests/test_support_modules.py::test_message_push_passive_role_does_not_wait_for_passive_lane",
   "tests/test_support_modules.py::test_message_push_passive_role_serializes_actual_same_chat_send",
   "tests/test_support_modules.py::test_context_builder_debug_projection_is_turn_local",
-  "tests/test_builtin_develop_akashic_plugin_skill.py",
+  "tests/test_builtin_develop_roxy_plugin_skill.py",
 ]
 observes = [
   "runtime_pointer_snapshot",

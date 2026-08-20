@@ -24,7 +24,7 @@ def _socket_alias_directory(workspace: Path) -> Path:
 
     # 2. Derive a stable short alias so deep workspaces remain valid AF_UNIX owners.
     digest = hashlib.sha256(str(resolved_runtime).encode("utf-8")).hexdigest()[:20]
-    alias_root = Path("/tmp") / f"akashic-web-{os.getuid()}"
+    alias_root = Path("/tmp") / f"roxy-web-{os.getuid()}"
     alias_root.mkdir(mode=0o700, exist_ok=True)
     alias = alias_root / digest
     if alias.is_symlink():

@@ -322,7 +322,7 @@ def test_config_load_reads_compaction_and_app_server(tmp_path: Path):
                 },
             },
             "app_server": {
-                "listen": "/tmp/dev-akashic.sock",
+                "listen": "/tmp/dev-roxy.sock",
             },
         },
     )
@@ -330,7 +330,7 @@ def test_config_load_reads_compaction_and_app_server(tmp_path: Path):
     cfg = Config.load(cfg_path, workspace=tmp_path)
 
     assert cfg.context_compaction.keep_recent_tokens == 21000
-    assert cfg.app_server.listen == "/tmp/dev-akashic.sock"
+    assert cfg.app_server.listen == "/tmp/dev-roxy.sock"
 
 
 def test_config_load_reads_agent_dev_mode(tmp_path: Path):
@@ -438,7 +438,7 @@ max_tokens = 256
 keep_recent_tokens = 20000
 
 [app_server]
-listen = "/tmp/toml-akashic.sock"
+listen = "/tmp/toml-roxy.sock"
 
 """.strip() + "\n",
         encoding="utf-8",
@@ -451,10 +451,10 @@ listen = "/tmp/toml-akashic.sock"
     assert cfg.max_tokens == 256
     assert cfg.context_compaction.keep_recent_tokens == 20000
     if sys.platform == "win32":
-        assert cfg.app_server.listen != "/tmp/toml-akashic.sock"
+        assert cfg.app_server.listen != "/tmp/toml-roxy.sock"
         assert cfg.app_server.listen.startswith("127.0.0.1:")
     else:
-        assert cfg.app_server.listen == "/tmp/toml-akashic.sock"
+        assert cfg.app_server.listen == "/tmp/toml-roxy.sock"
 
 
 def test_config_rejects_legacy_cli_socket(tmp_path: Path):

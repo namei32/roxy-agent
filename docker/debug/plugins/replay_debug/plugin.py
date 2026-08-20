@@ -14,8 +14,8 @@ from infra.channels.contract import ChannelContext
 
 def _replay_source_enabled() -> bool:
     return bool(
-        os.environ.get("AKASHIC_REPLAY_CLOCK_FILE", "").strip()
-        and os.environ.get("AKASHIC_REPLAY_EVENTS_FILE", "").strip()
+        os.environ.get("ROXY_REPLAY_CLOCK_FILE", "").strip()
+        and os.environ.get("ROXY_REPLAY_EVENTS_FILE", "").strip()
     )
 
 
@@ -23,7 +23,7 @@ class CaptureChannel:
     name = "replay"
 
     def __init__(self, outbox_path: Path) -> None:
-        self.name = os.environ.get("AKASHIC_REPLAY_CHANNEL", "replay").strip() or "replay"
+        self.name = os.environ.get("ROXY_REPLAY_CHANNEL", "replay").strip() or "replay"
         self._outbox_path = outbox_path
         self._registration: Any = None
 
@@ -82,7 +82,7 @@ class ReplayDebugPlugin(Plugin):
     name = "replay_debug"
 
     def channels(self) -> list[CaptureChannel]:
-        path = os.environ.get("AKASHIC_REPLAY_OUTBOX_FILE", "").strip()
+        path = os.environ.get("ROXY_REPLAY_OUTBOX_FILE", "").strip()
         return [CaptureChannel(Path(path))] if path and _replay_source_enabled() else []
 
     @classmethod

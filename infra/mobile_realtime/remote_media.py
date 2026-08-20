@@ -165,7 +165,7 @@ async def _download_remote_media(
                 headers=[
                     (b"host", _host_header(host, port, parts.scheme).encode("ascii")),
                     (b"accept", b"*/*"),
-                    (b"user-agent", b"Akasic-Mobile-Media/1"),
+                    (b"user-agent", b"Roxy-Mobile-Media/1"),
                     (b"connection", b"close"),
                 ],
                 extensions={

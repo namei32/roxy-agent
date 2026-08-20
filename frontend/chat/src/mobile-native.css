@@ -16,11 +16,11 @@ body,
   min-height: var(--mobile-viewport-height, 100vh);
   margin: 0;
   overflow: hidden;
-  background: var(--ak-color-bg-canvas);
+  background: var(--roxy-color-bg-canvas);
 }
 
 body {
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
   overscroll-behavior: none;
 }
 
@@ -36,8 +36,8 @@ button {
 }
 
 ::selection {
-  color: var(--ak-color-on-action-container);
-  background: var(--ak-color-action-container);
+  color: var(--roxy-color-on-action-container);
+  background: var(--roxy-color-action-container);
 }
 
 .mobile-loading {
@@ -46,7 +46,7 @@ button {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.875rem;
 }
 
@@ -54,7 +54,7 @@ button {
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: var(--ak-color-action-primary);
+  background: var(--roxy-color-action-primary);
   animation: mobile-loading-pulse 1.1s ease-in-out infinite;
 }
 
@@ -65,12 +65,12 @@ button {
   align-items: center;
   justify-content: center;
   padding: 32px;
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
   text-align: center;
 }
 
 .mobile-fatal__mark {
-  color: var(--ak-color-status-error);
+  color: var(--roxy-color-status-error);
 }
 
 .mobile-fatal h1 {
@@ -82,7 +82,7 @@ button {
 .mobile-fatal p {
   max-width: 32rem;
   margin: 8px 0 0;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.875rem;
   line-height: 1.5;
 }
@@ -97,7 +97,7 @@ button {
   border-radius: 22px;
   padding: 0 20px;
   color: white;
-  background: var(--ak-color-action-primary);
+  background: var(--roxy-color-action-primary);
 }
 
 .mobile-shell {
@@ -107,7 +107,7 @@ button {
   height: 100%;
   flex-direction: column;
   overflow: hidden;
-  background: var(--ak-color-bg-canvas);
+  background: var(--roxy-color-bg-canvas);
 }
 
 .mobile-topbar {
@@ -142,8 +142,8 @@ button {
 
 .mobile-topbar.selection-mode {
   gap: 4px;
-  color: var(--ak-color-text-primary);
-  background: var(--ak-color-bg-surface-high);
+  color: var(--roxy-color-text-primary);
+  background: var(--roxy-color-bg-surface-high);
 }
 
 .mobile-topbar.selection-mode > strong {
@@ -160,11 +160,11 @@ button {
 }
 
 .mobile-topbar.selection-mode > .mobile-icon-button:not(:first-child) {
-  color: var(--ak-color-action-primary);
+  color: var(--roxy-color-action-primary);
 }
 
 .mobile-topbar.selection-mode > .mobile-icon-button:disabled {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   opacity: 0.38;
 }
 
@@ -202,13 +202,13 @@ button {
   gap: 10px;
   border-radius: var(--m-shape-extra-small);
   padding: 8px 8px 8px 16px;
-  color: var(--ak-color-bg-canvas);
-  background: var(--ak-color-text-primary);
+  color: var(--roxy-color-bg-canvas);
+  background: var(--roxy-color-text-primary);
   box-shadow: 0 2px 6px rgb(var(--md-sys-color-shadow-rgb) / 0.18);
 }
 
 .mobile-snackbar__mark {
-  color: color-mix(in oklch, var(--ak-color-status-error) 48%, white);
+  color: color-mix(in oklch, var(--roxy-color-status-error) 48%, white);
 }
 
 .mobile-snackbar > span {
@@ -225,7 +225,7 @@ button {
 
 .mobile-snackbar small {
   overflow: hidden;
-  color: color-mix(in oklch, var(--ak-color-bg-canvas) 76%, transparent);
+  color: color-mix(in oklch, var(--roxy-color-bg-canvas) 76%, transparent);
   font-size: 0.75rem;
   line-height: 1.35;
   text-overflow: ellipsis;
@@ -238,7 +238,7 @@ button {
   border: 0;
   border-radius: var(--m-shape-full);
   padding: 0 12px;
-  color: color-mix(in oklch, var(--ak-color-action-primary) 54%, white);
+  color: color-mix(in oklch, var(--roxy-color-action-primary) 54%, white);
   background: transparent;
   font-size: 0.8125rem;
   font-weight: 500;
@@ -249,7 +249,7 @@ button {
 
 .mobile-snackbar button:active {
   scale: 0.96;
-  background: rgb(var(--ak-color-bg-canvas-rgb) / 0.08);
+  background: rgb(var(--roxy-color-bg-canvas-rgb) / 0.08);
 }
 
 .mobile-plugin-topbar {
@@ -274,12 +274,12 @@ button {
   height: 100%;
   overflow-y: auto;
   padding: calc(84px + env(safe-area-inset-top)) 20px calc(28px + env(safe-area-inset-bottom));
-  background: var(--ak-color-bg-canvas);
+  background: var(--roxy-color-bg-canvas);
 }
 
 .mobile-plugin-directory__status {
   margin: 0 0 8px;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.75rem;
   font-weight: 500;
   line-height: 1.35;
@@ -298,9 +298,9 @@ button {
   align-items: center;
   gap: 12px;
   border: 0;
-  border-bottom: 1px solid var(--ak-color-border-default);
+  border-bottom: 1px solid var(--roxy-color-border-default);
   padding: 10px 2px;
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
   background: transparent;
   text-align: start;
   transition-property: background-color, scale;
@@ -310,11 +310,11 @@ button {
 
 .mobile-plugin-directory__list > button:active {
   scale: 0.96;
-  background: color-mix(in oklch, var(--ak-color-action-primary) 8%, transparent);
+  background: color-mix(in oklch, var(--roxy-color-action-primary) 8%, transparent);
 }
 
 .mobile-plugin-directory__list > button > svg:last-child {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
 }
 
 .mobile-plugin-directory__mark {
@@ -324,7 +324,7 @@ button {
   place-items: center;
   border-radius: var(--m-shape-medium);
   color: white;
-  background: var(--ak-color-action-primary);
+  background: var(--roxy-color-action-primary);
   font-size: 0.6875rem;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -344,7 +344,7 @@ button {
 
 .mobile-plugin-directory__list small,
 .mobile-plugin-directory__empty {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.8125rem;
   line-height: 1.45;
   text-wrap: pretty;
@@ -365,8 +365,8 @@ button {
   height: 100%;
   overflow-y: auto;
   padding: calc(84px + env(safe-area-inset-top)) 16px calc(32px + env(safe-area-inset-bottom));
-  color: var(--ak-color-text-primary);
-  background: var(--ak-color-bg-canvas);
+  color: var(--roxy-color-text-primary);
+  background: var(--roxy-color-bg-canvas);
 }
 
 .runtime-library__intro {
@@ -377,7 +377,7 @@ button {
 .runtime-library__intro > span,
 .runtime-section > header small,
 .runtime-detail > header > span {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.6875rem;
   font-weight: 700;
   line-height: 1.2;
@@ -398,7 +398,7 @@ button {
 .runtime-detail > header p {
   max-width: 32rem;
   margin: 0;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.875rem;
   line-height: 1.55;
   text-wrap: pretty;
@@ -414,8 +414,8 @@ button {
   border: 0;
   border-radius: var(--m-shape-full);
   padding: 0 14px;
-  color: var(--ak-color-text-secondary);
-  background: var(--ak-color-bg-surface);
+  color: var(--roxy-color-text-secondary);
+  background: var(--roxy-color-bg-surface);
   font-size: 0.8125rem;
   font-weight: 650;
 }
@@ -431,8 +431,8 @@ button {
   margin-bottom: 12px;
   border-radius: var(--m-shape-large);
   padding: 12px 14px;
-  color: var(--ak-color-status-error);
-  background: var(--ak-color-status-error-container);
+  color: var(--roxy-color-status-error);
+  background: var(--roxy-color-status-error-container);
   font-size: 0.8125rem;
 }
 
@@ -444,18 +444,18 @@ button {
 }
 
 .runtime-section.documents {
-  border-color: color-mix(in oklch, var(--ak-color-status-warning) 32%, transparent);
-  background: color-mix(in oklch, var(--ak-color-status-warning) 10%, var(--ak-color-bg-canvas));
+  border-color: color-mix(in oklch, var(--roxy-color-status-warning) 32%, transparent);
+  background: color-mix(in oklch, var(--roxy-color-status-warning) 10%, var(--roxy-color-bg-canvas));
 }
 
 .runtime-section.mcp {
-  border-color: color-mix(in oklch, var(--ak-color-status-success) 32%, transparent);
-  background: color-mix(in oklch, var(--ak-color-status-success) 10%, var(--ak-color-bg-canvas));
+  border-color: color-mix(in oklch, var(--roxy-color-status-success) 32%, transparent);
+  background: color-mix(in oklch, var(--roxy-color-status-success) 10%, var(--roxy-color-bg-canvas));
 }
 
 .runtime-section.schedules {
-  border-color: color-mix(in oklch, var(--ak-color-status-trace) 32%, transparent);
-  background: color-mix(in oklch, var(--ak-color-status-trace) 10%, var(--ak-color-bg-canvas));
+  border-color: color-mix(in oklch, var(--roxy-color-status-trace) 32%, transparent);
+  background: color-mix(in oklch, var(--roxy-color-status-trace) 10%, var(--roxy-color-bg-canvas));
 }
 
 .runtime-section > header {
@@ -475,18 +475,18 @@ button {
 }
 
 .documents .runtime-section__icon {
-  color: var(--ak-color-status-warning);
-  background: color-mix(in oklch, var(--ak-color-status-warning) 18%, transparent);
+  color: var(--roxy-color-status-warning);
+  background: color-mix(in oklch, var(--roxy-color-status-warning) 18%, transparent);
 }
 
 .mcp .runtime-section__icon {
-  color: var(--ak-color-status-success);
-  background: color-mix(in oklch, var(--ak-color-status-success) 18%, transparent);
+  color: var(--roxy-color-status-success);
+  background: color-mix(in oklch, var(--roxy-color-status-success) 18%, transparent);
 }
 
 .schedules .runtime-section__icon {
-  color: var(--ak-color-status-trace);
-  background: color-mix(in oklch, var(--ak-color-status-trace) 18%, transparent);
+  color: var(--roxy-color-status-trace);
+  background: color-mix(in oklch, var(--roxy-color-status-trace) 18%, transparent);
 }
 
 .runtime-section > header > span:nth-child(2) {
@@ -504,8 +504,8 @@ button {
   min-width: 30px;
   border-radius: var(--m-shape-full);
   padding: 5px 9px;
-  color: var(--ak-color-text-secondary);
-  background: color-mix(in oklch, var(--ak-color-bg-surface-high) 56%, transparent);
+  color: var(--roxy-color-text-secondary);
+  background: color-mix(in oklch, var(--roxy-color-bg-surface-high) 56%, transparent);
   font-size: 0.75rem;
   font-weight: 700;
   text-align: center;
@@ -513,14 +513,14 @@ button {
 
 .runtime-section__meta {
   margin: -3px 5px 7px 54px;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.75rem;
 }
 
 .runtime-section__items {
   overflow: hidden;
   border-radius: 16px;
-  background: color-mix(in oklch, var(--ak-color-bg-surface-high) 46%, transparent);
+  background: color-mix(in oklch, var(--roxy-color-bg-surface-high) 46%, transparent);
 }
 
 .runtime-item {
@@ -531,9 +531,9 @@ button {
   align-items: center;
   gap: 9px;
   border: 0;
-  border-bottom: 1px solid var(--ak-color-border-default);
+  border-bottom: 1px solid var(--roxy-color-border-default);
   padding: 10px 10px 10px 14px;
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
   background: transparent;
   text-align: start;
 }
@@ -544,7 +544,7 @@ button {
 
 .runtime-item:active:not(:disabled) {
   scale: 0.96;
-  background: color-mix(in oklch, var(--ak-color-bg-surface-high) 58%, transparent);
+  background: color-mix(in oklch, var(--roxy-color-bg-surface-high) 58%, transparent);
 }
 
 .runtime-item:disabled {
@@ -569,7 +569,7 @@ button {
 .runtime-item small,
 .runtime-item code,
 .runtime-empty {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.75rem;
   line-height: 1.4;
 }
@@ -582,21 +582,21 @@ button {
 }
 
 .runtime-item > svg {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
 }
 
 .runtime-status {
   border-radius: var(--m-shape-full);
   padding: 4px 8px;
-  color: var(--ak-color-text-secondary);
-  background: color-mix(in oklch, var(--ak-color-text-muted) 8%, transparent);
+  color: var(--roxy-color-text-secondary);
+  background: color-mix(in oklch, var(--roxy-color-text-muted) 8%, transparent);
   font-size: 0.6875rem;
   font-weight: 650;
 }
 
 .runtime-status.enabled {
-  color: var(--ak-color-status-success);
-  background: color-mix(in oklch, var(--ak-color-status-success) 18%, transparent);
+  color: var(--roxy-color-status-success);
+  background: color-mix(in oklch, var(--roxy-color-status-success) 18%, transparent);
 }
 
 .runtime-empty {
@@ -610,10 +610,10 @@ button {
 }
 
 .runtime-markdown {
-  border: 1px solid var(--ak-color-border-default);
+  border: 1px solid var(--roxy-color-border-default);
   border-radius: 24px;
   padding: 20px 18px 28px;
-  background: color-mix(in oklch, var(--ak-color-bg-canvas) 72%, var(--ak-color-bg-surface-high));
+  background: color-mix(in oklch, var(--roxy-color-bg-canvas) 72%, var(--roxy-color-bg-surface-high));
   box-shadow: none;
 }
 
@@ -639,7 +639,7 @@ button {
   place-content: center;
   place-items: center;
   gap: 12px;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
 }
 
 .is-spinning {
@@ -658,7 +658,7 @@ button {
   place-items: center;
   border: 0;
   border-radius: 50%;
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
   background: transparent;
   transition-property: scale, background-color, color, opacity;
   transition-duration: 150ms;
@@ -666,7 +666,7 @@ button {
 }
 
 .mobile-icon-button:disabled {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   opacity: 0.56;
 }
 
@@ -686,13 +686,13 @@ button {
 .mobile-search-navigator button:focus-visible,
 .mobile-scroll-button:focus-visible,
 .tool-step-summary:focus-visible {
-  outline: 2px solid var(--ak-color-action-primary);
+  outline: 2px solid var(--roxy-color-action-primary);
   outline-offset: 2px;
 }
 
 .mobile-plugin-directory__list > button:focus-visible,
 .runtime-item:focus-visible {
-  outline: 2px solid var(--ak-color-action-primary);
+  outline: 2px solid var(--roxy-color-action-primary);
   outline-offset: 2px;
 }
 
@@ -707,7 +707,7 @@ button {
   flex: 1;
   align-items: center;
   gap: 8px;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.875rem;
   font-weight: 650;
   white-space: nowrap;
@@ -730,13 +730,13 @@ button {
   gap: 8px;
   border-radius: 22px;
   padding: 0 4px 0 16px;
-  color: var(--ak-color-text-secondary);
-  background: var(--ak-color-bg-surface);
+  color: var(--roxy-color-text-secondary);
+  background: var(--roxy-color-bg-surface);
 }
 
 .mobile-search-field:focus-within {
-  color: var(--ak-color-action-primary);
-  background: color-mix(in oklch, var(--ak-color-action-container) 44%, var(--ak-color-bg-surface));
+  color: var(--roxy-color-action-primary);
+  background: color-mix(in oklch, var(--roxy-color-action-container) 44%, var(--roxy-color-bg-surface));
 }
 
 .mobile-search-field input {
@@ -745,16 +745,16 @@ button {
   flex: 1;
   border: 0;
   padding: 0;
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
   background: transparent;
   font-size: 1rem;
   line-height: 1.5;
   outline: none;
-  caret-color: var(--ak-color-action-primary);
+  caret-color: var(--roxy-color-action-primary);
 }
 
 .mobile-search-field input::placeholder {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
 }
 
 .mobile-search-field input::-webkit-search-cancel-button {
@@ -770,25 +770,25 @@ button {
   border: 0;
   border-radius: 50%;
   padding: 0;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   background: transparent;
 }
 
 .mobile-search-field > button:active {
-  color: var(--ak-color-on-action-container);
-  background: color-mix(in oklch, var(--ak-color-action-primary) 12%, transparent);
+  color: var(--roxy-color-on-action-container);
+  background: color-mix(in oklch, var(--roxy-color-action-primary) 12%, transparent);
 }
 
 .connection-state.ready {
-  color: var(--ak-sys-color-success);
+  color: var(--roxy-sys-color-success);
 }
 
 .connection-state.degraded {
-  color: var(--ak-color-status-warning);
+  color: var(--roxy-color-status-warning);
 }
 
 .connection-state.disconnected {
-  color: var(--ak-color-status-error);
+  color: var(--roxy-color-status-error);
 }
 
 .agent-task-state {
@@ -799,8 +799,8 @@ button {
   gap: 6px;
   border-radius: var(--m-shape-full);
   padding: 0 12px;
-  color: var(--ak-color-status-trace-text);
-  background: var(--ak-color-status-trace-container);
+  color: var(--roxy-color-status-trace-text);
+  background: var(--roxy-color-status-trace-container);
   font-size: 0.75rem;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
@@ -811,7 +811,7 @@ button {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--ak-color-status-trace);
+  background: var(--roxy-color-status-trace);
 }
 
 .connection-spinner {
@@ -907,7 +907,7 @@ button {
 .mobile-empty p {
   max-width: 28rem;
   margin: 2px 0 0;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.9375rem;
   line-height: 1.55;
   text-wrap: pretty;
@@ -923,7 +923,7 @@ button {
   justify-content: flex-start;
   gap: 8px;
   margin-top: 2px;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.75rem;
   line-height: 1.4;
   font-variant-numeric: tabular-nums;
@@ -944,7 +944,7 @@ button {
 .mobile-plain-message-view__content {
   min-width: 0;
   max-width: 100%;
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
   font-size: 1rem;
   line-height: 1.62;
 }
@@ -953,7 +953,7 @@ button {
   width: fit-content;
   border-radius: var(--m-shape-large);
   padding: 12px 16px;
-  background: var(--ak-color-action-soft);
+  background: var(--roxy-color-action-soft);
 }
 
 .mobile-plain-message-view__content p {
@@ -976,12 +976,12 @@ button {
 
 .delivery-state.retry,
 .mobile-delivery-action.retry {
-  color: var(--ak-color-status-error);
+  color: var(--roxy-color-status-error);
 }
 
 .delivery-state.verify,
 .mobile-delivery-action.verify {
-  color: var(--ak-color-action-primary);
+  color: var(--roxy-color-action-primary);
 }
 
 .mobile-delivery-action {
@@ -1018,7 +1018,7 @@ button {
 }
 
 .interrupted-label {
-  color: var(--ak-color-status-trace-text);
+  color: var(--roxy-color-status-trace-text);
   font-weight: 650;
 }
 
@@ -1027,7 +1027,7 @@ button {
   min-height: 32px;
   align-items: center;
   margin-top: -18px;
-  color: var(--ak-color-status-trace-text);
+  color: var(--roxy-color-status-trace-text);
   font-size: 0.8125rem;
   font-weight: 600;
 }
@@ -1036,7 +1036,7 @@ button {
   width: 100%;
   height: 1px;
   margin-block: -14px 13px;
-  background: var(--ak-color-border-default);
+  background: var(--roxy-color-border-default);
 }
 
 .mobile-message-anchor {
@@ -1053,7 +1053,7 @@ button {
 
 .mobile-markdown-render-fallback {
   min-height: 48px;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
 }
 
 .mobile-message-anchor .agent-content {
@@ -1076,14 +1076,14 @@ button {
 }
 
 .mobile-message-anchor.search-target::before {
-  background: color-mix(in oklch, var(--ak-color-action-primary) 10%, transparent);
+  background: color-mix(in oklch, var(--roxy-color-action-primary) 10%, transparent);
   animation: message-search-target 1s cubic-bezier(0.2, 0, 0, 1) both;
 }
 
 .mobile-message-anchor.selected::before {
   inset: -14px -20px;
   border-radius: 0;
-  background: color-mix(in oklch, var(--ak-color-action-primary) 11%, transparent);
+  background: color-mix(in oklch, var(--roxy-color-action-primary) 11%, transparent);
   transition-duration: 150ms;
 }
 
@@ -1092,7 +1092,7 @@ button {
 }
 
 .mobile-message-anchor[role="checkbox"]:focus-visible::before {
-  outline: 2px solid var(--ak-color-action-primary);
+  outline: 2px solid var(--roxy-color-action-primary);
   outline-offset: 2px;
 }
 
@@ -1102,7 +1102,7 @@ button {
   width: 100%;
   align-items: center;
   gap: 12px;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.75rem;
   font-weight: 600;
   line-height: 1;
@@ -1111,7 +1111,7 @@ button {
 
 .message-date-divider > span {
   height: 1px;
-  background: var(--ak-color-border-default);
+  background: var(--roxy-color-border-default);
 }
 
 .message-unread-divider {
@@ -1120,7 +1120,7 @@ button {
   width: 100%;
   align-items: center;
   gap: 12px;
-  color: var(--ak-color-action-primary);
+  color: var(--roxy-color-action-primary);
   font-size: 0.75rem;
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -1128,16 +1128,16 @@ button {
 
 .message-unread-divider > span {
   height: 1px;
-  background: color-mix(in oklch, var(--ak-color-action-primary) 52%, var(--ak-color-border-default));
+  background: color-mix(in oklch, var(--roxy-color-action-primary) 52%, var(--roxy-color-border-default));
 }
 
 .message-unread-divider > strong {
   font-weight: 650;
 }
 
-::highlight(akashic-search-match) {
-  color: var(--ak-color-on-action-container);
-  background: var(--ak-color-action-container);
+::highlight(roxy-search-match) {
+  color: var(--roxy-color-on-action-container);
+  background: var(--roxy-color-action-container);
 }
 
 .image-viewer-dialog {
@@ -1152,8 +1152,8 @@ button {
   border: 0;
   border-radius: 0;
   padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
-  color: var(--ak-color-text-primary);
-  background: var(--ak-color-bg-canvas);
+  color: var(--roxy-color-text-primary);
+  background: var(--roxy-color-bg-canvas);
   box-shadow: none;
 }
 
@@ -1196,8 +1196,8 @@ button {
 
 .image-viewer-toolbar button:focus-visible,
 .image-viewer-zoom button:focus-visible {
-  background: color-mix(in oklch, var(--ak-color-text-primary) 12%, transparent);
-  outline: 2px solid var(--ak-color-action-primary);
+  background: color-mix(in oklch, var(--roxy-color-text-primary) 12%, transparent);
+  outline: 2px solid var(--roxy-color-action-primary);
   outline-offset: -2px;
 }
 
@@ -1215,7 +1215,7 @@ button {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
-  outline: 1px solid var(--ak-color-image-outline);
+  outline: 1px solid var(--roxy-color-image-outline);
   outline-offset: -1px;
   transition-property: transform;
   transition-duration: 120ms;
@@ -1235,7 +1235,7 @@ button {
   justify-self: center;
   margin: 8px 0 12px;
   border-radius: 24px;
-  background: var(--ak-color-bg-surface-high);
+  background: var(--roxy-color-bg-surface-high);
   font-size: 0.8125rem;
   font-variant-numeric: tabular-nums;
   text-align: center;
@@ -1253,8 +1253,8 @@ button {
   border: 0;
   border-radius: 50%;
   padding: 0;
-  color: var(--ak-color-text-primary);
-  background: var(--ak-color-bg-surface-high);
+  color: var(--roxy-color-text-primary);
+  background: var(--roxy-color-bg-surface-high);
   box-shadow: 0 2px 8px rgb(var(--md-sys-color-shadow-rgb) / 0.18);
   opacity: 1;
   translate: 0 0;
@@ -1280,7 +1280,7 @@ button {
 
 .mobile-scroll-button:active {
   scale: 0.96;
-  background: color-mix(in oklch, var(--ak-color-action-primary) 12%, var(--ak-color-bg-surface-high));
+  background: color-mix(in oklch, var(--roxy-color-action-primary) 12%, var(--roxy-color-bg-surface-high));
 }
 
 .mobile-scroll-button > span {
@@ -1291,11 +1291,11 @@ button {
   min-width: 22px;
   height: 22px;
   place-items: center;
-  border: 2px solid var(--ak-color-bg-canvas);
+  border: 2px solid var(--roxy-color-bg-canvas);
   border-radius: 11px;
   padding-inline: 5px;
   color: white;
-  background: var(--ak-color-action-primary);
+  background: var(--roxy-color-action-primary);
   font-size: 0.6875rem;
   font-weight: 700;
   line-height: 1;
@@ -1310,10 +1310,10 @@ button {
   min-height: calc(64px + env(safe-area-inset-bottom));
   align-items: flex-start;
   justify-content: space-between;
-  border-top: 1px solid var(--ak-color-border-default);
+  border-top: 1px solid var(--roxy-color-border-default);
   padding: 8px 12px calc(8px + env(safe-area-inset-bottom)) 20px;
-  color: var(--ak-color-text-secondary);
-  background: color-mix(in oklch, var(--ak-color-bg-canvas) 96%, transparent);
+  color: var(--roxy-color-text-secondary);
+  background: color-mix(in oklch, var(--roxy-color-bg-canvas) 96%, transparent);
   font-size: 0.8125rem;
   line-height: 44px;
 }
@@ -1336,18 +1336,18 @@ button {
   border: 0;
   border-radius: 50%;
   padding: 0;
-  color: var(--ak-color-action-primary);
+  color: var(--roxy-color-action-primary);
   background: transparent;
   transition: scale 150ms cubic-bezier(0.2, 0, 0, 1), background-color 150ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .mobile-search-navigator button:active:not(:disabled) {
   scale: 0.96;
-  background: color-mix(in oklch, var(--ak-color-action-primary) 12%, transparent);
+  background: color-mix(in oklch, var(--roxy-color-action-primary) 12%, transparent);
 }
 
 .mobile-search-navigator button:disabled {
-  color: var(--ak-color-border-strong);
+  color: var(--roxy-color-border-strong);
   opacity: 0.56;
 }
 
@@ -1368,10 +1368,10 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  border-top: 1px solid var(--ak-color-border-default);
+  border-top: 1px solid var(--roxy-color-border-default);
   padding: 12px 16px calc(12px + env(safe-area-inset-bottom)) 20px;
-  color: var(--ak-color-text-primary);
-  background: color-mix(in oklch, var(--ak-color-bg-surface-low) 96%, transparent);
+  color: var(--roxy-color-text-primary);
+  background: color-mix(in oklch, var(--roxy-color-bg-surface-low) 96%, transparent);
 }
 
 .mobile-unavailable-session > span {
@@ -1387,7 +1387,7 @@ button {
 }
 
 .mobile-unavailable-session small {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.75rem;
   line-height: 1.4;
   text-wrap: pretty;
@@ -1402,7 +1402,7 @@ button {
   border: 0;
   border-radius: 999px;
   padding-inline: 16px;
-  color: var(--ak-color-status-warning);
+  color: var(--roxy-color-status-warning);
   background: transparent;
   font-size: 0.875rem;
   font-weight: 650;
@@ -1412,15 +1412,15 @@ button {
 
 .mobile-unavailable-session button:active {
   scale: 0.96;
-  background: color-mix(in oklch, var(--ak-color-status-warning) 12%, transparent);
+  background: color-mix(in oklch, var(--roxy-color-status-warning) 12%, transparent);
 }
 
 .mobile-unavailable-session button.new-session {
-  color: var(--ak-color-action-primary);
+  color: var(--roxy-color-action-primary);
 }
 
 .mobile-unavailable-session button.new-session:active {
-  background: color-mix(in oklch, var(--ak-color-action-primary) 12%, transparent);
+  background: color-mix(in oklch, var(--roxy-color-action-primary) 12%, transparent);
 }
 
 .mobile-session-remove-overlay {
@@ -1434,8 +1434,8 @@ button {
   border: 0;
   border-radius: 28px;
   padding: 24px;
-  color: var(--ak-color-text-primary);
-  background: var(--ak-color-bg-surface-high);
+  color: var(--roxy-color-text-primary);
+  background: var(--roxy-color-bg-surface-high);
   box-shadow:
     0 2px 6px rgb(var(--md-sys-color-shadow-rgb) / 0.12),
     0 8px 24px rgb(var(--md-sys-color-shadow-rgb) / 0.16);
@@ -1451,7 +1451,7 @@ button {
 
 .mobile-session-remove-dialog > p {
   margin: 0;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.875rem;
   line-height: 1.5;
   text-wrap: pretty;
@@ -1470,14 +1470,14 @@ button {
   border: 0;
   border-radius: 999px;
   padding-inline: 18px;
-  color: var(--ak-color-action-primary);
+  color: var(--roxy-color-action-primary);
   background: transparent;
   font-size: 0.875rem;
   font-weight: 650;
 }
 
 .mobile-session-remove-dialog__actions button.destructive {
-  color: var(--ak-color-status-error);
+  color: var(--roxy-color-status-error);
 }
 
 .mobile-session-remove-dialog__actions button:active {
@@ -1496,8 +1496,8 @@ button {
 }
 
 .composer-queue {
-  color: var(--ak-color-text-secondary);
-  background: color-mix(in oklch, var(--ak-color-status-warning) 9%, var(--ak-color-bg-surface));
+  color: var(--roxy-color-text-secondary);
+  background: color-mix(in oklch, var(--roxy-color-status-warning) 9%, var(--roxy-color-bg-surface));
 }
 
 .composer-queue > button {
@@ -1509,7 +1509,7 @@ button {
   gap: 8px;
   border: 0;
   padding: 0 16px;
-  color: var(--ak-color-status-warning);
+  color: var(--roxy-color-status-warning);
   background: transparent;
   font-size: 0.8125rem;
   font-weight: 650;
@@ -1517,7 +1517,7 @@ button {
 }
 
 .composer-queue > button:active {
-  background: color-mix(in oklch, var(--ak-color-status-warning) 12%, transparent);
+  background: color-mix(in oklch, var(--roxy-color-status-warning) 12%, transparent);
 }
 
 .composer-queue > button > svg:last-child {
@@ -1551,14 +1551,14 @@ button {
   align-items: center;
   gap: 12px;
   margin-inline: 16px;
-  border-top: 1px solid color-mix(in oklch, var(--ak-color-status-warning) 18%, var(--ak-color-border-default));
+  border-top: 1px solid color-mix(in oklch, var(--roxy-color-status-warning) 18%, var(--roxy-color-border-default));
   font-size: 0.8125rem;
   line-height: 1.4;
 }
 
 .composer-queue__item span {
   overflow: hidden;
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1585,12 +1585,12 @@ button {
   resize: none;
   border: 0;
   padding: 10px 8px;
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
   background: transparent;
   font-size: 1rem;
   line-height: 1.5;
   outline: none;
-  caret-color: var(--ak-color-action-primary);
+  caret-color: var(--roxy-color-action-primary);
 }
 
 .mobile-a11y-announcement {
@@ -1603,17 +1603,17 @@ button {
 }
 
 .mobile-composer textarea::placeholder {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
 }
 
 .mms-mark {
   display: grid;
   flex: 0 0 auto;
   place-items: center;
-  border: 1px solid var(--ak-color-border-default);
+  border: 1px solid var(--roxy-color-border-default);
   border-radius: 50%;
-  color: var(--ak-color-text-secondary);
-  background: var(--ak-color-bg-surface-low);
+  color: var(--roxy-color-text-secondary);
+  background: var(--roxy-color-bg-surface-low);
   font-size: 0.6875rem;
   font-weight: 720;
 }
@@ -1651,10 +1651,10 @@ button {
   max-width: min(23rem, calc(100vw - 2rem));
   height: min(24rem, calc(var(--mobile-viewport-height) - 15rem));
   padding-bottom: 2.4rem;
-  border-color: var(--ak-color-border-default);
+  border-color: var(--roxy-color-border-default);
   border-radius: 18px;
-  background: var(--ak-color-bg-surface-high);
-  box-shadow: 0 0.75rem 2rem rgb(var(--ak-color-shadow-rgb) / 0.4);
+  background: var(--roxy-color-bg-surface-high);
+  box-shadow: 0 0.75rem 2rem rgb(var(--roxy-color-shadow-rgb) / 0.4);
 }
 
 .mms-capsule__trigger {
@@ -1670,8 +1670,8 @@ button {
   border: 0;
   border-radius: 999px;
   padding: 0.125rem 0.5rem 0.125rem 0.25rem;
-  color: var(--ak-color-text-primary);
-  background: var(--ak-color-bg-surface-high);
+  color: var(--roxy-color-text-primary);
+  background: var(--roxy-color-bg-surface-high);
   transition: background-color 130ms cubic-bezier(0.2, 0, 0, 1), scale 130ms cubic-bezier(0.2, 0, 0, 1);
 }
 
@@ -1688,13 +1688,13 @@ button {
 .mms-capsule__back:focus-visible,
 .mms-capsule__effort-entry:focus-visible,
 .mms-capsule__effort-option:focus-visible {
-  outline: 2px solid var(--ak-color-action-primary);
+  outline: 2px solid var(--roxy-color-action-primary);
   outline-offset: 2px;
 }
 
 .mms-capsule__trigger > svg {
   flex: 0 0 auto;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   transition: transform 180ms cubic-bezier(0.2, 0, 0, 1);
 }
 
@@ -1730,7 +1730,7 @@ button {
 }
 
 .mms-capsule__trigger-copy small {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.59375rem;
 }
 
@@ -1771,7 +1771,7 @@ button {
 }
 
 .mms-capsule__header small {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.625rem;
 }
 
@@ -1798,7 +1798,7 @@ button {
 }
 
 .mms-capsule__back > svg {
-  color: var(--ak-color-action-primary);
+  color: var(--roxy-color-action-primary);
   transform: rotate(180deg);
 }
 
@@ -1830,7 +1830,7 @@ button {
   align-items: center;
   justify-content: space-between;
   padding: 0.4rem 1rem 0.25rem;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.625rem;
 }
 
@@ -1844,7 +1844,7 @@ button {
   height: 1rem;
   place-items: center;
   border-radius: 50%;
-  background: var(--ak-color-bg-surface-low);
+  background: var(--roxy-color-bg-surface-low);
   font-size: 0.5625rem;
 }
 
@@ -1857,7 +1857,7 @@ button {
   border: 0;
   border-radius: 10px;
   padding: 0.3rem 0.9rem;
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
   background: transparent;
   text-align: start;
 }
@@ -1865,13 +1865,13 @@ button {
 .mms-capsule__option:active,
 .mms-capsule__effort-option:active,
 .mms-capsule__effort-entry:active {
-  background: color-mix(in oklch, var(--ak-color-text-primary) 8%, transparent);
+  background: color-mix(in oklch, var(--roxy-color-text-primary) 8%, transparent);
 }
 
 .mms-capsule__option-wrap.is-selected .mms-capsule__option,
 .mms-capsule__effort-option.is-selected {
-  color: var(--ak-color-on-action-container);
-  background: var(--ak-color-action-container);
+  color: var(--roxy-color-on-action-container);
+  background: var(--roxy-color-action-container);
 }
 
 .mms-capsule__copy {
@@ -1890,7 +1890,7 @@ button {
 }
 
 .mms-capsule__copy small {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.625rem;
 }
 
@@ -1904,17 +1904,17 @@ button {
   gap: 0.5rem;
   border: 0;
   padding: 0.3rem 0.9rem;
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
   background: transparent;
   text-align: start;
 }
 
 .mms-capsule__effort-entry {
-  border-top: 1px solid var(--ak-color-border-default);
+  border-top: 1px solid var(--roxy-color-border-default);
 }
 
 .mms-capsule__effort-entry > svg:first-child {
-  color: var(--ak-color-action-primary);
+  color: var(--roxy-color-action-primary);
 }
 
 .mms-capsule__effort-entry > span,
@@ -1924,7 +1924,7 @@ button {
 }
 
 .mms-capsule__effort-entry > svg:last-child {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
 }
 
 .mms-capsule__effort-list {
@@ -1938,8 +1938,8 @@ button {
 }
 
 .command-toggle.active {
-  color: var(--ak-color-on-action-container);
-  background: var(--ak-color-action-container);
+  color: var(--roxy-color-on-action-container);
+  background: var(--roxy-color-action-container);
 }
 
 .composer-action-button.pending {
@@ -1949,14 +1949,14 @@ button {
 .connection-notice,
 .stop-feedback {
   margin: 0 12px 7px;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.8125rem;
   line-height: 1.45;
   text-align: center;
 }
 
 .stop-feedback {
-  color: var(--ak-color-status-trace-text);
+  color: var(--roxy-color-status-trace-text);
   font-weight: 650;
 }
 
@@ -1974,8 +1974,8 @@ button {
   margin: 0 2px 8px;
   border-radius: 18px;
   padding: 12px 14px;
-  color: var(--ak-color-on-action-container);
-  background: var(--ak-color-action-container);
+  color: var(--roxy-color-on-action-container);
+  background: var(--roxy-color-action-container);
 }
 
 .transfer-banner > div:first-child {
@@ -1991,7 +1991,7 @@ button {
 
 .transfer-banner span {
   margin-top: 2px;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.75rem;
   line-height: 1.4;
   text-wrap: pretty;
@@ -2009,7 +2009,7 @@ button {
   height: 4px;
   overflow: hidden;
   border-radius: 2px;
-  background: color-mix(in oklch, var(--ak-color-action-primary) 18%, transparent);
+  background: color-mix(in oklch, var(--roxy-color-action-primary) 18%, transparent);
 }
 
 .transfer-banner__track span {
@@ -2017,7 +2017,7 @@ button {
   height: 100%;
   margin: 0;
   border-radius: inherit;
-  background: var(--ak-color-action-primary);
+  background: var(--roxy-color-action-primary);
   transition-property: inline-size;
   transition-duration: 180ms;
   transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
@@ -2029,8 +2029,8 @@ button {
   border: 0;
   border-radius: 22px;
   padding: 0 18px;
-  color: var(--ak-color-on-action-primary);
-  background: var(--ak-color-action-primary);
+  color: var(--roxy-color-on-action-primary);
+  background: var(--roxy-color-action-primary);
   font-size: 0.875rem;
   font-weight: 650;
   transition-property: scale;
@@ -2050,9 +2050,9 @@ button {
   gap: 10px;
   border-radius: 18px;
   padding: 9px 10px 9px 14px;
-  color: var(--ak-color-text-primary);
-  background: var(--ak-color-bg-surface-low);
-  box-shadow: 0 0 0 1px var(--ak-color-image-outline);
+  color: var(--roxy-color-text-primary);
+  background: var(--roxy-color-bg-surface-low);
+  box-shadow: 0 0 0 1px var(--roxy-color-image-outline);
 }
 
 .draft-attachment__body {
@@ -2070,13 +2070,13 @@ button {
 
 .draft-attachment__status {
   margin-top: 2px;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
 
 .draft-attachment__status.error {
-  color: var(--ak-color-status-error);
+  color: var(--roxy-color-status-error);
 }
 
 .draft-attachment__track {
@@ -2084,14 +2084,14 @@ button {
   margin-top: 5px;
   overflow: hidden;
   border-radius: 2px;
-  background: var(--ak-color-border-default);
+  background: var(--roxy-color-border-default);
 }
 
 .draft-attachment__track span {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: var(--ak-color-action-primary);
+  background: var(--roxy-color-action-primary);
   transition-property: inline-size;
   transition-duration: 180ms;
   transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
@@ -2109,7 +2109,7 @@ button {
   place-items: center;
   border: 0;
   border-radius: 22px;
-  color: var(--ak-color-action-primary);
+  color: var(--roxy-color-action-primary);
   background: transparent;
   font-size: 0.8125rem;
 }
@@ -2119,7 +2119,7 @@ button {
 }
 
 .draft-attachment__actions > button:disabled {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   opacity: 0.56;
 }
 
@@ -2137,12 +2137,12 @@ button {
   align-items: center;
   overflow: hidden;
   border-radius: 16px;
-  background: var(--ak-color-bg-surface-low);
-  box-shadow: inset 0 0 0 1px var(--ak-color-border-default);
+  background: var(--roxy-color-bg-surface-low);
+  box-shadow: inset 0 0 0 1px var(--roxy-color-border-default);
 }
 
 .user-bubble .mobile-message-attachment {
-  background: color-mix(in oklch, var(--ak-color-bg-canvas) 45%, transparent);
+  background: color-mix(in oklch, var(--roxy-color-bg-canvas) 45%, transparent);
 }
 
 .message-attachment-main {
@@ -2153,7 +2153,7 @@ button {
   gap: 10px;
   border: 0;
   padding: 9px 12px;
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
   background: transparent;
   text-align: start;
 }
@@ -2176,7 +2176,7 @@ button {
 .message-attachment-main small,
 .message-attachment-caption small {
   margin-top: 2px;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.75rem;
   line-height: 1.35;
 }
@@ -2200,7 +2200,7 @@ button {
   max-height: 260px;
   margin-inline: auto;
   object-fit: contain;
-  outline: 1px solid var(--ak-color-image-outline);
+  outline: 1px solid var(--roxy-color-image-outline);
   outline-offset: -1px;
 }
 
@@ -2214,7 +2214,7 @@ button {
   border: 0;
   border-radius: 22px;
   margin-right: 4px;
-  color: var(--ak-color-action-primary);
+  color: var(--roxy-color-action-primary);
   background: transparent;
   font-size: 0.8125rem;
   font-weight: 650;
@@ -2229,13 +2229,13 @@ button {
   position: absolute;
   inset: auto 0 0;
   height: 3px;
-  background: var(--ak-color-border-default);
+  background: var(--roxy-color-border-default);
 }
 
 .message-attachment-progress span {
   display: block;
   height: 100%;
-  background: var(--ak-color-action-primary);
+  background: var(--roxy-color-action-primary);
   transition: inline-size 180ms cubic-bezier(0.2, 0, 0, 1);
 }
 
@@ -2248,8 +2248,8 @@ button {
   flex-direction: column;
   overflow: hidden;
   border-radius: 28px 28px 0 0;
-  color: var(--ak-color-text-primary);
-  background: var(--ak-color-bg-surface-low);
+  color: var(--roxy-color-text-primary);
+  background: var(--roxy-color-bg-surface-low);
   box-shadow: 0 -4px 16px rgb(var(--md-sys-color-shadow-rgb) / 0.16);
   visibility: hidden;
   opacity: 0;
@@ -2275,7 +2275,7 @@ button {
   flex: 0 0 auto;
   margin: 10px auto 2px;
   border-radius: 2px;
-  background: var(--ak-color-border-strong);
+  background: var(--roxy-color-border-strong);
 }
 
 .command-sheet__header {
@@ -2294,7 +2294,7 @@ button {
 
 .command-sheet p {
   margin: 4px 0 0;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.8125rem;
   line-height: 1.4;
 }
@@ -2314,7 +2314,7 @@ button {
   border: 0;
   border-radius: 14px;
   padding: 9px 12px;
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
   background: transparent;
   text-align: start;
   transition-property: scale, background-color;
@@ -2323,7 +2323,7 @@ button {
 }
 
 .command-row:active {
-  background: var(--ak-color-bg-surface);
+  background: var(--roxy-color-bg-surface);
 }
 
 .command-row__description {
@@ -2337,7 +2337,7 @@ button {
 .command-row__name {
   max-width: 46%;
   overflow: hidden;
-  color: var(--ak-color-action-primary);
+  color: var(--roxy-color-action-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.8125rem;
   font-weight: 600;
@@ -2366,7 +2366,7 @@ button {
   position: absolute;
   inset: 0;
   border: 0;
-  background: rgb(var(--ak-color-shadow-rgb) / 0.72);
+  background: rgb(var(--roxy-color-shadow-rgb) / 0.72);
   opacity: 0;
   transition-property: opacity;
   transition-duration: 180ms;
@@ -2384,8 +2384,8 @@ button {
   width: min(84vw, 360px);
   flex-direction: column;
   padding: 0;
-  color: var(--ak-color-text-primary);
-  background: var(--ak-color-bg-canvas);
+  color: var(--roxy-color-text-primary);
+  background: var(--roxy-color-bg-canvas);
   transform: translateX(-100%);
   box-shadow: 4px 0 12px rgb(var(--md-sys-color-shadow-rgb) / 0.16);
   transition-property: transform;
@@ -2404,7 +2404,7 @@ button {
   border: 0;
   border-radius: var(--m-shape-full);
   padding: 0;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   background: transparent;
 }
 
@@ -2423,7 +2423,7 @@ button {
 }
 
 .mobile-drawer__close:active {
-  background: var(--ak-color-bg-surface);
+  background: var(--roxy-color-bg-surface);
   scale: 0.96;
 }
 
@@ -2435,7 +2435,7 @@ button {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--ak-color-status-trace);
+  background: var(--roxy-color-status-trace);
 }
 
 .session-unread {
@@ -2446,7 +2446,7 @@ button {
   border-radius: 11px;
   padding-inline: 5px;
   color: white;
-  background: var(--ak-color-action-primary);
+  background: var(--roxy-color-action-primary);
   font-size: 0.6875rem;
   font-variant-numeric: tabular-nums;
 }
@@ -2460,9 +2460,9 @@ button {
 }
 
 @keyframes message-search-target {
-  0% { background: color-mix(in oklch, var(--ak-color-action-primary) 18%, transparent); }
-  70% { background: color-mix(in oklch, var(--ak-color-action-primary) 10%, transparent); }
-  100% { background: color-mix(in oklch, var(--ak-color-action-primary) 10%, transparent); }
+  0% { background: color-mix(in oklch, var(--roxy-color-action-primary) 18%, transparent); }
+  70% { background: color-mix(in oklch, var(--roxy-color-action-primary) 10%, transparent); }
+  100% { background: color-mix(in oklch, var(--roxy-color-action-primary) 10%, transparent); }
 }
 
 @media (prefers-reduced-motion: reduce) {

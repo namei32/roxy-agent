@@ -136,13 +136,13 @@ def test_benchmark_commands_inherit_terminal_task_workdir() -> None:
     gateway_command = _build_gateway_command()
     driver_command = _build_driver_command(900)
 
-    assert _WORKSPACE == "/opt/akashic-workspace"
-    assert _ENDPOINT == "/opt/akashic-workspace/akashic.sock"
+    assert _WORKSPACE == "/opt/roxy-workspace"
+    assert _ENDPOINT == "/opt/roxy-workspace/roxy.sock"
     assert "cd /app" not in gateway_command
     assert "cd /app" not in driver_command
-    assert gateway_command.startswith("mkdir -p /opt/akashic-workspace && env ")
+    assert gateway_command.startswith("mkdir -p /opt/roxy-workspace && env ")
     assert "main.py veda-reset" in gateway_command
-    assert driver_command.startswith("PYTHONPATH=/opt/akashic/src:")
+    assert driver_command.startswith("PYTHONPATH=/opt/roxy/src:")
     assert "--outcome /logs/agent/driver-outcome.json" in driver_command
 
 
@@ -374,7 +374,7 @@ uvx \\
 
     assert len(environment.commands) == 4
     command = environment.commands[0]
-    assert "/opt/akashic-runtime/uv" in command
+    assert "/opt/roxy-runtime/uv" in command
     assert "/root/.local/bin/uvx" in command
     assert "uv tool run" in command
     assert "uv 0.9.5" in command
@@ -598,7 +598,7 @@ def test_candidate_digest_is_persisted_before_verifier(tmp_path: Path) -> None:
         (tmp_path / "agent" / "candidate-identity.json").read_text(encoding="utf-8")
     )
     assert identity == {
-        "schema": "akasic.verifier-candidate.v1",
+        "schema": "roxy.verifier-candidate.v1",
         "root": "/workspace",
         "digest": "sha256:abc123",
     }
@@ -615,7 +615,7 @@ def test_verifier_timeout_replays_same_candidate_without_model_sampling(
     (tmp_path / "agent" / "candidate-identity.json").write_text(
         json.dumps(
             {
-                "schema": "akasic.verifier-candidate.v1",
+                "schema": "roxy.verifier-candidate.v1",
                 "root": "/app",
                 "digest": "sha256:abc123",
             }
@@ -727,10 +727,10 @@ def test_harbor_startup_failure_keeps_original_result(
         missing_project,
     )
 
-    containers, error = _inspect_finished_project(result, "akasic-bench-missing")
+    containers, error = _inspect_finished_project(result, "roxy-bench-missing")
 
     assert containers == []
-    assert error == "未找到 compose project：akasic-bench-missing"
+    assert error == "未找到 compose project：roxy-bench-missing"
 
 
 def test_success_without_compose_project_fails_loud(
@@ -747,7 +747,7 @@ def test_success_without_compose_project_fails_loud(
     )
 
     with pytest.raises(IsolationError, match="未找到 compose project"):
-        _inspect_finished_project(result, "akasic-bench-missing")
+        _inspect_finished_project(result, "roxy-bench-missing")
 
 
 def test_source_bundle_restores_history_and_keeps_worktree_overlay(

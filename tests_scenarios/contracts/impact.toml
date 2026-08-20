@@ -157,11 +157,11 @@ paths = [
   "infra/control/**",
   "main.py",
   "session/**",
-  "skills/develop-akashic-plugin/**",
+  "skills/develop-roxy-plugin/**",
   "tests/control/**",
   "tests/semantic/test_recursive_plugin_self_validation_contract.py",
   "tests/semantic/test_recursive_plugin_self_validation_trajectory.py",
-  "tests/test_builtin_develop_akashic_plugin_skill.py",
+  "tests/test_builtin_develop_roxy_plugin_skill.py",
   "tests/test_plugin_hot_reload.py",
   "tests/test_plugin_runtime_control.py",
   "tests/test_support_modules.py",
@@ -345,8 +345,9 @@ scenarios = ["host_bridge_boot_fencing_contract", "shell_privileged_cleanup_cont
 
 [groups.migrations]
 priority = "p0"
-requirements = ["MIG-001", "MIG-002", "WSP-003", "BAK-001", "TST-002", "TST-005"]
+requirements = ["MIG-001", "MIG-002", "WSP-003", "WSP-005", "BAK-001", "TST-002", "TST-005"]
 paths = [
+  "agent/identity.py",
   "agent/migrations/**",
   "migrations/**",
   "scripts/check_yoyo_migrations.py",

@@ -7,7 +7,7 @@
 | 文件 | 用途 |
 |------|------|
 | `MEMORY.md` | 长期用户档案与稳定事实 |
-| `SELF.md` | Akashic 自我认知 |
+| `SELF.md` | Roxy 自我认知 |
 | `PENDING.md` | consolidation 提取出的待归档候选 |
 
 当前运行时不创建或写入 `HISTORY.md`；`ConsolidationCommitted`

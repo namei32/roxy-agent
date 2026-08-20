@@ -493,7 +493,7 @@ class WebChatChannel:
             inbound_content = build_reply_inbound_text(
                 text,
                 reply_content,
-                sender_label="你" if reply_role == "user" else "Akashic",
+                sender_label="你" if reply_role == "user" else "Roxy",
             )
         await self._add_connection(session_key, websocket)
         chat_id = self._chat_id(session_key)

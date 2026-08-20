@@ -1,4 +1,4 @@
-/// <reference path="../../types/akashic-dashboard.d.ts" />
+/// <reference path="../../types/roxy-dashboard.d.ts" />
 
 interface InspectorItem {
   query_id: string;
@@ -267,7 +267,7 @@ function renderDetail(item: InspectorDetail, closePane?: () => void): string {
   `;
 }
 
-window.AkashicDashboard.registerPlugin({
+window.RoxyDashboard.registerPlugin({
   id: "akasha_inspector",
   label: "Akasha 检索",
   viewLabel: "Akasha 检索",

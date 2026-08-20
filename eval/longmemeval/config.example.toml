@@ -6,7 +6,7 @@
 #
 #   python -m eval.longmemeval.run \
 #     --config eval/longmemeval/config.toml \
-#     --data eval/longmemeval/data/longmemeval_akashic.json \
+#     --data eval/longmemeval/data/longmemeval_roxy.json \
 #     --workspace /tmp/lme_bench \
 #     --limit 1
 #

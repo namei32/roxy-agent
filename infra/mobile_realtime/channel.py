@@ -1620,7 +1620,7 @@ class MobileRealtimeChannel:
             inbound_content = build_reply_inbound_text(
                 frame.payload.text,
                 reply.content,
-                sender_label="你" if reply.role == "user" else "Akashic",
+                sender_label="你" if reply.role == "user" else "Roxy",
             )
         self._runtime.storage.claim_session(
             device_id=device_id,

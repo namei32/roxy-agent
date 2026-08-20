@@ -2281,7 +2281,7 @@ def create_mobile_gateway_app(runtime: MobileGatewayRuntime) -> FastAPI:
             await runtime.stop()
 
     app = FastAPI(
-        title="Akasic Mobile Realtime Gateway",
+        title="Roxy Mobile Realtime Gateway",
         docs_url=None,
         redoc_url=None,
         lifespan=lifespan,

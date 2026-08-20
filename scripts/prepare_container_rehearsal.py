@@ -15,7 +15,7 @@ def _parser() -> argparse.ArgumentParser:
     _ = parser.add_argument("--source-workspace", type=Path, required=True)
     _ = parser.add_argument("--source-config", type=Path, required=True)
     _ = parser.add_argument(
-        "--plugin-home", type=Path, default=Path("~/.akashic-plugin")
+        "--plugin-home", type=Path, default=Path("~/.roxy-plugin")
     )
     _ = parser.add_argument("--target", type=Path, required=True)
     return parser

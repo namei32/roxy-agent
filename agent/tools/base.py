@@ -57,7 +57,7 @@ class ToolExecutionContext:
 
 
 _CURRENT_TOOL_CONTEXT: ContextVar[ToolExecutionContext | None] = ContextVar(
-    "akashic_current_tool_execution_context",
+    "roxy_current_tool_execution_context",
     default=None,
 )
 

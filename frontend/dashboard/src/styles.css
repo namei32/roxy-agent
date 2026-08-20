@@ -10,10 +10,10 @@
   --radius: var(--md-sys-shape-corner-medium);
   --radius-lg: var(--md-sys-shape-corner-large);
   --radius-xl: var(--md-sys-shape-corner-extra-large);
-  --ease-out: var(--ak-sys-motion-standard);
-  --ease-in-out: var(--ak-sys-motion-emphasized);
-  --t-fast: var(--ak-sys-duration-short);
-  --t-base: var(--ak-sys-duration-medium);
+  --ease-out: var(--roxy-sys-motion-standard);
+  --ease-in-out: var(--roxy-sys-motion-emphasized);
+  --t-fast: var(--roxy-sys-duration-short);
+  --t-base: var(--roxy-sys-duration-medium);
   --t-slow: 400ms;
   --display: var(--md-ref-typeface-brand);
   --sans: var(--md-ref-typeface-plain);
@@ -38,6 +38,7 @@ body {
 }
 
 /* Public plugin preset. Plugins may use these classes or the matching SDK components. */
+.roxy-plugin-stack,
 .ak-plugin-stack {
   display: flex;
   min-width: 0;
@@ -46,16 +47,18 @@ body {
   gap: 1rem;
 }
 
+.roxy-plugin-grid,
 .ak-plugin-grid {
   display: grid;
   min-width: 0;
   gap: 1rem;
 }
 
-.ak-plugin-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.ak-plugin-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.ak-plugin-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.roxy-plugin-grid-2, .ak-plugin-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.roxy-plugin-grid-3, .ak-plugin-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.roxy-plugin-grid-4, .ak-plugin-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 
+.roxy-plugin-panel,
 .ak-plugin-panel {
   min-width: 0;
   overflow: hidden;
@@ -64,18 +67,20 @@ body {
   background: var(--md-sys-color-surface-container-low);
 }
 
+.roxy-chip,
 .ak-chip {
   border-radius: var(--md-sys-shape-corner-small);
   font-weight: 500;
 }
 
-.ak-chip--neutral { color: var(--md-sys-color-on-surface); background: var(--md-sys-color-surface-container-high); }
-.ak-chip--muted { color: var(--md-sys-color-on-surface-variant); background: var(--md-sys-color-surface-container); }
-.ak-chip--accent { color: var(--md-sys-color-on-primary-container); background: var(--md-sys-color-primary-container); }
-.ak-chip--success { color: var(--ak-sys-color-on-success-container); background: var(--ak-sys-color-success-container); }
-.ak-chip--warning { color: var(--ak-sys-color-on-warning-container); background: var(--ak-sys-color-warning-container); }
-.ak-chip--danger { color: var(--md-sys-color-on-error-container); background: var(--md-sys-color-error-container); }
+.roxy-chip--neutral, .ak-chip--neutral { color: var(--md-sys-color-on-surface); background: var(--md-sys-color-surface-container-high); }
+.roxy-chip--muted, .ak-chip--muted { color: var(--md-sys-color-on-surface-variant); background: var(--md-sys-color-surface-container); }
+.roxy-chip--accent, .ak-chip--accent { color: var(--md-sys-color-on-primary-container); background: var(--md-sys-color-primary-container); }
+.roxy-chip--success, .ak-chip--success { color: var(--roxy-sys-color-on-success-container); background: var(--roxy-sys-color-success-container); }
+.roxy-chip--warning, .ak-chip--warning { color: var(--roxy-sys-color-on-warning-container); background: var(--roxy-sys-color-warning-container); }
+.roxy-chip--danger, .ak-chip--danger { color: var(--md-sys-color-on-error-container); background: var(--md-sys-color-error-container); }
 
+.roxy-control-button,
 .ak-control-button {
   justify-content: center;
   border: 0;
@@ -83,20 +88,24 @@ body {
   padding-inline: 1.5rem;
   font-family: var(--md-ref-typeface-plain);
   transition-property: background-color, color, box-shadow, scale;
-  transition-duration: var(--ak-sys-duration-short);
-  transition-timing-function: var(--ak-sys-motion-standard);
+  transition-duration: var(--roxy-sys-duration-short);
+  transition-timing-function: var(--roxy-sys-motion-standard);
 }
+.roxy-control-button:active:not(:disabled),
 .ak-control-button:active:not(:disabled) { scale: 0.96; }
-.ak-control-button--sm { min-height: 2rem; padding-inline: 0.75rem; font-size: 0.75rem; }
-.ak-control-button--md { min-height: 2.5rem; font-size: 0.875rem; }
-.ak-control-button--lg { min-height: 3rem; font-size: 0.875rem; }
-.ak-control-button--primary { color: var(--md-sys-color-on-primary); background: var(--md-sys-color-primary); }
-.ak-control-button--secondary { color: var(--md-sys-color-primary); box-shadow: inset 0 0 0 1px var(--md-sys-color-outline); background: transparent; }
-.ak-control-button--ghost { color: var(--md-sys-color-primary); background: transparent; }
-.ak-control-button--danger { color: var(--md-sys-color-on-error-container); background: var(--md-sys-color-error-container); }
+.roxy-control-button--sm, .ak-control-button--sm { min-height: 2rem; padding-inline: 0.75rem; font-size: 0.75rem; }
+.roxy-control-button--md, .ak-control-button--md { min-height: 2.5rem; font-size: 0.875rem; }
+.roxy-control-button--lg, .ak-control-button--lg { min-height: 3rem; font-size: 0.875rem; }
+.roxy-control-button--primary, .ak-control-button--primary { color: var(--md-sys-color-on-primary); background: var(--md-sys-color-primary); }
+.roxy-control-button--secondary, .ak-control-button--secondary { color: var(--md-sys-color-primary); box-shadow: inset 0 0 0 1px var(--md-sys-color-outline); background: transparent; }
+.roxy-control-button--ghost, .ak-control-button--ghost { color: var(--md-sys-color-primary); background: transparent; }
+.roxy-control-button--danger, .ak-control-button--danger { color: var(--md-sys-color-on-error-container); background: var(--md-sys-color-error-container); }
+.roxy-control-button--secondary:hover,
 .ak-control-button--secondary:hover,
+.roxy-control-button--ghost:hover,
 .ak-control-button--ghost:hover { background: color-mix(in oklch, var(--md-sys-color-primary) 8%, transparent); }
 
+.roxy-control-input,
 .ak-control-input {
   min-height: 3.5rem;
   border: 1px solid var(--md-sys-color-outline);
@@ -105,15 +114,17 @@ body {
   color: var(--md-sys-color-on-surface);
   background: transparent;
 }
+.roxy-control-input:focus-visible,
 .ak-control-input:focus-visible {
   border-color: var(--md-sys-color-primary);
   outline: 2px solid var(--md-sys-color-primary);
   outline-offset: -2px;
 }
 
-.ak-material-button--sm { --md-filled-button-container-height: 2rem; --md-outlined-button-container-height: 2rem; --md-text-button-container-height: 2rem; --md-filled-tonal-button-container-height: 2rem; }
-.ak-material-button--lg { --md-filled-button-container-height: 3rem; --md-outlined-button-container-height: 3rem; --md-text-button-container-height: 3rem; --md-filled-tonal-button-container-height: 3rem; }
+.roxy-material-button--sm, .ak-material-button--sm { --md-filled-button-container-height: 2rem; --md-outlined-button-container-height: 2rem; --md-text-button-container-height: 2rem; --md-filled-tonal-button-container-height: 2rem; }
+.roxy-material-button--lg, .ak-material-button--lg { --md-filled-button-container-height: 3rem; --md-outlined-button-container-height: 3rem; --md-text-button-container-height: 3rem; --md-filled-tonal-button-container-height: 3rem; }
 
+.roxy-plugin-toolbar,
 .ak-plugin-toolbar {
   display: flex;
   min-width: 0;
@@ -122,15 +133,15 @@ body {
   gap: 0.75rem;
 }
 
-.ak-plugin-pre-wrap { white-space: pre-wrap; }
+.roxy-plugin-pre-wrap, .ak-plugin-pre-wrap { white-space: pre-wrap; }
 
 ::selection {
-  background: var(--ak-color-action-primary);
-  color: var(--ak-color-on-action-primary);
+  background: var(--roxy-color-action-primary);
+  color: var(--roxy-color-on-action-primary);
 }
 
 :where(button, a, input, textarea, select, [tabindex]):focus-visible {
-  outline: 1px solid var(--ak-color-action-primary);
+  outline: 1px solid var(--roxy-color-action-primary);
   outline-offset: 2px;
 }
 
@@ -463,7 +474,7 @@ body {
   select:focus,
   textarea:focus {
     @apply border-border-strong bg-surface-3;
-    box-shadow: 0 0 0 3px var(--ak-color-action-soft);
+    box-shadow: 0 0 0 3px var(--roxy-color-action-soft);
   }
 
   /* ── Custom select ── */
@@ -493,7 +504,7 @@ body {
 
   .custom-select.open .cs-trigger {
     @apply border-border-strong;
-    box-shadow: 0 0 0 3px var(--ak-color-action-soft);
+    box-shadow: 0 0 0 3px var(--roxy-color-action-soft);
   }
 
   .cs-dropdown {
@@ -564,8 +575,8 @@ body {
 
   .messages-pane {
     @apply flex min-h-0 min-w-0 flex-1 flex-col bg-surface overflow-hidden;
-    border: 1px solid var(--ak-color-border-default);
-    background: var(--ak-color-bg-surface);
+    border: 1px solid var(--roxy-color-border-default);
+    background: var(--roxy-color-bg-surface);
   }
 
   .detail-pane {
@@ -573,8 +584,8 @@ body {
     position: relative;
     width: 0;
     overflow-y: auto;
-    border: 0 solid var(--ak-color-border-default);
-    background: var(--ak-color-bg-surface);
+    border: 0 solid var(--roxy-color-border-default);
+    background: var(--roxy-color-bg-surface);
     opacity: 0;
     pointer-events: none;
     container-name: detail-pane;
@@ -597,9 +608,9 @@ body {
     width: 40px;
     height: 40px;
     border-radius: var(--radius);
-    background: var(--ak-color-bg-surface-low);
-    border: 1px solid var(--ak-color-border-default);
-    color: var(--ak-color-text-muted);
+    background: var(--roxy-color-bg-surface-low);
+    border: 1px solid var(--roxy-color-border-default);
+    color: var(--roxy-color-text-muted);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -608,14 +619,14 @@ body {
     transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
   }
   .detail-close-btn:hover {
-    background: var(--ak-color-bg-surface-high);
-    color: var(--ak-color-text-primary);
+    background: var(--roxy-color-bg-surface-high);
+    color: var(--roxy-color-text-primary);
   }
 
   .plugin-workbench-pane {
     @apply min-h-0 min-w-0 flex-1 overflow-y-auto bg-bg;
-    border: 1px solid var(--ak-color-border-default);
-    background: var(--ak-color-bg-surface);
+    border: 1px solid var(--roxy-color-border-default);
+    background: var(--roxy-color-bg-surface);
   }
 
   .plugin-workbench-root {
@@ -921,7 +932,7 @@ body {
   .memory-status-active,
   .proactive-result-reply {
     @apply text-success;
-    background: rgb(var(--ak-color-status-success-rgb) / 0.15);
+    background: rgb(var(--roxy-color-status-success-rgb) / 0.15);
   }
 
   /* role-system / superseded / skip -> warning */
@@ -929,15 +940,15 @@ body {
   .memory-status-superseded,
   .proactive-result-skip {
     @apply text-warning;
-    background: rgb(var(--ak-color-status-warning-rgb) / 0.15);
+    background: rgb(var(--roxy-color-status-warning-rgb) / 0.15);
   }
 
   /* role-tool / procedure -> warning amber, separated by a hairline ring */
   .role-tool,
   .memory-type-procedure {
     @apply text-warning;
-    background: rgb(var(--ak-color-status-warning-rgb) / 0.12);
-    box-shadow: inset 0 0 0 1px rgb(var(--ak-color-status-warning-rgb) / 0.25);
+    background: rgb(var(--roxy-color-status-warning-rgb) / 0.12);
+    box-shadow: inset 0 0 0 1px rgb(var(--roxy-color-status-warning-rgb) / 0.25);
   }
 
   /* unknown / profile -> neutral subtle */
@@ -953,13 +964,13 @@ body {
   .proactive-result-cooldown,
   .proactive-result-presence {
     @apply text-danger;
-    background: rgb(var(--ak-color-status-error-rgb) / 0.15);
+    background: rgb(var(--roxy-color-status-error-rgb) / 0.15);
   }
 
   /* flow: drift -> success, proactive -> accent */
   .proactive-flow-drift {
     @apply text-success;
-    background: rgb(var(--ak-color-status-success-rgb) / 0.15);
+    background: rgb(var(--roxy-color-status-success-rgb) / 0.15);
   }
 
   .proactive-flow-proactive {
@@ -1005,7 +1016,7 @@ body {
 
   .table-row:focus-visible {
     z-index: 2;
-    outline: 2px solid var(--ak-color-action-primary);
+    outline: 2px solid var(--roxy-color-action-primary);
     outline-offset: -2px;
   }
 
@@ -1045,8 +1056,8 @@ body {
   /* Machined header strip: hairline top highlight, defined bottom edge */
   .table-head {
     @apply sticky top-0 z-[1] min-h-[40px] px-4 font-sans text-[11px] font-medium text-muted;
-    border-bottom: 1px solid var(--ak-color-border-strong);
-    background: var(--ak-color-bg-surface-low);
+    border-bottom: 1px solid var(--roxy-color-border-strong);
+    background: var(--roxy-color-bg-surface-low);
   }
 
   .table-sort-btn {
@@ -1072,7 +1083,7 @@ body {
     margin: 0;
     padding: 0 16px;
     background: transparent;
-    border-bottom: 1px solid var(--ak-color-border-default);
+    border-bottom: 1px solid var(--roxy-color-border-default);
   }
 
   .table-row::before {
@@ -1081,20 +1092,20 @@ body {
   }
 
   .table-row:hover {
-    background: var(--ak-color-bg-surface-high);
+    background: var(--roxy-color-bg-surface-high);
   }
 
   .table-row.active {
-    background: var(--ak-color-action-soft);
+    background: var(--roxy-color-action-soft);
   }
 
   /* selected (batch pick) -> warning wash so it reads apart from active */
   .table-row.selected {
-    background: rgb(var(--ak-color-status-warning-rgb) / 0.12);
+    background: rgb(var(--roxy-color-status-warning-rgb) / 0.12);
   }
 
   .table-row.active:hover {
-    background: rgb(var(--ak-color-action-primary-rgb) / 0.1);
+    background: rgb(var(--roxy-color-action-primary-rgb) / 0.1);
   }
 
   /* ── Table foot ── */
@@ -1206,7 +1217,7 @@ body {
   .btn-ghost.danger:hover,
   .danger-ghost:hover {
     @apply border-danger;
-    background: rgb(var(--ak-color-status-error-rgb) / 0.12);
+    background: rgb(var(--roxy-color-status-error-rgb) / 0.12);
   }
 
   /* ── Pager ── */
@@ -1244,7 +1255,7 @@ body {
   .detail-loading-line,
   .detail-loading-block {
     border-radius: var(--radius);
-    background: var(--ak-color-bg-surface-high);
+    background: var(--roxy-color-bg-surface-high);
   }
 
   .detail-loading-line {
@@ -1268,15 +1279,15 @@ body {
 
   .detail-loading-progress {
     width: 100%;
-    --md-linear-progress-track-color: var(--ak-color-bg-surface-high);
-    --md-linear-progress-active-indicator-color: var(--ak-color-action-primary);
+    --md-linear-progress-track-color: var(--roxy-color-bg-surface-high);
+    --md-linear-progress-active-indicator-color: var(--roxy-color-action-primary);
   }
 
   .detail-toolbar {
     @apply flex items-center justify-between gap-2 border-b border-border;
     margin: -16px -16px 16px -16px;
     padding: 16px;
-    background: var(--ak-color-bg-surface);
+    background: var(--roxy-color-bg-surface);
     position: sticky;
     top: -16px;
     z-index: 50;
@@ -1288,7 +1299,7 @@ body {
 
   .detail-callout.success {
     @apply text-success;
-    background: var(--ak-color-bg-surface-low);
+    background: var(--roxy-color-bg-surface-low);
   }
 
   .detail-block {
@@ -1318,70 +1329,70 @@ body {
     @apply rounded-sm bg-surface-3 px-1 py-px font-mono text-xs;
   }
 
-  .ak-markdown {
+  :is(.roxy-markdown, .ak-markdown) {
     @apply text-[13px] leading-[1.7] text-fg;
     overflow-wrap: anywhere;
   }
 
-  .ak-markdown > :first-child {
+  :is(.roxy-markdown, .ak-markdown) > :first-child {
     margin-top: 0;
   }
 
-  .ak-markdown > :last-child {
+  :is(.roxy-markdown, .ak-markdown) > :last-child {
     margin-bottom: 0;
   }
 
-  .ak-markdown p,
-  .ak-markdown ul,
-  .ak-markdown ol,
-  .ak-markdown blockquote,
-  .ak-markdown pre {
+  :is(.roxy-markdown, .ak-markdown) p,
+  :is(.roxy-markdown, .ak-markdown) ul,
+  :is(.roxy-markdown, .ak-markdown) ol,
+  :is(.roxy-markdown, .ak-markdown) blockquote,
+  :is(.roxy-markdown, .ak-markdown) pre {
     margin: 0.55em 0;
   }
 
-  .ak-markdown h1,
-  .ak-markdown h2,
-  .ak-markdown h3,
-  .ak-markdown h4 {
+  :is(.roxy-markdown, .ak-markdown) h1,
+  :is(.roxy-markdown, .ak-markdown) h2,
+  :is(.roxy-markdown, .ak-markdown) h3,
+  :is(.roxy-markdown, .ak-markdown) h4 {
     @apply mb-2 mt-4 font-semibold leading-snug text-fg;
   }
 
-  .ak-markdown h1 { @apply text-xl; }
-  .ak-markdown h2 { @apply text-lg; }
-  .ak-markdown h3,
-  .ak-markdown h4 { @apply text-[15px]; }
+  :is(.roxy-markdown, .ak-markdown) h1 { @apply text-xl; }
+  :is(.roxy-markdown, .ak-markdown) h2 { @apply text-lg; }
+  :is(.roxy-markdown, .ak-markdown) h3,
+  :is(.roxy-markdown, .ak-markdown) h4 { @apply text-[15px]; }
 
-  .ak-markdown ul,
-  .ak-markdown ol {
+  :is(.roxy-markdown, .ak-markdown) ul,
+  :is(.roxy-markdown, .ak-markdown) ol {
     padding-left: 1.4em;
   }
 
-  .ak-markdown a {
+  :is(.roxy-markdown, .ak-markdown) a {
     @apply text-accent underline underline-offset-2;
   }
 
-  .ak-markdown code {
+  :is(.roxy-markdown, .ak-markdown) code {
     @apply rounded-sm bg-surface-3 px-1 py-px font-mono text-xs;
   }
 
-  .ak-markdown pre {
+  :is(.roxy-markdown, .ak-markdown) pre {
     @apply overflow-auto rounded border border-border bg-surface-3 p-3;
   }
 
-  .ak-markdown blockquote {
+  :is(.roxy-markdown, .ak-markdown) blockquote {
     @apply border-l border-border-strong pl-3 text-muted;
   }
 
-  .ak-markdown table {
+  :is(.roxy-markdown, .ak-markdown) table {
     @apply my-3 w-full border-collapse text-left text-xs;
   }
 
-  .ak-markdown th,
-  .ak-markdown td {
+  :is(.roxy-markdown, .ak-markdown) th,
+  :is(.roxy-markdown, .ak-markdown) td {
     @apply border-b border-border px-2 py-1.5 align-top;
   }
 
-  .ak-markdown th {
+  :is(.roxy-markdown, .ak-markdown) th {
     @apply font-medium text-muted;
   }
 
@@ -1442,7 +1453,7 @@ body {
     @apply ml-auto shrink-0 text-subtle;
   }
 
-  .jt-str.ak-markdown {
+  .jt-str:is(.roxy-markdown, .ak-markdown) {
     font-size: inherit;
     line-height: inherit;
   }
@@ -1472,7 +1483,7 @@ body {
     display: block;
   }
 
-  .jt-long > .ak-markdown {
+  .jt-long > :is(.roxy-markdown, .ak-markdown) {
     font-size: inherit;
   }
 
@@ -1666,7 +1677,7 @@ body {
   .explorer-nav::-webkit-scrollbar-thumb,
   .table-body::-webkit-scrollbar-thumb,
   .modal::-webkit-scrollbar-thumb {
-    background: rgb(var(--ak-color-text-muted-rgb) / 0.3);
+    background: rgb(var(--roxy-color-text-muted-rgb) / 0.3);
     border-radius: 999px;
   }
 
@@ -1675,7 +1686,7 @@ body {
   .explorer-nav::-webkit-scrollbar-thumb:hover,
   .table-body::-webkit-scrollbar-thumb:hover,
   .modal::-webkit-scrollbar-thumb:hover {
-    background: rgb(var(--ak-color-text-muted-rgb) / 0.5);
+    background: rgb(var(--roxy-color-text-muted-rgb) / 0.5);
   }
 
   .detail-pane,
@@ -1685,7 +1696,7 @@ body {
   .table-body,
   .modal {
     scrollbar-width: thin;
-    scrollbar-color: rgb(var(--ak-color-text-muted-rgb) / 0.3) transparent;
+    scrollbar-color: rgb(var(--roxy-color-text-muted-rgb) / 0.3) transparent;
     scroll-behavior: smooth;
     overscroll-behavior: contain;
   }
@@ -1703,7 +1714,7 @@ body {
       inset-inline-end: 12px;
       z-index: 80;
       width: min(460px, calc(100% - 24px));
-      border: 1px solid var(--ak-color-border-default);
+      border: 1px solid var(--roxy-color-border-default);
       border-radius: var(--md-sys-shape-corner-large, 16px);
       box-shadow: 0 2px 8px rgb(0 0 0 / 0.14);
     }

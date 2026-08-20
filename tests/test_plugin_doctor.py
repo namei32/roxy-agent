@@ -47,7 +47,7 @@ def _check(report: dict[str, object], name: str) -> dict[str, str]:
 
 
 def test_plugin_doctor_reads_programmatic_capabilities(tmp_path: Path) -> None:
-    plugins_home = tmp_path / ".akashic-plugin"
+    plugins_home = tmp_path / ".roxy-plugin"
     workspace = tmp_path / "workspace"
     plugin_root = plugins_home / "cache" / "github" / "demo" / "1.0.0"
     skill_dir = plugin_root / "skills" / "demo-skill"
@@ -78,7 +78,7 @@ def test_plugin_doctor_reads_programmatic_capabilities(tmp_path: Path) -> None:
 
 
 def test_plugin_doctor_reads_latest_artifact_candidate(tmp_path: Path) -> None:
-    plugins_home = tmp_path / ".akashic-plugin"
+    plugins_home = tmp_path / ".roxy-plugin"
     workspace = tmp_path / "workspace"
     plugin_base = plugins_home / "cache" / "local" / "demo"
     plugin_root = plugin_base / ".artifacts" / "1.0.0-aaaa"
@@ -197,7 +197,7 @@ def test_plugin_doctor_reports_misdirected_and_stale_stable_projection(
 
 
 def test_plugin_doctor_reports_broken_declaration(tmp_path: Path) -> None:
-    plugins_home = tmp_path / ".akashic-plugin"
+    plugins_home = tmp_path / ".roxy-plugin"
     plugin_root = plugins_home / "cache" / "github" / "demo" / "1.0.0"
     plugin_root.mkdir(parents=True)
     (plugin_root / "plugin.py").write_text("class X: pass\n", encoding="utf-8")
@@ -214,7 +214,7 @@ def test_plugin_doctor_reports_broken_declaration(tmp_path: Path) -> None:
 
 
 def test_plugin_doctor_finds_builtin_plugin(tmp_path: Path) -> None:
-    plugins_home = tmp_path / ".akashic-plugin"
+    plugins_home = tmp_path / ".roxy-plugin"
     upsert_plugin_manifest("default_proactive", enabled=True, plugins_home=plugins_home)
 
     report = run_plugin_doctor(
@@ -230,7 +230,7 @@ def test_plugin_doctor_finds_builtin_plugin(tmp_path: Path) -> None:
 def test_plugin_doctor_skips_inactive_default_memory_drift_links(
     tmp_path: Path,
 ) -> None:
-    plugins_home = tmp_path / ".akashic-plugin"
+    plugins_home = tmp_path / ".roxy-plugin"
     config_path = tmp_path / "config.toml"
     workspace = tmp_path / "workspace"
     _ = init_workspace(

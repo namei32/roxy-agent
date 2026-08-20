@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from akashic_sdk import AsyncAkashic
+from roxy_sdk import AsyncRoxy
 
 TERMINAL_STATUSES = {"completed", "failed", "interrupted", "cancelled"}
 _EMPTY_PROVIDER_REPLY = "模型未返回可用回复，请重试。"
@@ -19,7 +19,7 @@ class TurnDeadlineExceeded(TimeoutError):
 
 
 class AgentTurnFailed(RuntimeError):
-    """Akashic turn 已开始但未形成成功终态。"""
+    """Roxy turn 已开始但未形成成功终态。"""
 
 
 class ProviderRateLimited(AgentTurnFailed):
@@ -163,7 +163,7 @@ def _turn_was_empty_provider_response(turn: dict[str, Any]) -> bool:
     )
 
 
-async def _connect(endpoint: str, deadline_s: float) -> AsyncAkashic:
+async def _connect(endpoint: str, deadline_s: float) -> AsyncRoxy:
     """在总 deadline 内连接当前 trial 独占的 app-server。"""
 
     # 1. 只重试尚未 ready 的本地 socket。
@@ -171,7 +171,7 @@ async def _connect(endpoint: str, deadline_s: float) -> AsyncAkashic:
     last_error = ""
     while time.monotonic() < deadline:
         try:
-            return await AsyncAkashic.connect(endpoint)
+            return await AsyncRoxy.connect(endpoint)
         except (ConnectionError, FileNotFoundError, OSError) as error:
             last_error = f"{type(error).__name__}: {error}"
             await asyncio.sleep(0.2)
@@ -391,7 +391,7 @@ async def run_turn(
         thread = await client.thread_start(
             {
                 "benchmark": "terminal-bench-2.1",
-                "harness": "akasic-v4flash",
+                "harness": "roxy-v4flash",
             }
         )
         handle = await thread.turn(instruction)
@@ -460,7 +460,7 @@ async def run_turn(
         if _turn_was_empty_provider_response(terminal):
             raise ProviderTransientFailure("provider 未返回任何可用响应 delta")
         if status != "completed":
-            raise AgentTurnFailed(f"Akasic turn 未正常完成：{status}")
+            raise AgentTurnFailed(f"Roxy turn 未正常完成：{status}")
         return result
     finally:
         await client.close()

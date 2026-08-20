@@ -106,7 +106,7 @@ class ControlClient:
                 {
                     "protocolVersion": "1.0",
                     "clientInfo": {
-                        "name": "akashic-control-client",
+                        "name": "roxy-control-client",
                         "version": "0.1.0",
                     },
                     "capabilities": {"reasoningEvents": False},

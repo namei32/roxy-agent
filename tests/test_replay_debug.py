@@ -46,7 +46,7 @@ async def test_capture_channel_records_replay_time(tmp_path, monkeypatch) -> Non
         outbox_path,
     )
     initialize(layout, datetime(2026, 3, 4, 5, 6, tzinfo=UTC))
-    monkeypatch.setenv("AKASHIC_REPLAY_CLOCK_FILE", str(clock_path))
+    monkeypatch.setenv("ROXY_REPLAY_CLOCK_FILE", str(clock_path))
     push = MessagePushTool()
     channel = CaptureChannel(outbox_path)
 
@@ -112,7 +112,7 @@ def test_replay_event_requires_timezone() -> None:
 
 def test_debug_plugin_dir_can_be_added_from_env(tmp_path, monkeypatch) -> None:
     extra = tmp_path / "debug-plugins"
-    monkeypatch.setenv("AKASHIC_EXTRA_PLUGIN_DIRS", str(extra))
+    monkeypatch.setenv("ROXY_EXTRA_PLUGIN_DIRS", str(extra))
 
     assert _resolve_plugin_dirs(tmp_path)[-1] == extra
 
@@ -142,8 +142,8 @@ def test_replay_mcp_only_returns_available_unacked_events(tmp_path, monkeypatch)
                 "available_at": available_at,
             },
         )
-    monkeypatch.setenv("AKASHIC_REPLAY_CLOCK_FILE", str(layout.clock_path))
-    monkeypatch.setenv("AKASHIC_REPLAY_EVENTS_FILE", str(layout.events_path))
+    monkeypatch.setenv("ROXY_REPLAY_CLOCK_FILE", str(layout.clock_path))
+    monkeypatch.setenv("ROXY_REPLAY_EVENTS_FILE", str(layout.events_path))
 
     assert [event["event_id"] for event in json.loads(fetch_replay_events())] == [
         "alert-now",
@@ -163,8 +163,8 @@ def test_replay_mcp_only_returns_available_unacked_events(tmp_path, monkeypatch)
 def test_replay_debug_plugin_declares_three_channel_mcp_source(
     tmp_path, monkeypatch
 ) -> None:
-    monkeypatch.setenv("AKASHIC_REPLAY_CLOCK_FILE", str(tmp_path / "clock.json"))
-    monkeypatch.setenv("AKASHIC_REPLAY_EVENTS_FILE", str(tmp_path / "events.jsonl"))
+    monkeypatch.setenv("ROXY_REPLAY_CLOCK_FILE", str(tmp_path / "clock.json"))
+    monkeypatch.setenv("ROXY_REPLAY_EVENTS_FILE", str(tmp_path / "events.jsonl"))
     plugin = ReplayDebugPlugin()
     server = plugin.mcp_servers()[0]
     source = plugin.proactive_sources()[0]
@@ -178,9 +178,9 @@ def test_replay_debug_plugin_declares_three_channel_mcp_source(
 
 
 def test_replay_debug_plugin_is_inert_without_replay_profile(monkeypatch) -> None:
-    monkeypatch.delenv("AKASHIC_REPLAY_CLOCK_FILE", raising=False)
-    monkeypatch.delenv("AKASHIC_REPLAY_EVENTS_FILE", raising=False)
-    monkeypatch.delenv("AKASHIC_REPLAY_OUTBOX_FILE", raising=False)
+    monkeypatch.delenv("ROXY_REPLAY_CLOCK_FILE", raising=False)
+    monkeypatch.delenv("ROXY_REPLAY_EVENTS_FILE", raising=False)
+    monkeypatch.delenv("ROXY_REPLAY_OUTBOX_FILE", raising=False)
     plugin = ReplayDebugPlugin()
 
     assert plugin.mcp_servers() == []
@@ -210,8 +210,8 @@ async def test_replay_fetch_json_round_trips_through_shared_gateway(
                 "published_at": "2026-03-04T04:00:00Z",
             },
         )
-    monkeypatch.setenv("AKASHIC_REPLAY_CLOCK_FILE", str(layout.clock_path))
-    monkeypatch.setenv("AKASHIC_REPLAY_EVENTS_FILE", str(layout.events_path))
+    monkeypatch.setenv("ROXY_REPLAY_CLOCK_FILE", str(layout.clock_path))
+    monkeypatch.setenv("ROXY_REPLAY_EVENTS_FILE", str(layout.events_path))
     registry = ToolRegistry()
     registry.register(
         _ReplayFetchTool(),

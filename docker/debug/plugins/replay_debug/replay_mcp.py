@@ -19,7 +19,7 @@ def fetch_replay_events(offset: int = 0, limit: int = 50) -> str:
 
 def _available_events() -> list[dict[str, Any]]:
     now = _clock_now()
-    events_path = _required_path("AKASHIC_REPLAY_EVENTS_FILE")
+    events_path = _required_path("ROXY_REPLAY_EVENTS_FILE")
     acked = _read_acked(_acks_path(events_path))
     available: list[dict[str, Any]] = []
     for event in _read_events(events_path):
@@ -40,7 +40,7 @@ def acknowledge_replay_events(
     event_ids: list[str], feedback: str | None = None
 ) -> str:
     del feedback
-    events_path = _required_path("AKASHIC_REPLAY_EVENTS_FILE")
+    events_path = _required_path("ROXY_REPLAY_EVENTS_FILE")
     acks_path = _acks_path(events_path)
     clean_ids = list(dict.fromkeys(str(item).strip() for item in event_ids if str(item).strip()))
     if not clean_ids:
@@ -63,7 +63,7 @@ def _required_path(name: str) -> Path:
 
 
 def _clock_now() -> datetime:
-    path = _required_path("AKASHIC_REPLAY_CLOCK_FILE")
+    path = _required_path("ROXY_REPLAY_CLOCK_FILE")
     payload = cast(object, json.loads(path.read_text(encoding="utf-8")))
     if not isinstance(payload, dict):
         raise ValueError(f"invalid replay clock file: {path}")
@@ -72,7 +72,7 @@ def _clock_now() -> datetime:
 
 
 def _acks_path(events_path: Path) -> Path:
-    configured = str(os.environ.get("AKASHIC_REPLAY_ACKS_FILE") or "").strip()
+    configured = str(os.environ.get("ROXY_REPLAY_ACKS_FILE") or "").strip()
     return Path(configured) if configured else events_path.parent / "acks.json"
 
 

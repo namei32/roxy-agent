@@ -597,8 +597,8 @@ async def _run_plugin_conflict(root: Path, checks: list[dict[str, object]]) -> N
         "        return [McpServerSpec(name='docs', command=('python', 'unused.py'))]\n",
         encoding="utf-8",
     )
-    previous = os.environ.get("AKASHIC_EXTRA_PLUGIN_DIRS")
-    os.environ["AKASHIC_EXTRA_PLUGIN_DIRS"] = str(plugins)
+    previous = os.environ.get("ROXY_EXTRA_PLUGIN_DIRS")
+    os.environ["ROXY_EXTRA_PLUGIN_DIRS"] = str(plugins)
     app = bootstrap_app.AppRuntime(_config(), workspace)
     error = ""
     try:
@@ -608,9 +608,9 @@ async def _run_plugin_conflict(root: Path, checks: list[dict[str, object]]) -> N
         error = str(caught)
     finally:
         if previous is None:
-            os.environ.pop("AKASHIC_EXTRA_PLUGIN_DIRS", None)
+            os.environ.pop("ROXY_EXTRA_PLUGIN_DIRS", None)
         else:
-            os.environ["AKASHIC_EXTRA_PLUGIN_DIRS"] = previous
+            os.environ["ROXY_EXTRA_PLUGIN_DIRS"] = previous
     _check(
         checks,
         "plugin-name-conflict-fail-loud",
@@ -724,11 +724,11 @@ def _compose_command(repo: Path, project: str) -> list[str]:
 def _compose_environment(sandbox: Path) -> dict[str, str]:
     env = {
         **os.environ,
-        "AKASHIC_CONTROL_SANDBOX": str(sandbox),
+        "ROXY_CONTROL_SANDBOX": str(sandbox),
         "UID": str(os.getuid()),
         "GID": str(os.getgid()),
     }
-    env.pop("AKASHIC_EXTRA_PLUGIN_DIRS", None)
+    env.pop("ROXY_EXTRA_PLUGIN_DIRS", None)
     return env
 
 
@@ -769,16 +769,16 @@ def _run_host(report_root: Path | None) -> int:
         else repo / "docker/debug/reports/workspace-mcp" / run_id
     )
     report_dir.mkdir(parents=True)
-    sandbox = Path(tempfile.mkdtemp(prefix="akashic-workspace-mcp-gate-", dir="/tmp"))
+    sandbox = Path(tempfile.mkdtemp(prefix="roxy-workspace-mcp-gate-", dir="/tmp"))
     _prepare_host_sandbox(sandbox, repo)
 
     head_before, dirty_before = _git_state(repo)
     source_before = _repository_digest(repo)
     app_before = _sandbox_manifest(sandbox / "app", source_before)
-    project = f"akashic-workspace-mcp-{run_id.lower()}"
+    project = f"roxy-workspace-mcp-{run_id.lower()}"
     compose = _compose_command(repo, project)
     env = _compose_environment(sandbox)
-    image = "akashic-agent-control-gate:latest"
+    image = "roxy-agent-control-gate:latest"
     controller_error = ""
     internal: dict[str, object] = {}
     cleanup_returncode = -1
@@ -810,7 +810,7 @@ def _run_host(report_root: Path | None) -> int:
                 "-T",
                 "--no-deps",
                 "-e",
-                "AKASHIC_WORKSPACE_MCP_DOCKER_GATE=1",
+                "ROXY_WORKSPACE_MCP_DOCKER_GATE=1",
                 "control-probe",
                 "python",
                 "docker/debug/workspace_mcp_reload_probe.py",
@@ -912,13 +912,13 @@ def _run_host(report_root: Path | None) -> int:
 
 
 def _container_isolation() -> dict[str, object]:
-    docker_gate = os.environ.get("AKASHIC_WORKSPACE_MCP_DOCKER_GATE") == "1"
-    extra_present = "AKASHIC_EXTRA_PLUGIN_DIRS" in os.environ
+    docker_gate = os.environ.get("ROXY_WORKSPACE_MCP_DOCKER_GATE") == "1"
+    extra_present = "ROXY_EXTRA_PLUGIN_DIRS" in os.environ
     mountinfo = Path("/proc/self/mountinfo").read_text(encoding="utf-8")
     host_cache_mounts = [
         line
         for line in mountinfo.splitlines()
-        if ".akashic-plugin/cache" in line
+        if ".roxy-plugin/cache" in line
     ]
     home = str(Path.home())
     passed = (

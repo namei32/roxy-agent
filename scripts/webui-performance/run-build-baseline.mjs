@@ -14,7 +14,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
 const baselinePath = resolve(here, "baseline.json");
 const updateBaseline = process.argv.includes("--update-baseline");
-const buildRoot = mkdtempSync(resolve(tmpdir(), "akashic-webui-build-"));
+const buildRoot = mkdtempSync(resolve(tmpdir(), "roxy-webui-build-"));
 
 try {
   const targets = {

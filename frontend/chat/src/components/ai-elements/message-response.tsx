@@ -16,7 +16,7 @@ const baseStreamdownPlugins: PluginConfig = { cjk };
 let codePluginPromise: Promise<NonNullable<PluginConfig["code"]>> | undefined;
 let mathPluginPromise: Promise<NonNullable<PluginConfig["math"]>> | undefined;
 let mermaidPluginPromise: Promise<NonNullable<PluginConfig["mermaid"]>> | undefined;
-const kaomojiPlaceholder = "\uE000AKASHIC_KAOMOJI_";
+const kaomojiPlaceholder = "\uE000ROXY_KAOMOJI_";
 const kaomojiPattern = /^([（(])([^()\n（）]{0,24}[・ω｀´＾＿ー∀▽дД﹏꒳][^()\n（）]{0,24})([）)])/;
 
 export const MessageResponse = memo(
@@ -97,7 +97,7 @@ MessageResponse.displayName = "MessageResponse";
 
 function prepareKaomojiMarkdown(children: MessageResponseProps["children"]) {
   const markdown = typeof children === "string"
-    ? children.replace(/\uE000AKASHIC_KAOMOJI_\d+\uE000/g, "")
+    ? children.replace(/\uE000ROXY_KAOMOJI_\d+\uE000/g, "")
     : "";
   const kaomoji: string[] = [];
   let fenced = false;

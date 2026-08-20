@@ -45,7 +45,7 @@ from docker.debug.programmatic_control_probe import (
 
 READINESS_DEADLINE_S = 30.0
 MODEL_URL = "http://model-gate:8090"
-ENDPOINT = Path("/sandbox/akashic.sock")
+ENDPOINT = Path("/sandbox/roxy.sock")
 WORKSPACE = Path("/sandbox/workspace")
 
 MCP_SERVER_SOURCE = r'''from __future__ import annotations
@@ -674,7 +674,7 @@ def _unsupervised_tool_absence_check(report_dir: Path) -> CheckResult:
         encoding="utf-8"
     )
     config = config.replace(
-        'listen = "/sandbox/akashic.sock"',
+        'listen = "/sandbox/roxy.sock"',
         'listen = "/sandbox/unsupervised.sock"',
     ).replace(
         "[channels.chat]\nenabled = true",
@@ -759,8 +759,8 @@ def _inside(iterations: int, report_dir: Path, *, resource_gate: bool) -> int:
     checks: list[CheckResult] = []
     try:
         isolation = {
-            "extraPluginDirs": os.environ.get("AKASHIC_EXTRA_PLUGIN_DIRS"),
-            "pluginCacheExists": Path("/sandbox/home/.akashic-plugin/cache").exists(),
+            "extraPluginDirs": os.environ.get("ROXY_EXTRA_PLUGIN_DIRS"),
+            "pluginCacheExists": Path("/sandbox/home/.roxy-plugin/cache").exists(),
         }
         checks.append(
             CheckResult(
@@ -886,7 +886,7 @@ def _isolated_config(name: str) -> tuple[Path, Path, Path]:
     )
     endpoint = Path(f"/sandbox/{name}.sock")
     source = source.replace(
-        'listen = "/sandbox/akashic.sock"',
+        'listen = "/sandbox/roxy.sock"',
         f'listen = "{endpoint}"',
     ).replace(
         "[channels.chat]\nenabled = true",
@@ -900,10 +900,10 @@ def _isolated_config(name: str) -> tuple[Path, Path, Path]:
 
 
 def _install_startup_plugin(home: Path, name: str, source: str) -> None:
-    cache = home / f".akashic-plugin/cache/gate/{name}/1.0.0"
+    cache = home / f".roxy-plugin/cache/gate/{name}/1.0.0"
     cache.mkdir(parents=True, exist_ok=True)
     (cache / "plugin.py").write_text(source, encoding="utf-8")
-    manifest = home / ".akashic-plugin/manifest.toml"
+    manifest = home / ".roxy-plugin/manifest.toml"
     manifest.parent.mkdir(parents=True, exist_ok=True)
     manifest.write_text(
         f'[plugins."{name}@gate"]\nenabled = true\n',
@@ -982,7 +982,7 @@ def _failure_mode_checks(report_dir: Path) -> list[CheckResult]:
         env={
             **os.environ,
             "HOME": str(stale_home),
-            "AKASHIC_READINESS_TIMEOUT_S": "15",
+            "ROXY_READINESS_TIMEOUT_S": "15",
         },
         timeout=25,
     )
@@ -1205,7 +1205,7 @@ def _host(iterations: int, *, soak: bool) -> int:
     run_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
     report_dir = repo / "docker/debug/reports/restart" / run_id
     report_dir.mkdir(parents=True)
-    sandbox = Path(tempfile.mkdtemp(prefix="akashic-restart-gate-", dir="/tmp"))
+    sandbox = Path(tempfile.mkdtemp(prefix="roxy-restart-gate-", dir="/tmp"))
     _prepare_host_sandbox(sandbox, repo)
     _configure_restart_gate(sandbox)
     before = _repository_digest(repo)
@@ -1226,12 +1226,12 @@ def _host(iterations: int, *, soak: bool) -> int:
     )
     env = {
         **os.environ,
-        "AKASHIC_CONTROL_SANDBOX": str(sandbox),
+        "ROXY_CONTROL_SANDBOX": str(sandbox),
         "UID": str(os.getuid()),
         "GID": str(os.getgid()),
     }
-    env.pop("AKASHIC_EXTRA_PLUGIN_DIRS", None)
-    project = f"akashic-restart-{run_id.lower()}"
+    env.pop("ROXY_EXTRA_PLUGIN_DIRS", None)
+    project = f"roxy-restart-{run_id.lower()}"
     compose = [
         "docker",
         "compose",
@@ -1257,7 +1257,7 @@ def _host(iterations: int, *, soak: bool) -> int:
             raise GateFailure(f"image build failed: {build.returncode}")
         image_inspect = subprocess.run(
             [
-                "docker", "image", "inspect", "akashic-agent-control-gate:latest",
+                "docker", "image", "inspect", "roxy-agent-control-gate:latest",
                 "--format", '{{json .}}',
             ],
             check=True,
@@ -1266,12 +1266,12 @@ def _host(iterations: int, *, soak: bool) -> int:
         )
         inspected = json.loads(image_inspect.stdout)
         image = {
-            "name": "akashic-agent-control-gate:latest",
+            "name": "roxy-agent-control-gate:latest",
             "id": inspected["Id"],
             "repoDigests": inspected.get("RepoDigests", []),
         }
         up = subprocess.run(
-            [*compose, "up", "-d", "model-gate", "akashic-control-gate"],
+            [*compose, "up", "-d", "model-gate", "roxy-control-gate"],
             cwd=repo,
             env=env,
         )
@@ -1283,7 +1283,7 @@ def _host(iterations: int, *, soak: bool) -> int:
                 "-T",
                 "--user",
                 f"{os.getuid()}:{os.getgid()}",
-                "akashic-control-gate",
+                "roxy-control-gate",
                 "python",
                 "docker/debug/restart_probe.py",
                 "--inside",

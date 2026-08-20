@@ -157,9 +157,7 @@ tag 含义（与 consolidation 阶段一致）：
 {pending}
 """
 
-_SELF_SYSTEM = (
-    "你是 Akashic，只能更新 SELF.md 中现有的三个 section，不得新增其他 section。"
-)
+_SELF_SYSTEM = "你是 Roxy，只能更新 SELF.md 中现有的三个 section，不得新增其他 section。"
 
 _SELF_PROMPT = """\
 你的任务是根据当前 SELF.md 和本轮待合并事实，整理一份新的 SELF.md。
@@ -175,9 +173,9 @@ _SELF_PROMPT = """\
 ## 更新原则
 - 当前 SELF.md 是主文本，优先保留其已有的自我认知、语气和关系定义；不要把待合并事实机械改写进 SELF
 - 待合并事实只是辅助证据，只能在它们确实帮助澄清以下内容时少量吸收：
-  - Akashic 的定位、说话风格、交互边界
-  - Akashic 对当前用户的稳定理解
-  - Akashic 与当前用户关系的长期定义
+  - Roxy 的定位、说话风格、交互边界
+  - Roxy 对当前用户的稳定理解
+  - Roxy 与当前用户关系的长期定义
 - 大多数待合并事实其实与 SELF.md 无关；无关时直接忽略，不要为了“有输入”而强行改写
 - 尤其不要把以下内容写进 SELF.md：
   - 用户资料清单、账号、key、设备参数
@@ -188,7 +186,7 @@ _SELF_PROMPT = """\
 - 保持语气稳定、简洁、有立场；它是自我认知，不是用户档案，也不是工作日志
 
 ## 输出约束
-- 输出必须以 `# Akashic 的自我认知` 开头
+- 输出必须以 `# Roxy 的自我认知` 开头
 - 只能包含标题和 bullet 列表
 - 不要代码块，不要解释，不要额外说明
 
@@ -208,8 +206,9 @@ _MEMORY_REQUIRED_HEADINGS = (
     "## 用户明确要求长期记住的关键内容",
 )
 _MEMORY_OPTIONAL_HEADING = "## 助手操作上下文"
-_SELF_REQUIRED_HEADINGS = (
-    "# Akashic 的自我认知",
+_SELF_CANONICAL_TITLE = "# Roxy 的自我认知"
+_SELF_LEGACY_TITLE = "# Akashic 的自我认知"
+_SELF_SECTION_HEADINGS = (
     "## 人格与形象",
     "## 我对当前用户的理解",
     "## 我们关系的定义",
@@ -250,21 +249,22 @@ def _validate_self_output(content: str) -> None:
     # 1. SELF 只能保留既定标题，禁止模型扩展文档结构
     lines = content.splitlines()
     first_line = lines[0].strip() if lines else ""
+    headings = _markdown_headings(content)
     if (
-        first_line != _SELF_REQUIRED_HEADINGS[0]
-        or _markdown_headings(content) != _SELF_REQUIRED_HEADINGS
+        first_line not in {_SELF_CANONICAL_TITLE, _SELF_LEGACY_TITLE}
+        or headings != (first_line, *_SELF_SECTION_HEADINGS)
         or "```" in content
     ):
         raise MemoryOptimizerOutputError("SELF.md 模型输出格式无效")
 
     # 2. 每个自我认知 section 必须保留至少一条内容
-    positions = [lines.index(heading) for heading in _SELF_REQUIRED_HEADINGS]
+    positions = [lines.index(heading) for heading in _SELF_SECTION_HEADINGS]
     positions.append(len(lines))
-    for index in range(1, len(_SELF_REQUIRED_HEADINGS)):
+    for index, heading in enumerate(_SELF_SECTION_HEADINGS):
         section = lines[positions[index] + 1 : positions[index + 1]]
         if not any(line.lstrip().startswith("- ") for line in section):
             raise MemoryOptimizerOutputError(
-                f"SELF.md 模型输出 section 为空: {_SELF_REQUIRED_HEADINGS[index]}"
+                f"SELF.md 模型输出 section 为空: {heading}"
             )
 
 # ── MemoryOptimizer ───────────────────────────────────────────────

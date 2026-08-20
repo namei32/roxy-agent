@@ -19,8 +19,8 @@
   cursor: pointer;
   appearance: none;
   transition-property: scale, color, background-color, opacity;
-  transition-duration: var(--ak-sys-duration-short);
-  transition-timing-function: var(--ak-sys-motion-standard);
+  transition-duration: var(--roxy-sys-duration-short);
+  transition-timing-function: var(--roxy-sys-motion-standard);
 }
 
 .composer-action-button > svg {

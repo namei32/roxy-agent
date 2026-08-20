@@ -11,7 +11,7 @@ from agent.skills import SkillsLoader
 
 
 REPO_ROOT = Path(__file__).parents[1]
-SKILL_ROOT = REPO_ROOT / "skills" / "akashic-call"
+SKILL_ROOT = REPO_ROOT / "skills" / "roxy-call"
 
 
 class _FrameStream(Protocol):
@@ -22,10 +22,10 @@ class _FrameStream(Protocol):
     def flush(self) -> None: ...
 
 
-def test_akashic_call_is_discoverable_builtin(tmp_path: Path) -> None:
+def test_roxy_call_is_discoverable_builtin(tmp_path: Path) -> None:
     loader = SkillsLoader(tmp_path, builtin_skills_dir=REPO_ROOT / "skills")
 
-    record = loader.load_skill_record("akashic-call")
+    record = loader.load_skill_record("roxy-call")
 
     assert record is not None
     assert record.source == "builtin"
@@ -33,18 +33,18 @@ def test_akashic_call_is_discoverable_builtin(tmp_path: Path) -> None:
     assert record.always is False
     assert record.when_to_use
     for trigger in (
-        "调用 akashic",
-        "程序化调用 Akashic",
-        "从 Codex 调用 Akashic",
+        "调用 Roxy",
+        "程序化调用 Roxy",
+        "从 Codex 调用 Roxy",
         "外部自动化调用",
-        "复用 Akashic session/thread",
+        "复用 Roxy session/thread",
     ):
         assert trigger in record.description
 
 
-def test_akashic_call_content_preserves_runtime_boundaries(tmp_path: Path) -> None:
+def test_roxy_call_content_preserves_runtime_boundaries(tmp_path: Path) -> None:
     loader = SkillsLoader(tmp_path, builtin_skills_dir=REPO_ROOT / "skills")
-    body = loader.load_skill_body("akashic-call")
+    body = loader.load_skill_body("roxy-call")
 
     assert body is not None
     for contract in (
@@ -59,9 +59,9 @@ def test_akashic_call_content_preserves_runtime_boundaries(tmp_path: Path) -> No
         assert contract in body
 
 
-def test_akashic_call_examples_are_complete_and_referenced(tmp_path: Path) -> None:
+def test_roxy_call_examples_are_complete_and_referenced(tmp_path: Path) -> None:
     loader = SkillsLoader(tmp_path, builtin_skills_dir=REPO_ROOT / "skills")
-    body = loader.load_skill_body("akashic-call")
+    body = loader.load_skill_body("roxy-call")
     guide = (SKILL_ROOT / "references" / "external-caller.md").read_text(encoding="utf-8")
     raw_client = SKILL_ROOT / "examples" / "raw_jsonrpc_uds.py"
 
@@ -71,20 +71,33 @@ def test_akashic_call_examples_are_complete_and_referenced(tmp_path: Path) -> No
     assert raw_client.is_file()
     for command in (
         "exec \\",
-        '--thread "$AKASHIC_THREAD_ID"',
-        "Akashic.connect(endpoint)",
-        "thread_resume(os.environ[\"AKASHIC_THREAD_ID\"])",
+        '--thread "$ROXY_THREAD_ID"',
+        "Roxy.connect(endpoint)",
+        "thread_resume(os.environ[\"ROXY_THREAD_ID\"])",
         '"method":"initialize"',
         '"method":"thread/resume"',
         '"method":"turn/start"',
     ):
         assert command in guide
     assert "自动化不得用“最近一次会话”" in guide
-    assert "Akashic 首次 turn 执行失败" in guide
-    assert "Akashic JSONL 中缺少 threadId" in guide
-    assert 'printf \'%s\\n\' "$AKASHIC_THREAD_ID" > "$AKASHIC_THREAD_FILE"' in guide
+    assert "Roxy 首次 turn 执行失败" in guide
+    assert "Roxy JSONL 中缺少 threadId" in guide
+    assert 'printf \'%s\\n\' "$ROXY_THREAD_ID" > "$ROXY_THREAD_FILE"' in guide
     assert "--timeout 600" in guide
     compile(raw_client.read_text(encoding="utf-8"), str(raw_client), "exec")
+
+
+def test_legacy_akashic_call_skill_routes_to_roxy_contract(tmp_path: Path) -> None:
+    loader = SkillsLoader(tmp_path, builtin_skills_dir=REPO_ROOT / "skills")
+
+    record = loader.load_skill_record("akashic-call")
+    body = loader.load_skill_body("akashic-call")
+
+    assert record is not None
+    assert record.available is True
+    assert body is not None
+    assert "../roxy-call/SKILL.md" in body
+    assert "AKASHIC_*" in body
 
 
 def _read_frame(stream: _FrameStream) -> dict[str, object]:
@@ -100,7 +113,7 @@ def _write_frame(stream: _FrameStream, payload: dict[str, object]) -> None:
 
 
 def test_raw_client_buffers_terminal_arriving_before_turn_response(tmp_path: Path) -> None:
-    endpoint = tmp_path / "fake-akashic.sock"
+    endpoint = tmp_path / "fake-roxy.sock"
     ready = threading.Event()
     failures: queue.SimpleQueue[BaseException] = queue.SimpleQueue()
 

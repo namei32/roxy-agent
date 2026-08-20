@@ -211,7 +211,7 @@ class RaceHarness:
         workspace: Path | None = None,
     ) -> None:
         self.timeout = timeout
-        self._tmpdir = TemporaryDirectory(prefix="akashic-race-")
+        self._tmpdir = TemporaryDirectory(prefix="roxy-race-")
         self._config_explicit = config_path is not None
         self.workspace = workspace or Path(self._tmpdir.name) / "workspace"
         self.config_path = config_path or Path(self._tmpdir.name) / "config.toml"
@@ -252,7 +252,7 @@ class RaceHarness:
                         "keep_recent_tokens = 20000",
                         "",
                         "[app_server]",
-                        'listen = "/tmp/akashic-race.sock"',
+                        'listen = "/tmp/roxy-race.sock"',
                         "",
                         "[channels.telegram]",
                         "enabled = false",
@@ -853,20 +853,20 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Docker runtime 竞态探针")
     _ = parser.add_argument(
         "--scenario",
-        default=os.environ.get("AKASHIC_RACE_SCENARIO", "all"),
+        default=os.environ.get("ROXY_RACE_SCENARIO", "all"),
         choices=["all", *SCENARIOS.keys()],
     )
     _ = parser.add_argument(
         "--timeout",
         type=float,
-        default=float(os.environ.get("AKASHIC_RACE_TIMEOUT", "2")),
+        default=float(os.environ.get("ROXY_RACE_TIMEOUT", "2")),
     )
     _ = parser.add_argument(
         "--trace",
         type=Path,
         default=(
-            Path(os.environ["AKASHIC_RACE_TRACE"])
-            if os.environ.get("AKASHIC_RACE_TRACE")
+            Path(os.environ["ROXY_RACE_TRACE"])
+            if os.environ.get("ROXY_RACE_TRACE")
             else None
         ),
     )
@@ -874,8 +874,8 @@ def _parse_args() -> argparse.Namespace:
         "--config",
         type=Path,
         default=(
-            Path(os.environ["AKASHIC_RACE_CONFIG"])
-            if os.environ.get("AKASHIC_RACE_CONFIG")
+            Path(os.environ["ROXY_RACE_CONFIG"])
+            if os.environ.get("ROXY_RACE_CONFIG")
             else None
         ),
     )
@@ -883,8 +883,8 @@ def _parse_args() -> argparse.Namespace:
         "--workspace",
         type=Path,
         default=(
-            Path(os.environ["AKASHIC_RACE_WORKSPACE"])
-            if os.environ.get("AKASHIC_RACE_WORKSPACE")
+            Path(os.environ["ROXY_RACE_WORKSPACE"])
+            if os.environ.get("ROXY_RACE_WORKSPACE")
             else None
         ),
     )

@@ -34,7 +34,7 @@ _VALID_MEMORY = """# 用户长期记忆
 - 新版要求
 """
 
-_VALID_SELF = """# Akashic 的自我认知
+_VALID_SELF = """# Roxy 的自我认知
 
 ## 人格与形象
 - 新版人格
@@ -198,7 +198,7 @@ def test_optimize_updates_self_using_pending_only(tmp_path):
     optimizer._STEP_DELAY_SECONDS = 0
     asyncio.run(optimizer.optimize())
 
-    assert memory.read_self().strip().startswith("# Akashic 的自我认知")
+    assert memory.read_self().strip().startswith("# Roxy 的自我认知")
     assert "新版理解" in memory.read_self()
     assert (memory.memory_dir / "SELF.bak.md").read_text(encoding="utf-8") == (
         "原 SELF"
@@ -235,7 +235,7 @@ def test_optimize_rejects_invalid_self_without_overwriting_file(tmp_path):
     memory.write_long_term("old")
     memory.write_self(_VALID_SELF)
     memory.append_pending("- [preference] 回复保持简洁。")
-    provider = _provider_with_responses(_VALID_MEMORY, "# Akashic 的自我认知")
+    provider = _provider_with_responses(_VALID_MEMORY, "# 无效的自我认知")
     optimizer = MemoryOptimizer(memory, cast(Any, provider), "test-model")
     optimizer._STEP_DELAY_SECONDS = 0
 

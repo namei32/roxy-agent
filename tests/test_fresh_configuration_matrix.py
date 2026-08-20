@@ -105,7 +105,7 @@ def _prepare_fresh_case(
             "default-proactive": proactive_package == "default-proactive",
             "wake-proactive": proactive_package == "wake-proactive",
         },
-        plugins_home=home / ".akashic-plugin",
+        plugins_home=home / ".roxy-plugin",
     )
     return home, config_path, workspace
 
@@ -224,7 +224,7 @@ async def test_fresh_init_runtime_start_stop_matrix(
             with pytest.raises(asyncio.CancelledError):
                 await asyncio.wait_for(task, timeout=5)
 
-    assert not (workspace / "akashic.sock").exists()
+    assert not (workspace / "roxy.sock").exists()
     plugin_name = "default_memory" if memory_name == "default" else memory_name
     config_dir = workspace / "plugin-data" / f"{plugin_name}-builtin"
     assert (config_dir / "config.local.toml").is_file()

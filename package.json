@@ -1,5 +1,5 @@
 {
-  "name": "akashic-agent-frontend",
+  "name": "roxy-agent-frontend",
   "private": true,
   "type": "module",
   "scripts": {

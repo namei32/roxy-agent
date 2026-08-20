@@ -67,11 +67,11 @@ sqlite3 "file:$AK_DIAG_WORKSPACE/runtime/plugin-reloads.sqlite3?mode=ro" \
 优先运行 Skill 自带的只读脚本。默认只输出状态、时间线和内容形状，不打印会话正文、工具参数或 metadata 值：
 
 ```bash
-python skills/develop-akashic-plugin/scripts/inspect-runtime-trace.py \
+python skills/develop-roxy-plugin/scripts/inspect-runtime-trace.py \
   --workspace "$AK_DIAG_WORKSPACE" \
   --turn-id "$AK_DIAG_TURN_ID" \
   --plugin-id "$AK_DIAG_PLUGIN_ID" \
-  > /tmp/akashic-plugin-runtime-trace.json
+  > /tmp/roxy-plugin-runtime-trace.json
 ```
 
 分页读取输出，不把大 JSON 塞进单个 control frame。报告前至少核对：
@@ -84,7 +84,7 @@ python skills/develop-akashic-plugin/scripts/inspect-runtime-trace.py \
 确实需要核对正文或工具参数时，只在可信本机终端显式加 `--include-content`。该输出可能包含 token、私密消息、文件内容和外部 API 参数，不要转存到 CI、公共日志或 agent transcript：
 
 ```bash
-python skills/develop-akashic-plugin/scripts/inspect-runtime-trace.py \
+python skills/develop-roxy-plugin/scripts/inspect-runtime-trace.py \
   --workspace "$AK_DIAG_WORKSPACE" \
   --turn-id "$AK_DIAG_TURN_ID" \
   --plugin-id "$AK_DIAG_PLUGIN_ID" \

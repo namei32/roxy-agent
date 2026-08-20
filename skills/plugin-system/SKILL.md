@@ -1,20 +1,20 @@
 ---
 name: plugin-system
-description: 说明并执行 Akashic 插件安装、加载、配置、插件内 MCP、Skill、生命周期、卸载与 turn 边界更新。
-when_to_use: 用户询问或要求处理 Akashic 插件、marketplace、插件自带 MCP、Skill、插件配置、安装、更新、卸载或排障时。独立本地 MCP server 使用 manage-workspace-mcp。
-metadata: {"akashic": {"always": false}}
+description: 说明并执行 Roxy 插件安装、加载、配置、插件内 MCP、Skill、生命周期、卸载与 turn 边界更新。
+when_to_use: 用户询问或要求处理 Roxy 插件、marketplace、插件自带 MCP、Skill、插件配置、安装、更新、卸载或排障时。独立本地 MCP server 使用 manage-workspace-mcp。
+metadata: {"roxy": {"always": false}}
 ---
 
-# Akashic 插件系统
+# Roxy 插件系统
 
-优先直接完成明确的插件请求。创建或改写源码、加入 Skill/MCP、递归验证候选时，先加载 `develop-akashic-plugin`。用户要管理不属于插件的独立本地 MCP server 时，加载 `manage-workspace-mcp`。
+优先直接完成明确的插件请求。创建或改写源码、加入 Skill/MCP、递归验证候选时，先加载 `develop-roxy-plugin`。用户要管理不属于插件的独立本地 MCP server 时，加载 `manage-workspace-mcp`。
 
 ## 事实来源
 
 ```text
-┌─ ~/.akashic-plugin/manifest.toml
+┌─ ~/.roxy-plugin/manifest.toml
 │  └─ 全局安装清单
-├─ ~/.akashic-plugin/cache/<marketplace>/<plugin>/.artifacts/
+├─ ~/.roxy-plugin/cache/<marketplace>/<plugin>/.artifacts/
 │  └─ 不可变 installed code 与 stable/latest 内部 pointer
 ├─ <workspace>/plugin-data/<plugin>-<marketplace>/
 │  └─ 插件配置和持久状态

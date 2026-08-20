@@ -13,9 +13,9 @@ from typing import Any
 from benchmark.harbor_v4flash.isolation import sha256_file
 from benchmark.harbor_v4flash.git_volume import GIT_MOUNT_PATH
 
-RUNTIME_VOLUME_PREFIX = "akasic-bench-runtime-v1-"
-RUNTIME_VOLUME_SCHEMA = "akasic.benchmark-runtime.v1"
-RUNTIME_MOUNT_PATH = "/opt/akashic-runtime"
+RUNTIME_VOLUME_PREFIX = "roxy-bench-runtime-v1-"
+RUNTIME_VOLUME_SCHEMA = "roxy.benchmark-runtime.v1"
+RUNTIME_MOUNT_PATH = "/opt/roxy-runtime"
 RUNTIME_VENV_PATH = f"{RUNTIME_MOUNT_PATH}/venv"
 RUNTIME_UV_PATH = f"{RUNTIME_MOUNT_PATH}/uv"
 DEFAULT_PYTHON_VERSION = "3.13.7"
@@ -34,7 +34,7 @@ RUNTIME_BUILD_RECIPE = {
     "builder_cache": "ephemeral-tmpfs",
 }
 _VOLUME_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
-_LABEL_PREFIX = "akasic.benchmark.runtime"
+_LABEL_PREFIX = "roxy.benchmark.runtime"
 
 
 class RuntimeVolumeError(RuntimeError):
@@ -507,7 +507,7 @@ def runtime_compose_overlay(
     service_volumes: list[dict[str, object]] = [
         {
             "type": "volume",
-            "source": "akasic_runtime",
+            "source": "roxy_runtime",
             "target": RUNTIME_MOUNT_PATH,
             "read_only": True,
         }
@@ -517,7 +517,7 @@ def runtime_compose_overlay(
         service["image"] = task_image_id
         service["pull_policy"] = "never"
     volumes: dict[str, object] = {
-        "akasic_runtime": {
+        "roxy_runtime": {
             "external": True,
             "name": volume_name,
         }
@@ -526,12 +526,12 @@ def runtime_compose_overlay(
         service_volumes.append(
             {
                 "type": "volume",
-                "source": "akasic_git",
+                "source": "roxy_git",
                 "target": GIT_MOUNT_PATH,
                 "read_only": True,
             }
         )
-        volumes["akasic_git"] = {
+        volumes["roxy_git"] = {
             "external": True,
             "name": git_volume_name,
         }
@@ -575,7 +575,7 @@ def build_runtime_volume(
         > MAX_BUILDER_GLIBC_VERSION
     ):
         raise RuntimeVolumeError("builder glibc 高于兼容上限 2.31")
-    with tempfile.TemporaryDirectory(prefix="akasic-runtime-volume-") as raw_temp:
+    with tempfile.TemporaryDirectory(prefix="roxy-runtime-volume-") as raw_temp:
         temp_root = Path(raw_temp)
         lock_path = temp_root / "resolved.lock"
         _resolve_lock(
@@ -716,7 +716,7 @@ def main() -> int:
         "--uv-binary",
         type=Path,
         default=Path(
-            os.environ.get("AKASIC_BENCH_UV", "/home/huashen/.local/bin/uv")
+            os.environ.get("ROXY_BENCH_UV", "/home/huashen/.local/bin/uv")
         ),
     )
     parser.add_argument("--volume")

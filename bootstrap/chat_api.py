@@ -71,7 +71,7 @@ def create_chat_app(
     model_registry: ModelRegistry | None = None,
 ) -> FastAPI:
     channel.bind_attachment_store(AttachmentStore(workspace / "uploads"))
-    app = FastAPI(title="Akashic Chat API")
+    app = FastAPI(title="Roxy Chat API")
     app.state.workspace = workspace
     app.state.channel = channel
     project_root = Path(__file__).resolve().parent.parent

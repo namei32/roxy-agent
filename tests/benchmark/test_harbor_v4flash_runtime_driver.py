@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from akashic_sdk import SlowConsumerError
+from roxy_sdk import SlowConsumerError
 
 from benchmark.harbor_v4flash.runtime_driver import (
     AgentTurnFailed,

@@ -63,7 +63,7 @@ def test_signal_old_controller_targets_only_main_owner(monkeypatch) -> None:
 
 
 def test_cleanup_old_projects_uses_full_network_id(monkeypatch, tmp_path) -> None:
-    project = "akasic-bench-old__env"
+    project = "roxy-bench-old__env"
     network_id = "a" * 64
     commands = []
     cleaned = []

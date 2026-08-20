@@ -2,9 +2,9 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-package_dir="${AKASHIC_MOBILE_WEB_PACKAGE_DIR:-$repo_root/dist/mobile-web-package}"
-archive_path="$package_dir/akashic-mobile-web.zip"
-digest_path="$package_dir/akashic-mobile-web.zip.sha256"
+package_dir="${ROXY_MOBILE_WEB_PACKAGE_DIR:-${AKASHIC_MOBILE_WEB_PACKAGE_DIR:-$repo_root/dist/mobile-web-package}}"
+archive_path="$package_dir/roxy-mobile-web.zip"
+digest_path="$package_dir/roxy-mobile-web.zip.sha256"
 stage_dir="$(mktemp -d)"
 trap 'rm -rf "$stage_dir"' EXIT
 
@@ -26,7 +26,9 @@ source_commit="$(git rev-parse HEAD)"
 source_tree="$(git rev-parse 'HEAD^{tree}')"
 source_epoch="$(git show -s --format=%ct HEAD)"
 
-AKASHIC_MOBILE_WEB_OUT_DIR="$stage_dir/web" npm run build:mobile-web
+ROXY_MOBILE_WEB_OUT_DIR="$stage_dir/web" \
+AKASHIC_MOBILE_WEB_OUT_DIR="$stage_dir/web" \
+  npm run build:mobile-web
 asset_digest="$(
   cd "$stage_dir/web"
   find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d ' ' -f 1
@@ -36,7 +38,7 @@ SOURCE_REPOSITORY="$source_repository" \
 SOURCE_COMMIT="$source_commit" \
 SOURCE_TREE="$source_tree" \
 ASSET_DIGEST="$asset_digest" \
-node --input-type=module - "$stage_dir/web/akashic-webui-manifest.json" <<'NODE'
+node --input-type=module - "$stage_dir/web/roxy-webui-manifest.json" <<'NODE'
 import { writeFileSync } from "node:fs";
 
 const manifestPath = process.argv[2];

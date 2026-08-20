@@ -45,7 +45,7 @@ from tests.provider_fakes import ProviderContextBudgetStub
 # ── fixtures ──────────────────────────────────────────────────────────────────
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "plugins"
-TEST_PLUGIN_HOME = Path(tempfile.gettempdir()) / f"akasic-plugin-tests-{os.getpid()}"
+TEST_PLUGIN_HOME = Path(tempfile.gettempdir()) / f"roxy-plugin-tests-{os.getpid()}"
 
 
 @pytest.fixture(autouse=True)
@@ -647,7 +647,7 @@ async def test_plugin_manager_scope_cleans_legacy_resources(tmp_path: Path):
     )
     for _ in range(20):
         await manager.load_all()
-        instance = plugin_registry.get_instance("akasic_plugin_plugins_scoped")
+        instance = plugin_registry.get_instance("roxy_plugin_plugins_scoped")
         assert instance is not None
         task = instance.task
         assert bus.handler_count() == 0
@@ -694,7 +694,7 @@ async def test_plugin_manager_consumes_scope_failures_after_terminate_cancellati
         installed_cache_root=tmp_path / "cache",
     )
     await manager.load_all()
-    module = sys.modules["akasic_plugin_plugins_cancelled_close"]
+    module = sys.modules["roxy_plugin_plugins_cancelled_close"]
     closing = asyncio.create_task(manager.terminate_all())
     await module.entered.wait()
     closing.cancel()
@@ -790,7 +790,7 @@ async def test_plugin_prepare_cancellation_rolls_back(tmp_path: Path):
         module_names = [
             name
             for name in sys.modules
-            if name.startswith("akasic_plugin_plugins_cancelled__g")
+            if name.startswith("roxy_plugin_plugins_cancelled__g")
         ]
     module = sys.modules[module_names[0]]
     await module.started.wait()
@@ -805,7 +805,7 @@ async def test_plugin_prepare_cancellation_rolls_back(tmp_path: Path):
         await loading
 
     assert manager.loaded_count == 0
-    assert plugin_registry.get_instance("akasic_plugin_plugins_cancelled") is None
+    assert plugin_registry.get_instance("roxy_plugin_plugins_cancelled") is None
     assert module.tasks[0].done()
     assert bus.handler_count() == 0
 
@@ -926,7 +926,7 @@ async def test_after_step_tap_hook_fires():
     import sys
     hello_mod = next(
         m for k, m in sys.modules.items()
-        if k.startswith("akasic_plugin_") and k.endswith("_hello")
+        if k.startswith("roxy_plugin_") and k.endswith("_hello")
     )
     hello_mod.after_step_calls.clear()
 
@@ -1062,7 +1062,7 @@ async def test_active_plugins_exposes_programmatic_metadata():
         active = mgr.active_plugins()
         assert len(active) == 1
         assert active[0].plugin_id == "manifested"
-        assert active[0].plugin_dir == Path(tmp) / "manifested"
+        assert active[0].plugin_dir == (Path(tmp) / "manifested").resolve()
         assert active[0].manifest["name"] == "manifested"
 
 
@@ -1112,7 +1112,7 @@ async def test_loads_installed_programmatic_plugin():
         active = mgr.active_plugins()
         assert len(active) == 1
         assert active[0].plugin_id == "feed@lab"
-        assert active[0].skill_roots == (plugin_root / "skills",)
+        assert active[0].skill_roots == ((plugin_root / "skills").resolve(),)
         assert "feed" in active[0].mcp_servers
         assert mgr.loaded_count == 1
         await mgr.terminate_all()
@@ -1150,7 +1150,7 @@ async def test_sync_manifest_covers_builtin_and_installed_plugins(tmp_path: Path
     )
     await mgr.load_all()
 
-    manifest_path = mgr.sync_manifest(plugins_home=tmp_path / ".akashic-plugin")
+    manifest_path = mgr.sync_manifest(plugins_home=tmp_path / ".roxy-plugin")
     import tomllib
     manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
     assert set(manifest["plugins"]) == {"feed@lab", "hello"}
@@ -1167,7 +1167,7 @@ async def test_active_plugins_excludes_inactive_memory_plugin(
         event_bus=bus,
         workspace=tmp_path,
         memory_engine=SimpleNamespace(describe=lambda: SimpleNamespace(name="akasha")),
-        installed_cache_root=tmp_path / ".akashic-plugin" / "cache",
+        installed_cache_root=tmp_path / ".roxy-plugin" / "cache",
     )
     await mgr.load_all()
 

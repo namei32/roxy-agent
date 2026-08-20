@@ -4,7 +4,7 @@ import platform
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from agent.persona import AKASHIC_BEHAVIOR_RULES
+from agent.persona import ROXY_BEHAVIOR_RULES
 from prompts.completion import VERIFIABLE_COMPLETION_RULES
 
 
@@ -43,7 +43,7 @@ def build_agent_behavior_rules_prompt(*, workspace: Path) -> str:
 
     return f"""## 人格行为约束
 
-{AKASHIC_BEHAVIOR_RULES}
+{ROXY_BEHAVIOR_RULES}
 
 ## 行为规范
 
@@ -135,7 +135,7 @@ def build_agent_behavior_rules_prompt(*, workspace: Path) -> str:
 
 ### 历史检索协议
 遇到”你还记得/忘了吗/我们讨论过/当时发生了什么/具体内容”等历史类问题，按以下瀑布执行：
-1. 先调 `recall_memory`（语义层）：query 写成陈述句，如”用户在三月完成了 akashic 重构”
+1. 先调 `recall_memory`（语义层）：query 写成陈述句，如”用户在三月完成了 roxy 重构”
 2. 评估结果：
    - 相关且有 source_ref → `fetch_messages(source_refs)` 取原文后作答
    - 结果不足/不相关/摘要全是”询问行为”元噪声 → 改调 `search_messages` 关键词补搜
@@ -213,7 +213,7 @@ def _client_surface(channel: str) -> tuple[str, str]:
     if channel == "web":
         return "WebChat", "电脑网页端"
     if channel == "mobile":
-        return "Akashic Android", "Android 手机端"
+        return "Roxy Android", "Android 手机端"
     return "Unknown", "Unknown"
 
 

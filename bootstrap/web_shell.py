@@ -166,7 +166,7 @@ async def _runtime_ready(socket_path: Path, health_path: str) -> bool:
     try:
         async with httpx.AsyncClient(
             transport=transport,
-            base_url="http://akashic-runtime",
+            base_url="http://roxy-runtime",
             timeout=0.5,
         ) as client:
             response = await client.get(health_path)
@@ -188,7 +188,7 @@ async def _proxy_http(
         return _runtime_unavailable()
     client = httpx.AsyncClient(
         transport=httpx.AsyncHTTPTransport(uds=str(socket_path)),
-        base_url="http://akashic-runtime",
+        base_url="http://roxy-runtime",
         timeout=httpx.Timeout(30.0, read=None),
     )
     query = request.url.query
@@ -254,7 +254,7 @@ async def _proxy_websocket(
         )
         async with websockets.unix_connect(
             str(socket_path),
-            uri=f"ws://akashic-runtime{target_path}",
+            uri=f"ws://roxy-runtime{target_path}",
             origin=origin,
             max_size=None,
         ) as upstream:

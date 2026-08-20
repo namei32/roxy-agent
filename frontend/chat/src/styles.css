@@ -5,21 +5,21 @@
 @tailwind utilities;
 
 :root {
-  --pairing-surface: var(--ak-color-bg-canvas);
-  --pairing-surface-container-low: var(--ak-color-bg-surface-low);
-  --pairing-surface-container: var(--ak-color-bg-surface);
-  --pairing-surface-container-high: var(--ak-color-bg-surface-high);
+  --pairing-surface: var(--roxy-color-bg-canvas);
+  --pairing-surface-container-low: var(--roxy-color-bg-surface-low);
+  --pairing-surface-container: var(--roxy-color-bg-surface);
+  --pairing-surface-container-high: var(--roxy-color-bg-surface-high);
   --pairing-on-surface: var(--md-sys-color-on-surface);
   --pairing-on-surface-variant: var(--md-sys-color-on-surface-variant);
   --pairing-on-surface-muted: var(--md-sys-color-on-surface-variant);
-  --pairing-primary: var(--ak-color-action-primary);
-  --pairing-primary-hover: var(--ak-color-action-hover);
-  --pairing-primary-container: var(--ak-color-action-container);
-  --pairing-primary-container-high: color-mix(in oklch, var(--ak-color-action-primary) 18%, var(--ak-color-action-container));
-  --pairing-on-primary: var(--ak-color-on-action-primary);
-  --pairing-on-primary-container: var(--ak-color-on-action-container);
-  --pairing-error-container: var(--ak-color-status-error-container);
-  --pairing-on-error-container: var(--ak-color-status-error);
+  --pairing-primary: var(--roxy-color-action-primary);
+  --pairing-primary-hover: var(--roxy-color-action-hover);
+  --pairing-primary-container: var(--roxy-color-action-container);
+  --pairing-primary-container-high: color-mix(in oklch, var(--roxy-color-action-primary) 18%, var(--roxy-color-action-container));
+  --pairing-on-primary: var(--roxy-color-on-action-primary);
+  --pairing-on-primary-container: var(--roxy-color-on-action-container);
+  --pairing-error-container: var(--roxy-color-status-error-container);
+  --pairing-on-error-container: var(--roxy-color-status-error);
   --pairing-outline: oklch(0 0 0 / 0.06);
   --pairing-outline-strong: oklch(0 0 0 / 0.1);
   --pairing-qr-surface: oklch(1 0 0);
@@ -38,11 +38,11 @@ body,
   width: 100%;
   height: 100%;
   margin: 0;
-  background: var(--ak-color-bg-canvas);
+  background: var(--roxy-color-bg-canvas);
 }
 
 body {
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
 }
 
 button,
@@ -56,8 +56,8 @@ input {
   width: 100%;
   min-height: 100%;
   place-items: center;
-  color: var(--ak-color-text-secondary);
-  background: var(--ak-color-bg-canvas);
+  color: var(--roxy-color-text-secondary);
+  background: var(--roxy-color-bg-canvas);
   font-size: 0.875rem;
 }
 
@@ -100,7 +100,7 @@ input {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  background: var(--ak-color-bg-canvas);
+  background: var(--roxy-color-bg-canvas);
 }
 
 .chat-sidebar {
@@ -131,7 +131,7 @@ input {
   width: 40px;
   height: 40px;
   flex: 0 0 40px;
-  background: var(--ak-color-action-primary);
+  background: var(--roxy-color-action-primary);
   -webkit-mask-position: center;
   mask-position: center;
   -webkit-mask-repeat: no-repeat;
@@ -154,7 +154,7 @@ input {
 
 .chat-sidebar-brand small {
   margin-top: 2px;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.75rem;
 }
 
@@ -274,8 +274,8 @@ input {
   background: transparent;
   cursor: pointer;
   transition-property: background-color, color;
-  transition-duration: var(--ak-sys-duration-short);
-  transition-timing-function: var(--ak-sys-motion-standard);
+  transition-duration: var(--roxy-sys-duration-short);
+  transition-timing-function: var(--roxy-sys-motion-standard);
 }
 
 .icon-button:hover,
@@ -290,7 +290,7 @@ input {
 }
 
 .session-button:hover {
-  background: var(--ak-color-bg-surface);
+  background: var(--roxy-color-bg-surface);
 }
 
 .session-section {
@@ -310,7 +310,7 @@ input {
 
 .session-title {
   padding: 0;
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
   font-size: 15px;
   font-weight: 700;
 }
@@ -329,7 +329,7 @@ input {
   border: 0;
   border-radius: 10px;
   padding: 8px 10px;
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
   background: transparent;
   font-size: 14px;
   line-height: 1.35;
@@ -338,8 +338,8 @@ input {
 }
 
 .session-button.active {
-  color: var(--ak-color-on-action-primary);
-  background: var(--ak-color-bg-surface);
+  color: var(--roxy-color-on-action-primary);
+  background: var(--roxy-color-bg-surface);
 }
 
 .chat-main {
@@ -458,7 +458,7 @@ input {
 .model-connection-state p {
   max-width: 460px;
   margin: 0;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   line-height: 1.7;
 }
 
@@ -474,7 +474,7 @@ input {
   font-size: var(--md-sys-typescale-label-large-size);
   font-weight: var(--md-sys-typescale-label-large-weight);
   text-decoration: none;
-  transition: box-shadow var(--ak-sys-duration-short) var(--ak-sys-motion-standard);
+  transition: box-shadow var(--roxy-sys-duration-short) var(--roxy-sys-motion-standard);
 }
 
 .model-connection-state a:hover {
@@ -526,7 +526,7 @@ input {
   padding: 8px 10px;
   background: var(--md-sys-color-surface-container-high);
   box-shadow: 0 1px 2px rgb(var(--md-sys-color-shadow-rgb) / 0.1);
-  transition: box-shadow var(--ak-sys-duration-short) var(--ak-sys-motion-standard);
+  transition: box-shadow var(--roxy-sys-duration-short) var(--roxy-sys-motion-standard);
 }
 
 .composer:focus-within {
@@ -578,9 +578,9 @@ form.composer:focus-within [data-slot="input-group"] {
 .composer-attachments [data-radix-collection-item],
 .composer-attachments .group {
   max-width: min(100%, 260px);
-  border-color: var(--ak-color-border-strong);
-  background: var(--ak-color-bg-surface);
-  color: var(--ak-color-text-primary);
+  border-color: var(--roxy-color-border-strong);
+  background: var(--roxy-color-bg-surface);
+  color: var(--roxy-color-text-primary);
 }
 
 .attachment-preview-slot {
@@ -597,13 +597,13 @@ form.composer:focus-within [data-slot="input-group"] {
 }
 
 .attachment-remove-inline {
-  background: var(--ak-color-on-action-primary);
-  color: var(--ak-color-bg-surface-low);
+  background: var(--roxy-color-on-action-primary);
+  color: var(--roxy-color-bg-surface-low);
 }
 
 .attachment-hover {
   max-width: 320px;
-  color: var(--ak-color-text-primary);
+  color: var(--roxy-color-text-primary);
 }
 
 .attachment-hover-image {
@@ -620,7 +620,7 @@ form.composer:focus-within [data-slot="input-group"] {
   height: 96px;
   place-items: center;
   border-radius: 8px;
-  background: var(--ak-color-bg-surface);
+  background: var(--roxy-color-bg-surface);
 }
 
 .attachment-hover-title {
@@ -634,7 +634,7 @@ form.composer:focus-within [data-slot="input-group"] {
 
 .attachment-hover-type {
   margin-top: 4px;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
 }
@@ -655,7 +655,7 @@ form.composer:focus-within [data-slot="input-group"] {
   line-height: 1.4;
 }
 
-.error-line .ak-material-button {
+.error-line :is(.roxy-material-button, .ak-material-button) {
   --md-filled-tonal-button-container-color: var(--md-sys-color-error-container);
   --md-filled-tonal-button-label-text-color: var(--md-sys-color-on-error-container);
   --md-filled-tonal-button-hover-label-text-color: var(--md-sys-color-on-error-container);
@@ -1150,7 +1150,7 @@ form.composer:focus-within [data-slot="input-group"] {
   transform-origin: bottom left;
   transition-property: height, border-color, border-radius, background-color, box-shadow;
   transition-duration: 260ms;
-  transition-timing-function: var(--ak-sys-motion-standard);
+  transition-timing-function: var(--roxy-sys-motion-standard);
 }
 
 .model-capsule.is-open .model-capsule__shell {
@@ -1178,8 +1178,8 @@ form.composer:focus-within [data-slot="input-group"] {
   background: var(--md-sys-color-surface-container-high);
   cursor: pointer;
   transition-property: background-color, color, scale;
-  transition-duration: var(--ak-sys-duration-short);
-  transition-timing-function: var(--ak-sys-motion-standard);
+  transition-duration: var(--roxy-sys-duration-short);
+  transition-timing-function: var(--roxy-sys-motion-standard);
 }
 
 .model-capsule__trigger:hover,
@@ -1226,7 +1226,7 @@ form.composer:focus-within [data-slot="input-group"] {
   flex: 0 0 auto;
   margin-inline-start: auto;
   color: var(--md-sys-color-on-surface-variant);
-  transition: transform 180ms var(--ak-sys-motion-standard);
+  transition: transform 180ms var(--roxy-sys-motion-standard);
 }
 
 .model-capsule.is-open .model-capsule__trigger > svg { transform: rotate(180deg); }
@@ -1332,7 +1332,7 @@ form.composer:focus-within [data-slot="input-group"] {
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 0 0.5rem 0.5rem;
-  scrollbar-color: var(--ak-color-border-strong) transparent;
+  scrollbar-color: var(--roxy-color-border-strong) transparent;
   scrollbar-width: thin;
 }
 .model-capsule__source + .model-capsule__source { margin-block-start: 0.75rem; }
@@ -1386,7 +1386,7 @@ form.composer:focus-within [data-slot="input-group"] {
   background: transparent;
   cursor: pointer;
   transition-property: background-color, scale;
-  transition-duration: var(--ak-sys-duration-short);
+  transition-duration: var(--roxy-sys-duration-short);
   transition-timing-function: ease-out;
 }
 .model-capsule__option:hover {
@@ -1416,7 +1416,7 @@ form.composer:focus-within [data-slot="input-group"] {
   background: transparent;
   cursor: pointer;
   transition-property: background-color, scale;
-  transition-duration: var(--ak-sys-duration-short);
+  transition-duration: var(--roxy-sys-duration-short);
   transition-timing-function: ease-out;
 }
 .model-capsule__effort-entry:hover {
@@ -1440,7 +1440,7 @@ form.composer:focus-within [data-slot="input-group"] {
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 0 0.5rem 0.5rem;
-  scrollbar-color: var(--ak-color-border-strong) transparent;
+  scrollbar-color: var(--roxy-color-border-strong) transparent;
   scrollbar-width: thin;
 }
 .model-capsule__effort-model {
@@ -1468,7 +1468,7 @@ form.composer:focus-within [data-slot="input-group"] {
   background: transparent;
   cursor: pointer;
   transition-property: background-color, scale;
-  transition-duration: var(--ak-sys-duration-short);
+  transition-duration: var(--roxy-sys-duration-short);
   transition-timing-function: ease-out;
 }
 .model-capsule__effort-option > span { display: grid; gap: 0.12rem; text-align: start; }

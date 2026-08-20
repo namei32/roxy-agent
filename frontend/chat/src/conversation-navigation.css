@@ -6,8 +6,8 @@
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
-  color: var(--ak-color-text-primary);
-  background: var(--ak-color-bg-canvas);
+  color: var(--roxy-color-text-primary);
+  background: var(--roxy-color-bg-canvas);
   outline: none;
 }
 
@@ -22,7 +22,7 @@
 
 .conversation-destination small,
 .conversation-session small {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
 }
 
 .conversation-destinations {
@@ -73,7 +73,7 @@
 .conversation-destination:focus-visible,
 .conversation-session:focus-visible,
 .conversation-navigation__action:focus-visible {
-  outline: 2px solid var(--ak-color-action-primary);
+  outline: 2px solid var(--roxy-color-action-primary);
   outline-offset: -2px;
 }
 
@@ -91,8 +91,8 @@
   gap: 11px;
   border-radius: 22px;
   padding: 10px 14px;
-  color: var(--ak-color-on-action-primary);
-  background: var(--ak-color-action-primary);
+  color: var(--roxy-color-on-action-primary);
+  background: var(--roxy-color-action-primary);
   box-shadow: none;
 }
 
@@ -137,7 +137,7 @@
 }
 
 .conversation-destination__badge {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
@@ -151,7 +151,7 @@
 }
 
 .conversation-navigation__heading {
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.875rem;
   font-weight: 650;
   line-height: 1.1;
@@ -218,7 +218,7 @@
 
 .conversation-session.unavailable .conversation-session__copy small,
 .conversation-session.unavailable .conversation-session__state {
-  color: var(--ak-color-status-warning);
+  color: var(--roxy-color-status-warning);
 }
 
 .conversation-session__copy,
@@ -249,7 +249,7 @@
 
 .conversation-session__title time {
   flex: 0 0 auto;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
   line-height: 1.35;

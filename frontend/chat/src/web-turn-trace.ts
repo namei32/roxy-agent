@@ -33,7 +33,7 @@ interface WebTurnTraceEntry {
 export type WebTurnTraceEmit = (record: WebTurnTraceRecord) => void;
 
 export const webTurnTraceEmit: WebTurnTraceEmit = (record) => {
-  console.log(`[akashic-trace] ${JSON.stringify(record)}`);
+  console.log(`[roxy-trace] ${JSON.stringify(record)}`);
 };
 
 /** 将一个 turn 的 transport、projection 与 React 帧里程碑关联起来。 */
@@ -138,6 +138,10 @@ export const webTurnTrace = new WebTurnTraceRegistry();
 
 declare global {
   interface Window {
+    __roxyWebTrace?: {
+      snapshot: () => readonly WebTurnTraceRecord[];
+      reset: () => void;
+    };
     __akashicWebTrace?: {
       snapshot: () => readonly WebTurnTraceRecord[];
       reset: () => void;
@@ -145,12 +149,15 @@ declare global {
   }
 }
 
-if (
-  typeof window !== "undefined"
-  && new URLSearchParams(window.location.search).get("akashic_perf") === "1"
-) {
-  window.__akashicWebTrace = {
+if (typeof window !== "undefined") {
+  const params = new URLSearchParams(window.location.search);
+  const enabled = params.get("roxy_perf") === "1" || params.get("akashic_perf") === "1";
+  const trace = {
     snapshot: () => webTurnTrace.snapshot(),
     reset: () => webTurnTrace.reset(),
   };
+  if (enabled) {
+    window.__roxyWebTrace = trace;
+    window.__akashicWebTrace = trace;
+  }
 }

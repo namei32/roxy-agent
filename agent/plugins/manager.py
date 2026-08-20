@@ -858,7 +858,7 @@ class PluginManager:
                     "name": name,
                     "plugin_root": str(source.plugin_root),
                     "module_path": str(module_path) if module_path is not None else "",
-                    "import_path": f"akasic_plugin_{import_source}_{import_suffix}",
+                    "import_path": f"roxy_plugin_{import_source}_{import_suffix}",
                     "marketplace": source.marketplace,
                     "source_type": source.source_type,
                     "package_id": package_id,

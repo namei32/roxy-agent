@@ -8,9 +8,13 @@ import { startDesktopFixtureServer } from "./desktop-fixture-server.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
-const buildRoot = mkdtempSync(resolve(tmpdir(), "akashic-webui-t3-"));
+const buildRoot = mkdtempSync(resolve(tmpdir(), "roxy-webui-t3-"));
 const output = resolve(buildRoot, "desktop");
-const port = Number(process.env.AKASHIC_WEBUI_FIXTURE_PORT || "4173");
+const port = Number(
+  process.env.ROXY_WEBUI_FIXTURE_PORT
+  ?? process.env.AKASHIC_WEBUI_FIXTURE_PORT
+  ?? "4173",
+);
 let fixture;
 
 try {

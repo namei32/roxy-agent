@@ -1,4 +1,4 @@
-/// <reference path="../../types/akashic-dashboard.d.ts" />
+/// <reference path="../../types/roxy-dashboard.d.ts" />
 
 interface MemoryRow {
   id: string;
@@ -469,7 +469,7 @@ async function dmemFetchPage(opts: FetchPageOpts): Promise<FetchPageResult> {
 
 function dmemRenderDeleteBtn(_value: unknown, item: Record<string, unknown>): string {
   const id = escapeHtml(String(item.id ?? ""));
-  return `<button class="icon-btn row-delete-btn" type="button" onclick="event.stopPropagation();void(async()=>{try{await api('/api/dashboard/memories/batch-delete',{method:'POST',body:JSON.stringify({ids:['${id}']})});window.dispatchEvent(new CustomEvent('akashic-dashboard-refresh'))}catch(e){alert(e.message||String(e))}})()" title="删除此条">✕</button>`;
+  return `<button class="icon-btn row-delete-btn" type="button" onclick="event.stopPropagation();void(async()=>{try{await api('/api/dashboard/memories/batch-delete',{method:'POST',body:JSON.stringify({ids:['${id}']})});window.dispatchEvent(new CustomEvent('roxy-dashboard-refresh'))}catch(e){alert(e.message||String(e))}})()" title="删除此条">✕</button>`;
 }
 
 async function dmemGetCount(): Promise<number | null> {
@@ -483,7 +483,7 @@ async function dmemGetCount(): Promise<number | null> {
   }
 }
 
-window.AkashicDashboard.registerPlugin({
+window.RoxyDashboard.registerPlugin({
   id: "default_memory",
   label: "Memory",
   viewLabel: "memory",

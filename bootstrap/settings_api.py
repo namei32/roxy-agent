@@ -150,7 +150,11 @@ def create_settings_app(
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
             origin = request.headers.get("origin", "")
             expected = f"http://{request.url.netloc}"
-            if origin != expected or request.headers.get("x-akasic-csrf") != "1":
+            csrf_header = request.headers.get("x-roxy-csrf")
+            legacy_csrf_header = request.headers.get("x-akasic-csrf")
+            if origin != expected or (
+                csrf_header != "1" and legacy_csrf_header != "1"
+            ):
                 return _error_response(403, "csrf_rejected", "请求来源无效")
 
         # 2. 所有响应禁止缓存和跨页面泄露引用信息。
@@ -1365,7 +1369,7 @@ async def _probe_embedding_candidate(
             headers={"Authorization": f"Bearer {api_key}"},
             json={
                 "model": model.strip(),
-                "input": ["Akashic memory connection test"],
+                "input": ["Roxy memory connection test"],
             },
         )
         response.raise_for_status()

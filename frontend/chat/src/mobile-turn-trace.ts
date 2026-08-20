@@ -2,7 +2,7 @@
  * Mobile WebView 端 turn 级低噪声观测：每 turn 每 kind 只记录一次的里程碑注册表。
  *
  * 1. 身份固定 session_id + turn_id + client_message_id，缺失显式 missing，不猜测。
- * 2. 输出单行 [akashic-trace] JSON（无正文）；身份冲突降级为一次性
+ * 2. 输出单行 [roxy-trace] JSON（无正文）；身份冲突降级为一次性
  *    webui.identity_conflict 诊断，不阻断业务。
  */
 
@@ -42,10 +42,10 @@ export interface MobileTurnTraceRecord {
 
 export type MobileTurnTraceEmit = (record: MobileTurnTraceRecord) => void;
 
-/** 默认 sink：单行 [akashic-trace] 前缀 + 固定字段 JSON，便于 logcat join。 */
+/** 默认 sink：单行 [roxy-trace] 前缀 + 固定字段 JSON，便于 logcat join。 */
 export const mobileTurnTraceEmit: MobileTurnTraceEmit = (record) => {
   // 1. 单行输出；字段固定，不含 message content / prompt / tool args
-  console.log(`[akashic-trace] ${JSON.stringify(record)}`);
+  console.log(`[roxy-trace] ${JSON.stringify(record)}`);
 };
 
 /** 从既有 assistant:<turn> messageId 合同解析 turn_id；非合同 ID 或空 turn 返回 undefined。 */
@@ -143,7 +143,7 @@ export class MobileTurnTraceRegistry {
       this.emit(record);
     } catch (error) {
       const errorType = error instanceof Error ? error.name : typeof error;
-      console.error(`[akashic-trace] ${JSON.stringify({
+      console.error(`[roxy-trace] ${JSON.stringify({
         event: "webui.trace_sink_error",
         session_id: record.session_id,
         turn_id: record.turn_id,

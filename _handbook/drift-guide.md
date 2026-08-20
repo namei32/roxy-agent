@@ -72,7 +72,7 @@ Drift 会被反复触发。它既要保留当前意图，也要能从多轮行�
 
 ## Drift Skill 格式
 
-每个 skill 是一个目录，放在 `~/.akashic/workspace/drift/skills/<skill-name>/` 下，核心文件是 `SKILL.md`。
+每个 skill 是一个目录，放在 `~/.roxy/workspace/drift/skills/<skill-name>/` 下，核心文件是 `SKILL.md`。
 
 ### 哪些文件你写、哪些 agent 写
 

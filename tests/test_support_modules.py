@@ -1065,7 +1065,7 @@ def test_context_builder_builds_prompt_messages_and_assistant_blocks(
     assert context_frame.startswith(SYSTEM_CONTEXT_FRAME_MARKER)
     assert "retrieved" in context_frame
     assert "memory block" in prompt
-    assert "Akashic 自我认知" in prompt
+    assert "Roxy 自我认知" in prompt
     assert "## 环境" in prompt
     assert "# Memes" not in prompt
     assert "<meme:shy>" not in prompt

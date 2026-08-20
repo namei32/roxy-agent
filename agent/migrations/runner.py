@@ -94,7 +94,7 @@ def _bind_yoyo_username() -> Iterator[None]:
         yield
         return
 
-    os.environ["USER"] = "akashic"
+    os.environ["USER"] = "roxy"
     try:
         yield
     finally:

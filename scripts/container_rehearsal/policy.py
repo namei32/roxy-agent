@@ -30,6 +30,7 @@ EXCLUDED_RUNTIME_FILES = frozenset(
         ".runtime-ready.json",
         ".supervisor.lock",
         ".supervisor.pid",
+        "roxy.sock",
         "akashic.sock",
     }
 )

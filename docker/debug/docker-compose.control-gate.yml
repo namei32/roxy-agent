@@ -3,7 +3,7 @@ services:
     build:
       context: ../..
       dockerfile: docker/debug/Dockerfile
-    image: akashic-agent-control-gate:latest
+    image: roxy-agent-control-gate:latest
     entrypoint:
       - python
       - docker/debug/model_gate.py
@@ -29,25 +29,25 @@ services:
       timeout: 3s
       retries: 30
 
-  akashic-control-gate:
-    image: akashic-agent-control-gate:latest
+  roxy-control-gate:
+    image: roxy-agent-control-gate:latest
     command:
       - gateway
     working_dir: /app
     read_only: true
     environment: &control-environment
-      AKASHIC_DEBUG_CONFIG: /sandbox/config.toml
-      AKASHIC_DEBUG_WORKSPACE: /sandbox/workspace
-      AKASHIC_HOST_GID: "${GID:?set by programmatic_control_probe.py}"
-      AKASHIC_HOST_UID: "${UID:?set by programmatic_control_probe.py}"
-      AKASHIC_WEB_HOST: 0.0.0.0
-      AKASHIC_WEB_ALLOW_NON_LOOPBACK: "1"
+      ROXY_DEBUG_CONFIG: /sandbox/config.toml
+      ROXY_DEBUG_WORKSPACE: /sandbox/workspace
+      ROXY_HOST_GID: "${GID:?set by programmatic_control_probe.py}"
+      ROXY_HOST_UID: "${UID:?set by programmatic_control_probe.py}"
+      ROXY_WEB_HOST: 0.0.0.0
+      ROXY_WEB_ALLOW_NON_LOOPBACK: "1"
       HOME: /sandbox/home
       PYTHONUNBUFFERED: "1"
     volumes: &control-volumes
-      - ${AKASHIC_CONTROL_SANDBOX:?set by programmatic_control_probe.py}/app:/app:ro
-      - ${AKASHIC_CONTROL_SANDBOX:?set by programmatic_control_probe.py}:/sandbox
-      - ${AKASHIC_CONTROL_SANDBOX:?set by programmatic_control_probe.py}/static:/app/static
+      - ${ROXY_CONTROL_SANDBOX:?set by programmatic_control_probe.py}/app:/app:ro
+      - ${ROXY_CONTROL_SANDBOX:?set by programmatic_control_probe.py}:/sandbox
+      - ${ROXY_CONTROL_SANDBOX:?set by programmatic_control_probe.py}/static:/app/static
     tmpfs:
       - /tmp
     depends_on:
@@ -55,17 +55,17 @@ services:
         condition: service_healthy
 
   control-probe:
-    image: akashic-agent-control-gate:latest
+    image: roxy-agent-control-gate:latest
     working_dir: /app
     read_only: true
     environment:
       <<: *control-environment
-      AKASHIC_MODEL_GATE_URL: http://model-gate:8090
+      ROXY_MODEL_GATE_URL: http://model-gate:8090
     volumes: *control-volumes
     tmpfs:
       - /tmp
     depends_on:
       model-gate:
         condition: service_healthy
-      akashic-control-gate:
+      roxy-control-gate:
         condition: service_started

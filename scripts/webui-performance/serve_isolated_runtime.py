@@ -191,7 +191,7 @@ def main() -> None:
     parser.add_argument("--workspace", type=Path)
     args = parser.parse_args()
     temporary = args.workspace is None
-    workspace = args.workspace or Path(tempfile.mkdtemp(prefix="akashic-webui-runtime-"))
+    workspace = args.workspace or Path(tempfile.mkdtemp(prefix="roxy-webui-runtime-"))
     try:
         print(f'{{"event":"webui.runtime_fixture_starting","workspace":"{workspace}","port":{args.port}}}', flush=True)
         try:

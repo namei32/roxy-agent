@@ -89,7 +89,7 @@ def main() -> int:
         release = _load_lock(args.lock.resolve())
         report["contract"] = asdict(release.contract)
         report["plugins"] = [asdict(item) for item in release.plugins]
-        with tempfile.TemporaryDirectory(prefix="akashic-plugin-api-v2-") as raw_temp:
+        with tempfile.TemporaryDirectory(prefix="roxy-plugin-api-v2-") as raw_temp:
             temp_root = Path(raw_temp)
             contract_root = temp_root / "contract"
             plugin_root = temp_root / "plugins"
@@ -274,7 +274,7 @@ def _run_runtime_phase(
 
     output_path = report_dir / f"runtime-{phase}.log"
     env = os.environ.copy()
-    env["AKASHIC_PLUGIN_SOURCE"] = str(plugin_root)
+    env["ROXY_PLUGIN_SOURCE"] = str(plugin_root)
     result = subprocess.run(
         [
             sys.executable,

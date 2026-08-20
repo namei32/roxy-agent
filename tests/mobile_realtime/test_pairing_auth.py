@@ -104,12 +104,12 @@ def _services(
     keyset = KeysetManager(
         tmp_path / "keys",
         _EphemeralMasterKeys(),
-    ).initialize(lan_hostname="akashic.local")
+    ).initialize(lan_hostname="roxy.local")
     storage = MobileRealtimeStorage(tmp_path / "mobile.db")
     service = PairingService(
         storage,
         keyset,
-        lan_endpoints=("wss://akashic.local:6323/ws",),
+        lan_endpoints=("wss://roxy.local:6323/ws",),
         tunnel_endpoints=("wss://agent.example.com/ws",),
     )
     return storage, service, keyset
@@ -121,7 +121,7 @@ def test_default_pairing_offer_lasts_eight_minutes(tmp_path: Path) -> None:
     service = PairingService(
         storage,
         keyset,
-        lan_endpoints=("wss://akashic.local:6323/ws",),
+        lan_endpoints=("wss://roxy.local:6323/ws",),
         tunnel_endpoints=("wss://mobile.huashen258.cc/ws",),
         clock=lambda: now,
     )
@@ -308,12 +308,12 @@ def test_expired_pairing_secret_is_rejected(tmp_path: Path) -> None:
     keyset = KeysetManager(
         tmp_path / "keys",
         _EphemeralMasterKeys(),
-    ).initialize(lan_hostname="akashic.local")
+    ).initialize(lan_hostname="roxy.local")
     storage = MobileRealtimeStorage(tmp_path / "mobile.db")
     service = PairingService(
         storage,
         keyset,
-        lan_endpoints=("wss://akashic.local:6323/ws",),
+        lan_endpoints=("wss://roxy.local:6323/ws",),
         tunnel_endpoints=(),
         ttl=timedelta(seconds=1),
         clock=lambda: current[0],

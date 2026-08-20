@@ -470,7 +470,7 @@ function ChatPrototype({ variant }: { variant: VariantId }) {
     <section className={`mx-chat mx-chat--${variant}`} aria-label={`${variant} 对话选模原型`}>
       <div className="mx-chat__topline"><span>新对话</span><button type="button"><Settings2 size={18} />对话设置</button></div>
       <div className="mx-chat__empty">
-        <span className="mx-akashic-mark">あ</span>
+        <span className="mx-roxy-mark">あ</span>
         <h2>今天想一起完成什么？</h2>
         <p>模型选择属于下一轮发送，不打断正在运行的这一轮。</p>
       </div>

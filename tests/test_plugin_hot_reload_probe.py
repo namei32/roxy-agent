@@ -86,7 +86,7 @@ def test_gate_sandbox_prepares_static_mountpoint_outside_clean_checkout(
         ).stdout.strip()
     )
     assert (
-        "${AKASHIC_GATE_SANDBOX:?set by plugin_hot_reload_probe.py}"
+        "${ROXY_GATE_SANDBOX:?set by plugin_hot_reload_probe.py}"
         "/app:/app:ro"
     ) in compose
     assert "../..:/app:ro" not in compose
@@ -147,12 +147,12 @@ def test_smoke_config_uses_app_server_control_endpoint(tmp_path: Path) -> None:
     assert '[llm]\nmain = "plugin_gate"' in config
     assert "[llm.runtimes.plugin_gate]" in config
     assert "[app_server]" in config
-    assert 'listen = "/sandbox/akashic.sock"' in config
+    assert 'listen = "/sandbox/roxy.sock"' in config
     assert "[channels]" not in config
 
 
 def test_smoke_package_selection_enables_default_proactive(tmp_path: Path) -> None:
-    manifest = tmp_path / "home/.akashic-plugin/manifest.toml"
+    manifest = tmp_path / "home/.roxy-plugin/manifest.toml"
     manifest.parent.mkdir(parents=True)
     manifest.write_text(
         '[plugins."fitbit@gate"]\nenabled = true\n',

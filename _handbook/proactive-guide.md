@@ -1,6 +1,6 @@
 # Proactive 主动推送指南
 
-Proactive 的判断和投递由核心 runtime 负责；插件通过 MCP 提供已经刷新的数据。不再使用 `~/.akashic/workspace/proactive_sources.json`。
+Proactive 的判断和投递由核心 runtime 负责；插件通过 MCP 提供已经刷新的数据。不再使用 `~/.roxy/workspace/proactive_sources.json`。
 
 ```text
 ┌─ 插件 plugin.py

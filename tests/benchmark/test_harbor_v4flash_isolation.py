@@ -26,7 +26,7 @@ def _container(
     *,
     source: str,
     ports: dict[str, object] | None = None,
-    volume_name: str = "akasic-bench-runtime-v1-fixed",
+    volume_name: str = "roxy-bench-runtime-v1-fixed",
     volume_rw: bool = False,
 ) -> dict[str, object]:
     return {
@@ -35,7 +35,7 @@ def _container(
         "image": "task:fixed",
         "status": "running",
         "running": True,
-        "project": "akasic-bench-v4flash-smoke__env",
+        "project": "roxy-bench-v4flash-smoke__env",
         "mounts": [
             {
                 "type": "bind",
@@ -57,8 +57,8 @@ def _container(
 
 def test_compose_project_name_matches_harbor_normalization() -> None:
     assert (
-        compose_project_name("Akasic-Bench-V4Flash-Smoke.Name__env")
-        == "akasic-bench-v4flash-smoke-name__env"
+        compose_project_name("Roxy-Bench-V4Flash-Smoke.Name__env")
+        == "roxy-bench-v4flash-smoke-name__env"
     )
 
 
@@ -85,7 +85,7 @@ def test_reserve_compose_network_retries_overlapping_subnet(
     monkeypatch.setattr(subprocess, "run", run)
 
     network = reserve_compose_network(
-        "akasic-bench-v4flash-smoke__env",
+        "roxy-bench-v4flash-smoke__env",
         network_pool=ipaddress.IPv4Network("10.240.0.0/29"),
         network_prefix=30,
     )
@@ -126,7 +126,7 @@ def test_storage_capacity_fails_before_new_container(
 def test_cleanup_only_removes_exact_stopped_project(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    project = "akasic-bench-v4flash-smoke__env"
+    project = "roxy-bench-v4flash-smoke__env"
     container = {"id": "container-id", "running": False}
     calls: list[list[str]] = []
 
@@ -143,7 +143,7 @@ def test_cleanup_only_removes_exact_stopped_project(
                 "Name": "network-name",
                 "Labels": {
                     "com.docker.compose.project": project,
-                    "akasic.benchmark.managed": "true",
+                    "roxy.benchmark.managed": "true",
                 },
             }]
             return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
@@ -164,7 +164,7 @@ def test_cleanup_only_removes_exact_stopped_project(
 def test_interruption_cleanup_stops_before_exact_project_removal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    project = "akasic-bench-v4flash-smoke__env"
+    project = "roxy-bench-v4flash-smoke__env"
     running = {"id": "container-id", "running": True}
     stopped = {"id": "container-id", "running": False}
     inspections = iter(([running], [stopped]))
@@ -218,7 +218,7 @@ def test_inspect_compose_project_records_immutable_image_id(
                                 "Image": "task:tag",
                                 "Labels": {
                                     "com.docker.compose.project": (
-                                        "akasic-bench-v4flash-smoke__env"
+                                        "roxy-bench-v4flash-smoke__env"
                                     )
                                 },
                             },
@@ -231,10 +231,10 @@ def test_inspect_compose_project_records_immutable_image_id(
                             "Mounts": [
                                 {
                                     "Type": "volume",
-                                    "Name": "akasic-bench-runtime-v1-fixed",
+                                    "Name": "roxy-bench-runtime-v1-fixed",
                                     "Source": (
                                         "/var/lib/docker/volumes/"
-                                        "akasic-bench-runtime-v1-fixed/_data"
+                                        "roxy-bench-runtime-v1-fixed/_data"
                                     ),
                                     "Destination": RUNTIME_MOUNT_PATH,
                                     "RW": False,
@@ -253,7 +253,7 @@ def test_inspect_compose_project_records_immutable_image_id(
     )
     monkeypatch.setattr(subprocess, "run", lambda *_, **__: next(responses))
 
-    containers = inspect_compose_project("akasic-bench-v4flash-smoke__env")
+    containers = inspect_compose_project("roxy-bench-v4flash-smoke__env")
 
     assert containers[0]["image"] == "task:tag"
     assert containers[0]["image_id"] == "sha256:image-id"
@@ -261,21 +261,21 @@ def test_inspect_compose_project_records_immutable_image_id(
     assert containers[0]["oom_killed"] is False
     assert containers[0]["memory_limit_bytes"] == 4294967296
     mounts = cast(list[dict[str, object]], containers[0]["mounts"])
-    assert mounts[0]["name"] == ("akasic-bench-runtime-v1-fixed")
+    assert mounts[0]["name"] == ("roxy-bench-runtime-v1-fixed")
 
 
 def test_validate_isolation_accepts_only_trial_bind_mounts(tmp_path: Path) -> None:
     trial = tmp_path / "trial"
     logs = trial / "agent"
     logs.mkdir(parents=True)
-    project = "akasic-bench-v4flash-smoke__env"
+    project = "roxy-bench-v4flash-smoke__env"
 
     report = validate_isolation(
         [_container(source=str(logs))],
         project_name=project,
         allowed_bind_root=trial,
         forbidden_host_paths=[tmp_path / "online"],
-        allowed_volume_mounts=[("akasic-bench-runtime-v1-fixed", RUNTIME_MOUNT_PATH)],
+        allowed_volume_mounts=[("roxy-bench-runtime-v1-fixed", RUNTIME_MOUNT_PATH)],
     )
 
     assert report["status"] == "passed"
@@ -286,7 +286,7 @@ def test_validate_isolation_accepts_only_trial_bind_mounts(tmp_path: Path) -> No
 @pytest.mark.parametrize(
     ("source", "ports"),
     [
-        ("/home/huashen/.akashic/workspace", {}),
+        ("/home/huashen/.roxy/workspace", {}),
         ("/var/run/docker.sock", {}),
         ("/tmp/allowed/agent", {"6322/tcp": [{"HostPort": "6322"}]}),
     ],
@@ -297,16 +297,16 @@ def test_validate_isolation_rejects_host_escape(
     ports: dict[str, object],
 ) -> None:
     allowed = Path("/tmp/allowed")
-    project = "akasic-bench-v4flash-smoke__env"
+    project = "roxy-bench-v4flash-smoke__env"
 
     with pytest.raises(IsolationError):
         validate_isolation(
             [_container(source=source, ports=ports)],
             project_name=project,
             allowed_bind_root=allowed,
-            forbidden_host_paths=[Path("/home/huashen/.akashic/workspace")],
+            forbidden_host_paths=[Path("/home/huashen/.roxy/workspace")],
             allowed_volume_mounts=[
-                ("akasic-bench-runtime-v1-fixed", RUNTIME_MOUNT_PATH)
+                ("roxy-bench-runtime-v1-fixed", RUNTIME_MOUNT_PATH)
             ],
         )
 
@@ -315,14 +315,14 @@ def test_validate_isolation_rejects_host_escape(
     ("volume_name", "volume_rw"),
     [
         ("other-volume", False),
-        ("akasic-bench-runtime-v1-fixed", True),
+        ("roxy-bench-runtime-v1-fixed", True),
     ],
 )
 def test_validate_isolation_rejects_unapproved_or_writable_volume(
     volume_name: str,
     volume_rw: bool,
 ) -> None:
-    project = "akasic-bench-v4flash-smoke__env"
+    project = "roxy-bench-v4flash-smoke__env"
 
     with pytest.raises(IsolationError):
         validate_isolation(
@@ -337,13 +337,13 @@ def test_validate_isolation_rejects_unapproved_or_writable_volume(
             allowed_bind_root=Path("/tmp/allowed"),
             forbidden_host_paths=[],
             allowed_volume_mounts=[
-                ("akasic-bench-runtime-v1-fixed", RUNTIME_MOUNT_PATH)
+                ("roxy-bench-runtime-v1-fixed", RUNTIME_MOUNT_PATH)
             ],
         )
 
 
 def test_validate_isolation_rejects_missing_runtime_volume() -> None:
-    project = "akasic-bench-v4flash-smoke__env"
+    project = "roxy-bench-v4flash-smoke__env"
     container = _container(source="/tmp/allowed/agent")
     mounts = cast(list[dict[str, object]], container["mounts"])
     container["mounts"] = mounts[:1]
@@ -355,7 +355,7 @@ def test_validate_isolation_rejects_missing_runtime_volume() -> None:
             allowed_bind_root=Path("/tmp/allowed"),
             forbidden_host_paths=[],
             allowed_volume_mounts=[
-                ("akasic-bench-runtime-v1-fixed", RUNTIME_MOUNT_PATH)
+                ("roxy-bench-runtime-v1-fixed", RUNTIME_MOUNT_PATH)
             ],
         )
 

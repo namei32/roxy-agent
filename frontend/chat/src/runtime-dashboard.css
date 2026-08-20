@@ -1,5 +1,5 @@
 .runtime-dashboard {
-  --runtime-ready: var(--ak-sys-color-success);
+  --runtime-ready: var(--roxy-sys-color-success);
   display: grid;
   min-width: 0;
   min-height: 0;
@@ -31,7 +31,7 @@
 .runtime-dashboard__topbar p {
   max-width: 64ch;
   margin: 6px 0 0;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   font-size: 0.8125rem;
   line-height: 1.5;
   text-wrap: pretty;
@@ -69,7 +69,7 @@
   font-size: 0.8125rem;
   font-weight: 650;
   cursor: pointer;
-  transition: background-color var(--ak-sys-duration-short) var(--ak-sys-motion-standard), scale var(--ak-sys-duration-short) var(--ak-sys-motion-standard);
+  transition: background-color var(--roxy-sys-duration-short) var(--roxy-sys-motion-standard), scale var(--roxy-sys-duration-short) var(--roxy-sys-motion-standard);
 }
 
 .runtime-dashboard__sync button:hover,
@@ -79,7 +79,7 @@
 }
 
 .runtime-dashboard button:active:not(:disabled) { scale: 0.96; }
-.runtime-dashboard button:focus-visible { outline: 2px solid var(--ak-color-action-primary); outline-offset: 2px; }
+.runtime-dashboard button:focus-visible { outline: 2px solid var(--roxy-color-action-primary); outline-offset: 2px; }
 .runtime-dashboard button:disabled { cursor: default; opacity: 0.5; }
 
 .runtime-dashboard__metrics {
@@ -104,13 +104,13 @@
 }
 
 .runtime-metric:nth-child(2) {
-  color: var(--ak-sys-color-on-info-container);
-  background: var(--ak-sys-color-info-container);
+  color: var(--roxy-sys-color-on-info-container);
+  background: var(--roxy-sys-color-info-container);
 }
 
 .runtime-metric:nth-child(3) {
-  color: var(--ak-sys-color-on-warning-container);
-  background: var(--ak-sys-color-warning-container);
+  color: var(--roxy-sys-color-on-warning-container);
+  background: var(--roxy-sys-color-warning-container);
 }
 
 .runtime-metric > span { display: grid; place-items: center; color: currentColor; }
@@ -134,7 +134,7 @@
   border: 0;
   border-radius: var(--md-sys-shape-corner-full);
   padding: 0 16px;
-  color: var(--ak-color-text-secondary);
+  color: var(--roxy-color-text-secondary);
   background: transparent;
   font-size: 0.875rem;
   font-weight: 600;
@@ -188,7 +188,7 @@
 .runtime-directory__list h2,
 .runtime-detail__header h2 { margin: 0; font-size: 1rem; font-weight: 650; line-height: 1.25; }
 .runtime-directory__list header p,
-.runtime-detail__header p { margin: 5px 0 0; color: var(--ak-color-text-secondary); font-size: 0.75rem; line-height: 1.45; }
+.runtime-detail__header p { margin: 5px 0 0; color: var(--roxy-color-text-secondary); font-size: 0.75rem; line-height: 1.45; }
 
 .runtime-directory__item {
   display: grid;
@@ -198,7 +198,7 @@
   align-items: center;
   gap: 10px;
   border: 0;
-  border-bottom: 1px solid var(--ak-color-border-default);
+  border-bottom: 1px solid var(--roxy-color-border-default);
   padding: 10px 16px;
   color: inherit;
   background: transparent;
@@ -209,15 +209,15 @@
 
 .runtime-directory__item:hover { background: var(--md-sys-color-surface-container-high); }
 .runtime-directory__item[aria-pressed="true"] { color: var(--md-sys-color-on-secondary-container); background: var(--md-sys-color-secondary-container); }
-.runtime-directory__item-icon { display: grid; place-items: center; color: var(--ak-color-text-muted); }
+.runtime-directory__item-icon { display: grid; place-items: center; color: var(--roxy-color-text-muted); }
 .runtime-directory__item-copy { min-width: 0; }
 .runtime-directory__item-copy strong,
 .runtime-directory__item-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .runtime-directory__item-copy strong { font-size: 0.875rem; font-weight: 650; }
-.runtime-directory__item-copy small { margin-top: 4px; color: var(--ak-color-text-secondary); font-size: 0.71875rem; }
-.runtime-directory__status { color: var(--ak-color-text-secondary); font-size: 0.6875rem; font-weight: 650; }
+.runtime-directory__item-copy small { margin-top: 4px; color: var(--roxy-color-text-secondary); font-size: 0.71875rem; }
+.runtime-directory__status { color: var(--roxy-color-text-secondary); font-size: 0.6875rem; font-weight: 650; }
 .runtime-directory__status.enabled { color: var(--runtime-ready); }
-.runtime-directory__empty { padding: 28px 18px; color: var(--ak-color-text-secondary); font-size: 0.8125rem; line-height: 1.5; }
+.runtime-directory__empty { padding: 28px 18px; color: var(--roxy-color-text-secondary); font-size: 0.8125rem; line-height: 1.5; }
 
 .runtime-detail { display: grid; min-width: 0; min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
 .runtime-detail__header {
@@ -227,14 +227,14 @@
   align-items: center;
   gap: 16px;
   padding: 14px 24px;
-  border-bottom: 1px solid var(--ak-color-border-default);
+  border-bottom: 1px solid var(--roxy-color-border-default);
 }
 
 .runtime-detail__back { display: none; }
 .runtime-detail__copy { min-height: 38px; padding-inline: 12px; }
 .runtime-detail__scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 28px 32px 52px; }
-.runtime-detail__loading { display: flex; min-height: 180px; align-items: center; justify-content: center; gap: 10px; color: var(--ak-color-text-secondary); font-size: 0.8125rem; }
-.runtime-detail__markdown { max-width: 72ch; color: var(--ak-color-text-primary); font-size: 0.9375rem; line-height: 1.7; }
+.runtime-detail__loading { display: flex; min-height: 180px; align-items: center; justify-content: center; gap: 10px; color: var(--roxy-color-text-secondary); font-size: 0.8125rem; }
+.runtime-detail__markdown { max-width: 72ch; color: var(--roxy-color-text-primary); font-size: 0.9375rem; line-height: 1.7; }
 .runtime-detail__markdown pre { border-radius: var(--m-shape-small); }
 
 .is-spinning { animation: runtime-spin 900ms linear infinite; }
@@ -259,7 +259,7 @@
 
 @media (max-width: 560px) {
   .runtime-dashboard__metrics { grid-template-columns: 1fr; }
-  .runtime-metric { padding-inline: 0; border-inline-end: 0; border-bottom: 1px solid var(--ak-color-border-default); }
+  .runtime-metric { padding-inline: 0; border-inline-end: 0; border-bottom: 1px solid var(--roxy-color-border-default); }
   .runtime-metric:last-child { border-bottom: 0; }
 }
 

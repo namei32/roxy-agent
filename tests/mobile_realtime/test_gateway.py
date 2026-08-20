@@ -242,7 +242,7 @@ def _config() -> MobileRealtimeConfig:
     return MobileRealtimeConfig(
         enabled=True,
         database=Path("data/mobile.db"),
-        lan_hostname="akashic.local",
+        lan_hostname="roxy.local",
         public_url="wss://agent.example.com/ws",
         key_encryption=MobileKeyEncryptionConfig(
             keyset_manifest=Path("data/mobile/keys/current.json")
@@ -312,6 +312,10 @@ def _device_proof(
     }
 
 
+@pytest.mark.skipif(
+    not Path("/proc/self/fd").is_dir(),
+    reason="网关 TLS 私钥仅支持 Linux memfd",
+)
 def test_authenticated_gateway_requires_resume_and_acks_durable_sync(
     tmp_path: Path,
 ) -> None:
