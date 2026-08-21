@@ -62,9 +62,9 @@ provider 返回 tool call 时，先完成整个 tool batch并持久发布工具 
 - consolidation 保留尾部、分页、积压阈值、recent turns 和 `start_index` 使用同一分组。窗口若落在显式 `control_turn_id` 中间，必须退回 U1；展开后的 provider message 数允许超过预算。
 - legacy 消息继续使用既有 user/proactive assistant 边界规则，不用相邻角色反推新格式 turn identity。
 
-### Attempt replay 和 query compaction
+### Attempt replay 和 session compaction Gate
 
-前驱 attempt replay 在 prompt 中按顺序保留 `U、assistant tool-call、tool result、interrupt marker`。runtime 把每个已闭合 tool-call/result 识别为可压缩批次；两个以上闭合批次且达到 provider 软水位后，旧批次进入现有 `context_compact` 摘要，最近完整批次和当前未闭合后缀保持原文。
+前驱 attempt replay 在 prompt 中按顺序保留 `U、assistant tool-call、tool result、interrupt marker`。runtime 把每个已闭合 tool-call/result 识别为 0030 session Gate 的可压缩批次；达到冻结模型的 74% soft watermark 后，旧批次进入 session ledger summary，最近完整批次和当前未闭合后缀保持原文。
 
 摘要的 current-query anchor 不是最后一条 U，而是本 interaction 的全部 `U1..Un`。摘要无效、工具批次未闭合、切点与 `prior_tool_chain` 数量不一致、压缩后仍越过硬水位时都 fail-loud。`turns` checkpoint、最终 `messages.tool_chain` 和既有消息正文不因 provider 投影压缩而 UPDATE 或 DELETE。
 
@@ -76,11 +76,17 @@ provider 返回 tool call 时，先完成整个 tool batch并持久发布工具 
 
 ### Proactive
 
-已成功送达的 proactive assistant 没有 user turn，也不生成 Akasha 学习节点；它在 canonical history、memory window、Markdown recent turns 和 consolidation 边界中作为一个独立逻辑单元。用户随后回复 proactive 时，回复 metadata 继续保留引用，新的被动 interaction 仍按正常 U/A 规则学习。本 PR 不把 proactive assistant 伪造成 Akasha 的 U 或 A。
+已成功送达的 proactive assistant 没有 user turn，也不生成 Akasha 学习节点；它在 canonical
+history、prompt history、Markdown exact source plan 和 consolidation 边界中作为一个
+独立逻辑单元。用户随后回复 proactive 时，回复 metadata 继续保留引用，新的被动
+interaction 仍按正常 U/A 规则学习。本设计不把 proactive assistant 伪造成 Akasha 的 U 或 A。
 
 ## 5. Channel 和 UI
 
 - Mobile：active 时无论草稿是否为空都只显示中止，草稿保留但发送不可用；中止收束后恢复发送。中止继续调用 `turn.stop`。
+- Mobile resume：客户端上报本地 `active_turns`，Core 必须在冻结 durable replay 窗口前读取 SessionDB 权威 turn。`interrupted`、`cancelled`、`failed` 补发定向 `turn.interrupted`；`completed` 继续由 `message.final` 或 history 恢复，不能伪装成中断。
+- Mobile stop：同一 turn 已在 SessionDB 终态时，`turn.stop` 幂等返回 `already_terminal`。只有 `terminal_status` 为 `interrupted`、`cancelled` 或 `failed` 时，Android 才把精确匹配的本地 streaming 消息和运行中 block 在同一 Room 事务内收敛，并删除对应 stop 意图。`completed` 必须由携带 `control_turn_id` 的 canonical `message.final` 或 history 迁移，不能伪装成中断；`turn_not_active`、`stale_turn`、未知 turn 或会话不匹配保留未确认投影并明确失败。
+- Mobile shutdown：计划停止 channel 时先 flush delta 并持久发布未完成 turn 的 `turn.interrupted`，再清理进程内 active map。异常退出遗漏的终态由下一次 resume 对账修复。
 - Telegram、QQ、Web Chat：`/stop` 或现有 stop command 结束 active attempt；终态后的下一条普通消息自动续接未完成 interaction。
 - Programmatic control：`turn/start` 在 active 时返回 busy；只有 `turn/interrupt` 能改变 active attempt。
 
@@ -105,6 +111,7 @@ provider 返回 tool call 时，先完成整个 tool batch并持久发布工具 
 - proactive：主动 assistant 独占一个历史单元，不进入 Akasha；相邻被动 interaction 保持独立。
 - channel：中止 attempt 不发送 assistant outbound；后续消息的新 attempt 最终只发送一次 A。
 - Mobile：验证 idle 显示 send，active 空草稿和 active 有草稿都显示 stop，stopping 显示 pending stop；active 时快捷键和 native send 同样被拒绝。
+- Mobile recovery：验证维护重启后 SessionDB 已终态但 durable inbox 缺失终态时，resume 在 `sync.completed` 前补发关闭信号；非 completed 的 `already_terminal` 能清掉精确匹配的 Room streaming 投影和 stop 意图；completed history 按 `control_turn_id` 迁移 canonical identity；`turn_not_active`、`stale_turn` 和普通协议错误不能误清理。
 - Akasha：`U1,U2,U3,A` 在线与离线得到一个相同 turn；legacy pair 不回归。
 - known-bad：邻接配对、seal 后仍接收、第二 inbound 重复发送 final A、工具批次中途注入。
 - known-bad：active `turn/start` 被隐式 steer、按物理 message 数裁掉 U1、consolidation 游标落在 multi-U turn 内、attempt replay 永远不可压缩。

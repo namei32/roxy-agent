@@ -153,7 +153,7 @@ PR #111 同时处理 runtime、memory、plugin、scheduler、filesystem、前端
 | 协作原理 | PR #111 中的失效形态 | 本设计的工程机制 |
 |---|---|---|
 | 核对先于假设 | “裁切历史”被自行解释成替换数据库历史 | 高风险歧义门禁、任务合同、状态分类 |
-| 工作手册提供共享现实 | 项目意图散落在旧会话、账本和普通测试 | projectneed、NOW、decisions、AGENTS、writing rules |
+| 工作手册提供共享现实 | 项目意图散落在旧会话、账本和普通测试 | INDEX、WORKFLOW、projectneed、NOW、decisions、writing rules |
 | 执行时隐藏，问责时展开 | context 模块拿到完整 manager，评审却难看见单条危险语义 | 窄依赖、完整 diff、write set、决策依据 |
 | 减少沟通不能消灭必要沟通 | 大改动一路执行，数据保留变化没有独立确认点 | semantic delta、一个高风险语义一个改动、阶段门禁 |
 | 执行可以树状，信息必须网状 | worktree 各自漂移，集成时才发现前提不同 | 稳定条款 ID、共享 Git 状态、验收前 workbook diff |
@@ -169,7 +169,7 @@ PR #111 同时处理 runtime、memory、plugin、scheduler、filesystem、前端
               ┌─────────────────────┼─────────────────────┐
               ▼                     ▼                     ▼
 ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐
-│ AGENTS.md            │  │ docs/decisions/      │  │ docs/writing-rules   │
+│ docs/WORKFLOW.md     │  │ docs/decisions/      │  │ docs/writing-rules   │
 │ 开工与交付纪律        │  │ 决策理由与勘误        │  │ 文档所有权与写法       │
 └──────────┬───────────┘  └──────────┬───────────┘  └──────────┬───────────┘
            │                         │                         │
@@ -191,7 +191,7 @@ PR #111 同时处理 runtime、memory、plugin、scheduler、filesystem、前端
 
 任何非简单任务按下面的顺序进入项目：
 
-1. 读取 `AGENTS.md`、`projectneed.md` 第 1～6 节和路由表命中的领域；跨层、高风险任务读取全文。
+1. 读取 `INDEX.md`，再读取 `projectneed.md` 第 1～6 节和路由表命中的领域；修改任务同时读取 `WORKFLOW.md`，跨层、高风险任务读取全文。
 2. 读取 `NOW.md`，确认任务是否已有 owner、阻塞或既定接手点。
 3. 用模块名、条款 ID、错误名和关键名词搜索 `decisions/README.md`。
 4. 只打开命中的决策和设计，不批量加载全部历史。
@@ -366,7 +366,7 @@ stop_rules:
 | 持久历史 owner | `session/store.py::SessionStore` | 保持唯一 SQLite owner |
 | 运行时 session | `session/manager.py::Session` | 只有 history window 确实缩小时才裁切 `messages`，且不调用 store |
 | prompt 输入与结果 | `agent/lifecycle/types.py::PromptRenderInput`、`PromptRenderResult` | 继续使用，不新增同义 wrapper |
-| 退化计划 | `agent/prompting/budget.py::ContextTrimPlan` | 补上明确的 prompt 语义；不得承担持久化动作 |
+| 退化计划（历史实现，已退役） | `agent/prompting/budget.py::ContextTrimPlan` | 旧 prompt retry 设计记录；当前由 session Context Gate 与完整 logical unit compaction 取代 |
 | retry orchestrator | `agent/core/passive_turn.py::DefaultReasoner.run_turn` | 移除 `SessionManager` 依赖和 `trim_history_async` 调用 |
 | 显式删除入口 | `agent/control/service.py::delete_thread` → `SessionManager.delete_session` | 保留，并与 prompt 路径保持无依赖边 |
 
@@ -469,7 +469,7 @@ validation:
 | 调用层 | 可依赖 | 禁止依赖 |
 |---|---|---|
 | `agent/prompting/**` | snapshot types、token estimator | SessionStore、SQL、destructive port |
-| `DefaultReasoner` context retry | `PromptRenderInput`、`ContextTrimPlan`、retry trace | SessionManager、SessionStore、delete session/messages/embeddings |
+| `DefaultReasoner` context retry（历史实现，已退役） | `PromptRenderInput`、旧 `ContextTrimPlan`、retry trace | SessionManager、SessionStore、delete session/messages/embeddings |
 | `session` persistence owner | SQLite store、transaction | provider 和 prompt policy |
 | control/dashboard delete | destructive port、audit、backup policy | prompt trim helpers |
 
@@ -595,7 +595,7 @@ owned_paths:
 ### 10.3 验收前同步
 
 1. 获取目标分支最新提交。
-2. 核对从 base 到最新目标分支的 `AGENTS.md`、projectneed、NOW 和相关 ADR。
+2. 核对从 base 到最新目标分支的 INDEX、WORKFLOW、projectneed、NOW 和相关 ADR。
 3. 解决需求或 owner 冲突后再 rebase/merge。
 4. 再次运行任务合同中的 semantic tests。
 5. 检查实际 diff 是否仍在 owned paths 和允许副作用内。
@@ -652,7 +652,7 @@ worktree 提供文件隔离，不提供语义同步。跳过第二步会让每�
 
 ### 12.1 保持 stable prefix
 
-长期不变量和协作纪律放在 `AGENTS.md` 与 `projectneed.md`。动态任务、NOW、日志和临时证据放在后部按需读取。这样可以减少大 prompt 前缀频繁变化，也让缓存行为更稳定。
+长期不变量和协作纪律放在 `projectneed.md` 与 `WORKFLOW.md`。动态任务、NOW、日志和临时证据放在后部按需读取。这样可以减少大 prompt 前缀频繁变化，也让缓存行为更稳定。
 
 ### 12.2 删除反复陈述，不删除完成标准
 
@@ -708,12 +708,12 @@ tests_scenarios/contracts/oracles.py
 tests_scenarios/contracts/scenarios.toml
 ```
 
-`test_context_retry_is_projection_over_append_only_history` 使用真实 `SessionManager` 和 `DefaultReasoner.run_turn`，只替换有界模型结果。它记录 SQLite trace，比较完整 messages/embeddings 快照，重启后读取全部历史，再追加消息验证 seq 续接。`test_history_oracle_rejects_historical_delete_mutant` 直接在 fixture 数据库执行历史 DELETE，证明同一组快照和 write-set oracle 会拒绝已知坏状态。
+`test_full_context_projection_preserves_append_only_history` 使用真实 `SessionManager` 和 `DefaultReasoner.run_turn`，只替换有界模型结果。它证明单一 `full_context` 计划从 session projection 读取全部历史，记录 SQLite trace，比较完整 messages/embeddings 快照，重启后再追加消息验证 seq 续接。`test_history_oracle_rejects_historical_delete_mutant` 直接在 fixture 数据库执行历史 DELETE，证明同一组快照和 write-set oracle 会拒绝已知坏状态。
 
-这个 pilot 已经保护“retry 后持久历史不能实际减少”的主要事故路径，但它还不是完整 Phase 1：
+这个 pilot 已经保护“full-context projection 和 compact 不能减少持久历史”的主要事故路径，但它还不是完整 Phase 1：
 
 - 没有 SQLite authorizer，因此不能稳定记录所有被回滚、由 CTE 表达或经 trigger 触发的受保护写入尝试。
-- fault injection 直接修改 fixture，不是在一次性候选源码中把 DELETE/UPDATE 注入真实 retry seam。
+- fault injection 直接修改 fixture，不是在一次性候选源码中把 DELETE/UPDATE 注入真实 compaction seam。
 - 还没有独立 protected-path policy 阻止普通实现改动同时降低 oracle、mutant 或 coverage baseline。
 - G2 仍是 Feed/Observe 单场景 runner；统一 Docker controller 和 aggregate external status 尚未完成。
 
@@ -724,13 +724,14 @@ tests/semantic/helpers/sqlite_write_guard.py
 tests/semantic_mutants/ctx_001_delete_messages.patch
 ```
 
-Phase 1 完整后锁住“绝不丢持久历史”。Phase 2 再收紧 runtime 副作用：动态区块退化不改 session，history window 退化只改运行时消息和必要游标。当前缺口继续保留在 `NOW.md`，不能用 pilot baseline 或普通 pytest 全绿冒充已经完成。
+Phase 1 完整后锁住“绝不丢持久历史”。Phase 2 再收紧 runtime 副作用：临时 payload projection 不改 session，compaction 只追加 ledger/checkpoint 并推进会话游标。当前缺口继续保留在 `NOW.md`，不能用 pilot baseline 或普通 pytest 全绿冒充已经完成。
 
 ### Phase 0 · 文档和模板
 
 交付：
 
-- `AGENTS.md`
+- `docs/INDEX.md`
+- `docs/WORKFLOW.md`
 - `docs/projectneed.md`
 - `docs/NOW.md`
 - `docs/decisions/`
@@ -768,7 +769,7 @@ Phase 1 完整后锁住“绝不丢持久历史”。Phase 2 再收紧 runtime �
 交付：
 
 - 全仓和 canonical plugin source 查询 `trim_history_async` 调用者。没有生产调用者就删除方法；runtime 裁切改用 `replace_runtime_history_view` 或等价的纯内存接口，该接口不能写 store。
-- `ContextTrimPlan` 只描述 prompt section；history ratio 计划使用带 `prompt` 前缀的类型或字段。
+- 历史 `ContextTrimPlan` 只描述过 prompt section，现已随旧 retry 路径退役；当前实现不得恢复同义兼容壳。
 - 继续复用 `PromptRenderInput`、`PromptRenderResult`，不新增同义 context wrapper。
 - 只有持久历史需要脱离 `Session` 加载时才引入 `SessionHistoryReader` 与 immutable snapshot。
 - 显式用户删除逐步收口到 `SessionDestructivePort`，入口仍是 `agent/control/service.py::delete_thread`。

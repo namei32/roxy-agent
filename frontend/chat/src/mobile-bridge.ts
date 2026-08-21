@@ -14,7 +14,7 @@ const METHODS = [
   "shareText", "saveComposerDraft", "commitSharedText", "rejectSharedText", "sendMessage",
   "copyText", "performActionHaptic", "sendCommand", "refreshRuntimeInspection",
   "openRuntimeDocument", "openRuntimeMcp", "openRuntimeJob", "clearRuntimeInspectionDetail",
-  "stopTurn", "queryPluginUi", "cancelPluginUiOwner", "setTheme", "reportHealthy",
+  "stopTurn", "queryPluginUi", "cancelPluginUiOwner", "setTheme", "setModelSelection", "reportHealthy",
 ] as const;
 
 const METHOD_ARITY: Record<(typeof METHODS)[number], number> = {
@@ -27,7 +27,8 @@ const METHOD_ARITY: Record<(typeof METHODS)[number], number> = {
   shareText: 2, saveComposerDraft: 4, commitSharedText: 4, rejectSharedText: 2, sendMessage: 6,
   copyText: 1, performActionHaptic: 0, sendCommand: 1, refreshRuntimeInspection: 0,
   openRuntimeDocument: 1, openRuntimeMcp: 2, openRuntimeJob: 1, clearRuntimeInspectionDetail: 0,
-  stopTurn: 0, queryPluginUi: 10, cancelPluginUiOwner: 1, setTheme: 1, reportHealthy: 0,
+  stopTurn: 0, queryPluginUi: 10, cancelPluginUiOwner: 1, setTheme: 1, setModelSelection: 2,
+  reportHealthy: 0,
 };
 
 export function installMobileBridge(): void {
@@ -35,9 +36,9 @@ export function installMobileBridge(): void {
     window.RoxyNativeTransport ?? window.AkashicNativeTransport
   ) as NativeTransport | undefined;
   if (!transport || typeof transport.postMessage !== "function") {
-    // 旧原生壳可能直接注入 AkashicNative，而不是 transport；将它仅作为
-    // 兼容来源映射到规范名称，页面其余部分只读取 RoxyNative。
-    if (!window.RoxyNative && window.AkashicNative) {
+    if (window.RoxyNative) {
+      window.AkashicNative = window.RoxyNative;
+    } else if (window.AkashicNative) {
       window.RoxyNative = window.AkashicNative;
     }
     return;
@@ -66,6 +67,5 @@ export function installMobileBridge(): void {
   }
   const nativeBridge = bridge as unknown as NonNullable<Window["RoxyNative"]>;
   window.RoxyNative = nativeBridge;
-  // 已发布的 Akashic Mobile 壳仍会查找这个全局名。
   window.AkashicNative = nativeBridge;
 }

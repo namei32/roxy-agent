@@ -21,8 +21,6 @@ system_prompt = "test"
 
 [channels.chat]
 enabled = true
-host = "127.0.0.1"
-port = 6322
 channel_name = "web"
 """
 
@@ -77,6 +75,29 @@ keyset_manifest = "data/mobile/keys/current.json"
     assert config.mobile_realtime.inbox_retention.days == 9
 
 
+def test_mobile_realtime_loads_file_master_key_provider(tmp_path: Path) -> None:
+    config = load_config(
+        _write_config(
+            tmp_path,
+            """
+[mobile_realtime]
+enabled = true
+
+[mobile_realtime.key_encryption]
+provider = "file"
+master_key_namespace = ""
+master_key_file = "data/mobile/private/master-keys.json"
+            """,
+        ),
+        workspace=tmp_path,
+    )
+
+    assert config.mobile_realtime.key_encryption.provider == "file"
+    assert config.mobile_realtime.key_encryption.master_key_file == Path(
+        "data/mobile/private/master-keys.json"
+    )
+
+
 @pytest.mark.parametrize(
     ("mobile", "message"),
     [
@@ -103,7 +124,7 @@ enabled = true
 [mobile_realtime.key_encryption]
 provider = "plaintext"
 """,
-            "只支持 secret_service",
+            "只支持 secret_service 或 file",
         ),
     ],
 )
@@ -116,10 +137,13 @@ def test_mobile_realtime_rejects_unsafe_configuration(
         load_config(_write_config(tmp_path, mobile), workspace=tmp_path)
 
 
-def test_mobile_realtime_requires_loopback_webchat_pairing_entry(
+def test_mobile_realtime_requires_enabled_webchat_pairing_entry(
     tmp_path: Path,
 ) -> None:
-    config = _BASE.replace('host = "127.0.0.1"', 'host = "0.0.0.0"')
+    config = _BASE.replace(
+        "[channels.chat]\nenabled = true",
+        "[channels.chat]\nenabled = false",
+    )
     path = tmp_path / "config.toml"
     path.write_text(
         config + """
@@ -129,5 +153,5 @@ enabled = true
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="loopback"):
+    with pytest.raises(ValueError, match="配对入口"):
         load_config(path, workspace=tmp_path)

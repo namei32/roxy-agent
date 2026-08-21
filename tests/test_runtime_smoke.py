@@ -50,13 +50,13 @@ class _FakeChatServer:
             await asyncio.sleep(0)
 
 
-def test_plugin_uninstall_defers_only_inside_runtime_turn(
+def test_plugin_uninstall_passes_active_turn_owner(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = tmp_path / "config.toml"
     config_path.write_text("[runtime]\nworkspace='workspace'\n", encoding="utf-8")
-    calls: list[bool] = []
+    calls: list[str] = []
 
     monkeypatch.setattr(
         main.Config,
@@ -72,58 +72,52 @@ def test_plugin_uninstall_defers_only_inside_runtime_turn(
         plugin_id: str,
         _workspace: Path,
         *,
-        wait: bool,
+        owner_turn_id: str,
     ) -> dict[str, object]:
-        calls.append(wait)
+        calls.append(owner_turn_id)
         return {
-            "id": "operation:drain",
             "pluginId": plugin_id,
-            "status": "completed" if wait else "in_progress",
+            "publicationState": "pending_turn_end",
         }
 
     monkeypatch.setattr(main, "_request_plugin_uninstall", request)
-    monkeypatch.delenv("ROXY_DEFER_PLUGIN_UNINSTALL", raising=False)
-    monkeypatch.delenv("AKASHIC_DEFER_PLUGIN_UNINSTALL", raising=False)
-    completed = main._uninstall_via_runtime(
+    monkeypatch.delenv("ROXY_PLUGIN_ROLLOUT_OWNER_TURN", raising=False)
+    monkeypatch.delenv("AKASHIC_PLUGIN_ROLLOUT_OWNER_TURN", raising=False)
+    outside = main._uninstall_via_runtime(
         str(config_path),
         "context_pressure@github",
         tmp_path / "workspace",
     )
-    monkeypatch.setenv("AKASHIC_DEFER_PLUGIN_UNINSTALL", "1")
-    deferred = main._uninstall_via_runtime(
+    monkeypatch.setenv("ROXY_PLUGIN_ROLLOUT_OWNER_TURN", "turn:owner")
+    inside = main._uninstall_via_runtime(
         str(config_path),
         "context_pressure@github",
         tmp_path / "workspace",
     )
 
-    assert calls == [True, False]
-    assert completed is not None and completed["status"] == "completed"
-    assert deferred is not None and deferred["status"] == "in_progress"
+    assert calls == ["", "turn:owner"]
+    assert outside["publicationState"] == "pending_turn_end"
+    assert inside["publicationState"] == "pending_turn_end"
 
 
-def test_app_runtime_uses_explicit_dashboard_bind(
+def test_agent_turn_rejects_internal_plugin_commands(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("ROXY_DASHBOARD_HOST", "127.0.0.1")
-    monkeypatch.setenv("ROXY_DASHBOARD_PORT", "16403")
+    monkeypatch.setenv("ROXY_PLUGIN_ROLLOUT_OWNER_TURN", "turn:owner")
 
+    with pytest.raises(ValueError, match="Core 内部维护动作"):
+        main._reject_agent_internal_plugin_action("plugin-promote")
+
+    main._reject_agent_internal_plugin_action("plugin-install")
+    main._reject_agent_internal_plugin_action("plugin-uninstall")
+    main._reject_agent_internal_plugin_action("plugin-revert")
+
+
+def test_app_runtime_does_not_own_public_web_listener(tmp_path: Path) -> None:
     runtime = bootstrap_app.AppRuntime(cast(Any, object()), tmp_path)
 
-    assert runtime.dashboard_host == "127.0.0.1"
-    assert runtime.dashboard_port == 16403
-
-
-@pytest.mark.parametrize("value", ["not-a-port", "0", "65536"])
-def test_app_runtime_rejects_invalid_dashboard_port(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    value: str,
-) -> None:
-    monkeypatch.setenv("ROXY_DASHBOARD_PORT", value)
-
-    with pytest.raises(ValueError, match="ROXY_DASHBOARD_PORT"):
-        bootstrap_app.AppRuntime(cast(Any, object()), tmp_path)
+    assert not hasattr(runtime, "dashboard_host")
+    assert not hasattr(runtime, "dashboard_port")
 
 
 def _toml_value(value):
@@ -211,7 +205,7 @@ system_prompt = "test"
     assert cfg.max_iterations == 10
 
 
-def test_load_config_defaults_memory_window_and_optimizer_interval(tmp_path: Path):
+def test_load_config_defaults_compaction_and_optimizer_interval(tmp_path: Path):
     config_path = tmp_path / "config.toml"
     config_path.write_text(
         """
@@ -233,7 +227,8 @@ system_prompt = "test"
 
     cfg = load_config(config_path, workspace=tmp_path)
 
-    assert cfg.memory_window == 20
+    assert not hasattr(cfg, "memory_window")
+    assert cfg.context_compaction.keep_recent_tokens == 20_000
     assert cfg.memory_optimizer_interval_seconds == 64800
 
 
@@ -330,9 +325,9 @@ def test_workspace_selection_prefers_cli_then_env_then_config(
         config_path,
     ) == environment_workspace.resolve()
 
-    roxy_workspace = tmp_path / "roxy-environment-workspace"
-    monkeypatch.setenv("ROXY_WORKSPACE", str(roxy_workspace))
-    assert main._workspace_from_args([], config_path) == roxy_workspace.resolve()
+    canonical_workspace = tmp_path / "roxy-environment-workspace"
+    monkeypatch.setenv("ROXY_WORKSPACE", str(canonical_workspace))
+    assert main._workspace_from_args([], config_path) == canonical_workspace.resolve()
 
     cli_workspace = tmp_path / "cli-workspace"
     assert main._workspace_from_args(
@@ -481,12 +476,15 @@ def test_validated_timezone_rejects_invalid_names(tz_name: str):
 @pytest.mark.asyncio
 async def test_serve_smoke_loads_config_and_runs_shutdown(monkeypatch, tmp_path):
     config_path = tmp_path / "config.toml"
-    socket_path = tmp_path / "akashic.sock"
+    socket_path = tmp_path / "roxy.sock"
     _write_config(config_path, socket_path)
     _ = reset_veda(tmp_path)
 
     original_build_core_runtime = bootstrap_app.build_core_runtime
     observed: dict[str, object] = {}
+
+    async def _no_fatal_failure() -> None:
+        return None
 
     def _patched_build_core_runtime(config, workspace, http_resources, **kwargs):
         runtime = original_build_core_runtime(config, workspace, http_resources, **kwargs)
@@ -518,6 +516,11 @@ async def test_serve_smoke_loads_config_and_runs_shutdown(monkeypatch, tmp_path)
 
     monkeypatch.setattr(
         bootstrap_app, "build_core_runtime", _patched_build_core_runtime
+    )
+    monkeypatch.setattr(
+        bootstrap_app.PluginServiceHost,
+        "wait_fatal_failure",
+        lambda _self: _no_fatal_failure(),
     )
     monkeypatch.setattr(
         bootstrap_app, "build_dashboard_server", lambda **_: _FakeDashboardServer()
@@ -588,6 +591,38 @@ async def test_run_cleanup_steps_continues_after_cancellation():
         )
 
     assert calls == ["cancel", "cleanup"]
+
+
+@pytest.mark.asyncio
+async def test_shutdown_stops_mobile_channel_before_closing_gateway_storage(tmp_path):
+    events: list[str] = []
+
+    class Gateway:
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+            events.append("gateway.close")
+
+    gateway = Gateway()
+
+    class ConversationRuntime:
+        async def shutdown(self) -> None:
+            events.append("conversation.shutdown")
+
+    class ChannelHost:
+        async def stop_all(self) -> None:
+            assert gateway.closed is False
+            events.append("channels.stop")
+
+    runtime = bootstrap_app.AppRuntime(cast(Any, object()), tmp_path)
+    runtime.mobile_gateway_runtime = gateway
+    runtime.conversation_runtime = cast(Any, ConversationRuntime())
+    runtime.channel_host = cast(Any, ChannelHost())
+
+    await runtime.shutdown()
+
+    assert events == ["conversation.shutdown", "channels.stop", "gateway.close"]
 
 
 @pytest.mark.asyncio
@@ -944,10 +979,10 @@ def test_init_workspace_creates_expected_assets(tmp_path):
     assert "[llm.runtimes.qwen_vl]" in config_text
     assert 'model = "qwen-vl-plus"' in config_text
     assert "[channels.chat]" in config_text
-    assert "port = 6322" in config_text
+    assert "6322" not in config_text
     assert '[runtime]\n' in config_text
     assert 'workspace = "~/.roxy/workspace"' in config_text
-    assert any("http://127.0.0.1:6322" in step for step in summary.next_steps)
+    assert any("http://127.0.0.1:2236" in step for step in summary.next_steps)
     assert (workspace / "sessions.db").exists()
     assert (workspace / "observe").is_dir()
     assert (workspace / "memory" / "consolidation_writes.db").exists()

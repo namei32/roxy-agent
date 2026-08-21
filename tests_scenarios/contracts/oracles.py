@@ -440,7 +440,10 @@ def assert_mcp_reservoir_contract(observation: Mapping[str, object]) -> None:
 
 def assert_schedule_capacity_contract(observation: Mapping[str, object]) -> None:
     """断言第 11 个 Schedule add 不改变已有任务。"""
-    if observation.get("active_jobs", 0) > 10 and observation.get("operation_accepted") is True:
+    if (
+        cast(int, observation.get("active_jobs", 0)) > 10
+        and observation.get("operation_accepted") is True
+    ):
         raise AssertionError("Schedule 超过默认 10 个仍被接受")
     assert_companion_capacity(observation)
 

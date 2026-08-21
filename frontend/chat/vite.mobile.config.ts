@@ -6,10 +6,8 @@ import { emitThemeCatalog } from "../theme/src/vite-theme-plugin";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
-const configuredOutDir = process.env.ROXY_MOBILE_WEB_OUT_DIR
-  ?? process.env.AKASHIC_MOBILE_WEB_OUT_DIR;
-const outDir = configuredOutDir
-  ? resolve(configuredOutDir)
+const outDir = process.env.AKASHIC_MOBILE_WEB_OUT_DIR
+  ? resolve(process.env.AKASHIC_MOBILE_WEB_OUT_DIR)
   : resolve(repoRoot, "dist", "mobile-web");
 
 export default defineConfig({

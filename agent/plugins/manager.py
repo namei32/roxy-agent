@@ -10,6 +10,7 @@ import logging
 import os
 import secrets
 import shutil
+import socket
 import sys
 import tomllib
 from dataclasses import dataclass, field, replace
@@ -17,6 +18,7 @@ from pathlib import Path
 from types import MappingProxyType
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Literal, TypeVar, cast
+from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import BaseModel, ValidationError
 
@@ -112,6 +114,7 @@ from agent.tool_hooks.base import ToolHook
 from agent.tool_hooks.types import HookContext, HookOutcome
 from bus.event_bus import EventBus
 from infra.channels.contract import Channel
+from infra.persistence.json_store import atomic_save_json
 
 logger = logging.getLogger(__name__)
 U = TypeVar("U")
@@ -152,6 +155,7 @@ async def _complete_critical(awaitable: Awaitable[U]) -> tuple[U, bool]:
     # 3. 读取操作结果，保留其真实异常
     result = await task
     return result, cancelled
+
 
 _EVENT_TYPE_MAP: dict[PluginEventType, type] = {
     PluginEventType.BEFORE_TURN: BeforeTurnCtx,
@@ -210,27 +214,43 @@ class PluginManager:
         self._llm = llm
         self._runtime_services = MappingProxyType(dict(runtime_services or {}))
         self._installed_cache_root = installed_cache_root
-        self._channel_switcher: Callable[
-            [str, tuple[Channel, ...], tuple[Channel, ...]],
-            Awaitable[None],
-        ] | None = None
+        self._channel_switcher: (
+            Callable[
+                [str, tuple[Channel, ...], tuple[Channel, ...]],
+                Awaitable[None],
+            ]
+            | None
+        ) = None
         self._dashboard_preparer: Callable[[RuntimeSnapshot], None] | None = None
-        self._service_switcher: Callable[
-            [str, dict[str, dict[str, Any]], dict[str, dict[str, Any]]],
-            Awaitable[None],
-        ] | None = None
+        self._service_switcher: (
+            Callable[
+                [str, dict[str, dict[str, Any]], dict[str, dict[str, Any]]],
+                Awaitable[None],
+            ]
+            | None
+        ) = None
+        self._candidate_service_starter: (
+            Callable[[str, dict[str, dict[str, Any]]], Awaitable[None]] | None
+        ) = None
+        self._candidate_service_stopper: Callable[[str], Awaitable[None]] | None = None
+        self._candidate_service_health_check: (
+            Callable[[str], Awaitable[None]] | None
+        ) = None
         self._endpoint_quiescer: Callable[[], Awaitable[None]] | None = None
         self._endpoint_resumer: Callable[[], Awaitable[None]] | None = None
-        self._endpoint_switcher: Callable[
-            [
-                str,
-                dict[str, dict[str, Any]],
-                dict[str, dict[str, Any]],
-                tuple[Channel, ...],
-                tuple[Channel, ...],
-            ],
-            Awaitable[None],
-        ] | None = None
+        self._endpoint_switcher: (
+            Callable[
+                [
+                    str,
+                    dict[str, dict[str, Any]],
+                    dict[str, dict[str, Any]],
+                    tuple[Channel, ...],
+                    tuple[Channel, ...],
+                ],
+                Awaitable[None],
+            ]
+            | None
+        ) = None
         self._loaded: set[str] = set()
         self._channels: list[Channel] = []
         self._tool_hooks: list[ToolHook] = []
@@ -271,7 +291,7 @@ class PluginManager:
         self._snapshot_skill_catalogs: dict[str, str] = {}
         self._reload_journal = ReloadJournal(workspace)
         self._drain_transactions: dict[str, str] = {}
-        self._drained_before_journal: set[str] = set()
+        self._drained_before_commit: set[str] = set()
         self._event_bus.bind_runtime_snapshot_store(self._snapshot_store)
 
     @property
@@ -375,6 +395,60 @@ class PluginManager:
     @property
     def plugin_dirs(self) -> list[Path]:
         return list(self._dirs)
+
+    @property
+    def skill_projection_roots(self) -> list[Path]:
+        roots = self.plugin_dirs
+        if self._installed_cache_root is not None:
+            roots.append(self._installed_cache_root)
+        return roots
+
+    def sync_skill_links(self):
+        """Rebuild workspace links from the active stable plugin generations."""
+
+        from agent.plugins.skill_links import PluginSkillLinker
+
+        return PluginSkillLinker(
+            workspace=self._workspace,
+            plugin_roots=self.skill_projection_roots,
+            memory_engine=self._memory_engine,
+        ).sync(self.active_plugins())
+
+    def _prepare_skill_links_for_promotion(
+        self,
+        generation: PluginGeneration,
+    ) -> tuple[Any, list[ActivePluginInfo], list[ActivePluginInfo]]:
+        """Build and validate both sides of the stable skill projection switch."""
+
+        from agent.plugins.skill_links import PluginSkillLinker
+
+        contributions = generation.production_contributions or generation.contributions
+        plugin_dir = Path(cast(Any, generation.instance).context.plugin_dir).resolve(
+            strict=False
+        )
+        target = ActivePluginInfo(
+            plugin_id=generation.plugin_id,
+            plugin_dir=plugin_dir,
+            manifest=contributions.manifest,
+            module_path=generation.module_path,
+            skill_roots=contributions.skill_roots,
+            drift_skill_roots=contributions.drift_skill_roots,
+            mcp_servers=contributions.mcp_servers,
+        )
+        stable = self.active_plugins()
+        post_promotion = [
+            plugin
+            for plugin in stable
+            if plugin.plugin_id != generation.plugin_id
+        ]
+        post_promotion.append(target)
+        linker = PluginSkillLinker(
+            workspace=self._workspace,
+            plugin_roots=self.skill_projection_roots,
+            memory_engine=self._memory_engine,
+        )
+        linker.validate(post_promotion)
+        return linker, stable, post_promotion
 
     def active_plugins(self) -> list[ActivePluginInfo]:
         return [
@@ -500,6 +574,7 @@ class PluginManager:
                 raise
 
             # 1. 首个快照直接安装；已有快照使用可回滚发布事务
+            previous = self._active_workspace_mcp
             if self._snapshot_store.current is None:
                 self._snapshot_store.install(snapshot)
             else:
@@ -516,6 +591,9 @@ class PluginManager:
                 _, commit_cancelled = await _complete_critical(
                     self._snapshot_store.commit(transaction)
                 )
+                self._mcp_host.mark_active(generation.generation_id)
+                if previous is not None:
+                    self._mcp_host.mark_draining(previous.generation_id)
                 if commit_cancelled:
                     raise asyncio.CancelledError
                 return generation
@@ -523,6 +601,7 @@ class PluginManager:
             self._active_workspace_mcp = generation
             self._prepared_workspace_mcp = None
             generation.state = "active"
+            self._mcp_host.mark_active(generation.generation_id)
             return generation
 
     async def discard_workspace_mcp_candidate(self) -> None:
@@ -580,6 +659,24 @@ class PluginManager:
     ) -> None:
         self._service_switcher = switcher
 
+    def bind_candidate_service_host(
+        self,
+        *,
+        start: Callable[[str, dict[str, dict[str, Any]]], Awaitable[None]],
+        stop: Callable[[str], Awaitable[None]],
+        assert_healthy: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """Bind isolated managed-service ownership for validation candidates."""
+
+        self._candidate_service_starter = start
+        self._candidate_service_stopper = stop
+        self._candidate_service_health_check = assert_healthy
+
+    async def wait_mcp_fatal_failure(self) -> None:
+        """Escalate exhausted active MCP recovery to the runtime owner."""
+
+        await self._mcp_host.wait_fatal_failure()
+
     def bind_endpoint_admission(
         self,
         *,
@@ -624,9 +721,7 @@ class PluginManager:
     @property
     def ready_candidate(self) -> PluginGeneration | None:
         return (
-            None
-            if self._ready_candidate is None
-            else self._ready_candidate.candidate
+            None if self._ready_candidate is None else self._ready_candidate.candidate
         )
 
     @property
@@ -758,15 +853,17 @@ class PluginManager:
             import_suffix = name.replace("-", "_").replace("@", "_")
             import_source = source.marketplace or source.plugin_root.parent.name
             module_path = source.plugin_root / "plugin.py"
-            mods.append({
-                "name": name,
-                "plugin_root": str(source.plugin_root),
-                "module_path": str(module_path) if module_path is not None else "",
-                "import_path": f"roxy_plugin_{import_source}_{import_suffix}",
-                "marketplace": source.marketplace,
-                "source_type": source.source_type,
-                "package_id": package_id,
-            })
+            mods.append(
+                {
+                    "name": name,
+                    "plugin_root": str(source.plugin_root),
+                    "module_path": str(module_path) if module_path is not None else "",
+                    "import_path": f"roxy_plugin_{import_source}_{import_suffix}",
+                    "marketplace": source.marketplace,
+                    "source_type": source.source_type,
+                    "package_id": package_id,
+                }
+            )
         return mods
 
     async def load_all(self) -> None:
@@ -787,6 +884,7 @@ class PluginManager:
                 latest_by_id=latest_by_id,
             )
             self._reload_journal.finish_recovery(action)
+            self._write_startup_recovery_fact(action, committed=False)
 
         # 2. 根据 durable pointer 判定 promoting 崩溃发生在切换前还是切换后。
         stable_by_id = self._discovered_by_id(installed_selector="stable")
@@ -800,6 +898,7 @@ class PluginManager:
         )
         for action in restore_discarded:
             self._reload_journal.finish_recovery(action)
+            self._write_startup_recovery_fact(action, committed=False)
 
         # 3. stable 先恢复服务；latest 候选随后以新事务重新准备和验证。
         for mod in stable_by_id.values():
@@ -856,7 +955,13 @@ class PluginManager:
                 action.phase in {"commit_started", "promoting"}
                 and latest_revision == action.source_revision
             ):
-                restore_candidates.append(action)
+                self._discard_recovery_pointer(
+                    action.plugin_id,
+                    action.source_revision,
+                    stable_by_id=stable_by_id,
+                    latest_by_id=latest_by_id,
+                )
+                restore_discarded.append(replace(action, action="discard_candidate"))
                 continue
             if (
                 action.phase in {"commit_started", "promoting"}
@@ -899,6 +1004,25 @@ class PluginManager:
                 )
             assert generation.source_revision == action.source_revision
             self._reload_journal.finish_recovery(action)
+            self._write_startup_recovery_fact(action, committed=True)
+
+    def _write_startup_recovery_fact(
+        self,
+        action: ReloadRecoveryAction,
+        *,
+        committed: bool,
+    ) -> None:
+        message = (
+            f"{action.plugin_id} 更新已在 Core 重启后确认提交；当前使用新版本。"
+            if committed
+            else f"{action.plugin_id} 更新在 Core 重启时没有完成；候选已丢弃，原版本保持可用。"
+        )
+        atomic_save_json(
+            self._workspace / "runtime" / "plugin-rollout-fact.json",
+            {"message": message},
+            ensure_ascii=False,
+            domain="plugin_rollout_fact",
+        )
 
     async def _restore_latest_candidates(
         self,
@@ -1095,6 +1219,8 @@ class PluginManager:
             return
         generation.retire_started = True
         generation.state = "retired"
+        if generation.mcp_catalog is not None:
+            self._mcp_host.mark_draining(generation.generation_id)
         self._draining_generations.setdefault(generation.plugin_id, []).append(
             generation
         )
@@ -1254,6 +1380,18 @@ class PluginManager:
                 raise asyncio.CancelledError
             return result, status
 
+    def annotate_reload(self, tx_id: str, details: dict[str, object]) -> None:
+        """Append turn lineage evidence to an existing reload transaction."""
+
+        self._reload_journal.annotate(tx_id, details)
+
+    def require_installed_plugin(self, plugin_id: str) -> None:
+        """Fail before registering uninstall when the plugin has no installed owner."""
+
+        manifest = load_plugin_manifest(_plugins_home(self._installed_cache_root))
+        if plugin_id not in manifest:
+            raise RuntimeError(f"插件未安装: {plugin_id}")
+
     async def _reconcile_changed_locked(self) -> list[dict[str, object]]:
         """Reconcile discovered latest artifacts while candidate ownership is held."""
 
@@ -1264,7 +1402,7 @@ class PluginManager:
             manifest = load_plugin_manifest(_plugins_home(self._installed_cache_root))
             if manifest.get(ready.plugin_id, True):
                 return [self._ready_candidate_status()]
-            results.append(await self._discard_ready_candidate(ready.plugin_id))
+            results.append(await self._drop_ready(ready.plugin_id))
         discovered = {
             _resolve_plugin_id(mod): mod
             for mod in self.discover(installed_selector="latest")
@@ -1306,9 +1444,7 @@ class PluginManager:
 
     async def reconcile_disabled_and_drain(self, plugin_id: str) -> None:
         async with self._candidate_prepare_lock:
-            manifest = load_plugin_manifest(
-                _plugins_home(self._installed_cache_root)
-            )
+            manifest = load_plugin_manifest(_plugins_home(self._installed_cache_root))
             if manifest.get(plugin_id, False):
                 raise RuntimeError(f"插件尚未禁用: {plugin_id}")
             if self._ready_candidate is not None:
@@ -1317,7 +1453,7 @@ class PluginManager:
                         "存在其他插件 latest，必须先 promote/discard: "
                         f"{self._ready_candidate.plugin_id}"
                     )
-                _ = await self._discard_ready_candidate(plugin_id)
+                _ = await self._drop_ready(plugin_id)
             active = self._active_generations.get(plugin_id)
             draining = self._draining_generations.get(plugin_id, [])
             if active is None and not draining:
@@ -1518,7 +1654,7 @@ class PluginManager:
         async with self._candidate_prepare_lock:
             return await self._publish_prepared(plugin_id)
 
-    async def promote_latest_candidate(self, plugin_id: str) -> dict[str, object]:
+    async def switch_ready(self, plugin_id: str) -> dict[str, object]:
         """Promote the one ready installed candidate without rebuilding it."""
 
         async with self._candidate_prepare_lock:
@@ -1534,21 +1670,107 @@ class PluginManager:
             if isinstance(kv_store, PreparedPluginKVStore) and kv_store.dirty:
                 raise RuntimeError("候选插件修改了 KV，read-only 验证不能 promote")
 
-            # 1. 持久 pointer 先进入 promoting；整个回调不跨 await。
+            old_services = (
+                ready.previous.contributions.managed_services
+                if ready.previous is not None
+                else {}
+            )
+            target_contributions = (
+                generation.production_contributions or generation.contributions
+            )
+            new_services = target_contributions.managed_services
+            old_channels = (
+                ready.previous.contributions.channels
+                if ready.previous is not None
+                else ()
+            )
+            new_channels = target_contributions.channels
+            endpoint_changed = (
+                old_services != new_services or old_channels != new_channels
+            )
+
+            skill_linker, stable_skill_plugins, target_skill_plugins = (
+                self._prepare_skill_links_for_promotion(generation)
+            )
+
+            # 1. Seal both stable and validation leases before touching ownership.
+            candidate_snapshot = self._snapshot_store.pause_candidate_admission(
+                ready.snapshot
+            )
+            quiesced_snapshot = (
+                self._snapshot_store.pause_admission() if endpoint_changed else None
+            )
+            endpoints_switched = False
+            if endpoint_changed:
+                try:
+                    if self._endpoint_quiescer is not None:
+                        await self._endpoint_quiescer()
+                    if quiesced_snapshot is not None:
+                        await self._snapshot_store.wait_for_no_leases(quiesced_snapshot)
+                    await self._snapshot_store.wait_for_no_leases(ready.snapshot)
+                    await self._restore_ready_runtime(ready)
+                    generation = ready.candidate
+                    kv_store = cast(Any, generation.instance).context.kv_store
+                    new_services = generation.contributions.managed_services
+                    new_channels = generation.contributions.channels
+                    await self._switch_plugin_endpoints(
+                        plugin_id,
+                        old_services,
+                        new_services,
+                        old_channels,
+                        new_channels,
+                    )
+                    endpoints_switched = True
+                except BaseException:
+                    await self._snapshot_store.resume(quiesced_snapshot)
+                    await self._snapshot_store.resume(candidate_snapshot)
+                    if self._endpoint_resumer is not None:
+                        await self._endpoint_resumer()
+                    if self._ready_candidate is ready:
+                        await self._drop_ready(plugin_id)
+                    raise
+            else:
+                try:
+                    await self._snapshot_store.wait_for_no_leases(ready.snapshot)
+                    await self._restore_ready_runtime(ready)
+                    generation = ready.candidate
+                    kv_store = cast(Any, generation.instance).context.kv_store
+                except asyncio.CancelledError:
+                    await self._snapshot_store.resume(candidate_snapshot)
+                    raise
+                except Exception:
+                    await self._snapshot_store.resume(candidate_snapshot)
+                    if self._ready_candidate is ready:
+                        await self._drop_ready(plugin_id)
+                    raise
+
+            # 2. 先切可回滚的 Skill 投影，再提交持久 pointer；整个回调不跨 await。
+            skill_links_switched = False
+            link_result = None
+
             def before_open() -> None:
+                nonlocal link_result, skill_links_switched
+                try:
+                    link_result = skill_linker.sync(target_skill_plugins)
+                except BaseException:
+                    skill_linker.sync(stable_skill_plugins)
+                    raise
+                skill_links_switched = True
                 phase = self._reload_journal.get(tx_id).phase
                 if phase == "latest_ready":
                     self._advance_reload(generation, "promoting")
                 artifact_base = _installed_artifact_base(generation)
                 if artifact_base is not None:
-                    _promote_ready_candidate_pointer(ready, artifact_base)
+                    _switch_ready_pointer(ready, artifact_base)
                 if isinstance(kv_store, PreparedPluginKVStore):
                     kv_store.commit()
 
-            # 2. Snapshot pointer 切换后再替换 manager 的 stable generation owner。
+            # 3. Snapshot pointer 切换后再替换 manager 的 stable generation owner。
             def after_open() -> None:
                 self._activate_published_generation(generation, ready.previous)
                 generation.state = "active"
+                if generation.mcp_catalog is not None:
+                    self._mcp_host.mark_active(generation.generation_id)
                 self._scopes[generation.module_path] = generation.scope
                 self._loaded.add(generation.module_path)
                 self._active_generations[plugin_id] = generation
@@ -1571,6 +1793,24 @@ class PluginManager:
                     )
                 )
             except BaseException:
+                endpoint_error: BaseException | None = None
+                skill_error: BaseException | None = None
+                if skill_links_switched:
+                    try:
+                        skill_linker.sync(stable_skill_plugins)
+                    except BaseException as error:
+                        skill_error = error
+                if endpoints_switched:
+                    try:
+                        await self._switch_plugin_endpoints(
+                            plugin_id,
+                            new_services,
+                            old_services,
+                            new_channels,
+                            old_channels,
+                        )
+                    except BaseException as error:
+                        endpoint_error = error
                 if (
                     previous_snapshot is not None
                     and self.current_snapshot is previous_snapshot
@@ -1579,15 +1819,56 @@ class PluginManager:
                         previous_snapshot.snapshot_id,
                         None,
                     )
+                await self._snapshot_store.resume(quiesced_snapshot)
+                await self._snapshot_store.resume(candidate_snapshot)
+                if self._endpoint_resumer is not None and endpoint_changed:
+                    await self._endpoint_resumer()
+                if endpoint_error is not None:
+                    raise RuntimeError(
+                        "插件 promote 失败后旧 endpoint 恢复失败"
+                    ) from endpoint_error
+                if skill_error is not None:
+                    raise RuntimeError(
+                        "插件 promote 失败后 stable skill 投影恢复失败"
+                    ) from skill_error
+                if endpoint_changed and self._ready_candidate is ready:
+                    await self._drop_ready(plugin_id)
                 raise
             self._ready_candidate = None
             self._track_reload_drain(generation, transaction.previous)
+            if self._endpoint_resumer is not None and endpoint_changed:
+                await self._endpoint_resumer()
+            assert link_result is not None
+            logger.info(
+                "插件 stable skill 投影同步完成: expected=%d created=%d repaired=%d removed=%d skipped=%d",
+                link_result.expected,
+                link_result.created,
+                link_result.repaired,
+                link_result.removed,
+                link_result.skipped,
+            )
             result = self._publication_status(
                 plugin_id,
                 active=ready.previous,
                 candidate=generation,
                 publication_state="promoted",
             )
+            validation_data_dir = (
+                self._workspace
+                / "runtime"
+                / "plugin-validation"
+                / generation.generation_id
+            )
+            try:
+                await asyncio.to_thread(
+                    _remove_validation_data_dir, validation_data_dir
+                )
+            except Exception as error:
+                logger.error(
+                    "候选隔离 plugin-data 清理失败: %s: %s",
+                    validation_data_dir,
+                    error,
+                )
             logger.info(
                 "plugin_snapshot_status %s",
                 json.dumps(result, ensure_ascii=False, sort_keys=True),
@@ -1596,13 +1877,83 @@ class PluginManager:
                 raise asyncio.CancelledError
             return result
 
-    async def discard_latest_candidate(self, plugin_id: str) -> dict[str, object]:
+    async def _restore_ready_runtime(
+        self,
+        ready: _ReadyPluginCandidate,
+    ) -> None:
+        """Replace isolated validation resources before formal endpoint commit."""
+
+        generation = ready.candidate
+        production = generation.production_contributions
+        if production is None:
+            return
+        production_data_dir = generation.production_data_dir
+        if production_data_dir is None:
+            raise RuntimeError("候选缺少 production plugin-data identity")
+
+        # 1. Stop isolated services after every validation lease has ended.
+        if generation.validation_managed_services:
+            if self._candidate_service_stopper is None:
+                raise RuntimeError("候选 managed service 隔离宿主未绑定")
+            if self._candidate_service_health_check is None:
+                raise RuntimeError("候选 managed service 健康检查未绑定")
+            await self._candidate_service_health_check(generation.generation_id)
+        if generation.mcp_catalog is not None:
+            self._mcp_host.assert_healthy(generation.generation_id)
+        if generation.validation_managed_services:
+            assert self._candidate_service_stopper is not None
+            await self._candidate_service_stopper(generation.generation_id)
+
+        # 2. Reconnect MCP with formal endpoint env, then refresh snapshot payload.
+        if generation.mcp_catalog is not None:
+            await self._mcp_host.close(generation.generation_id)
+            generation.mcp_catalog = None
+        generation.contributions = production
+        generation.data_dir = production_data_dir
+        from agent.plugins.context import PreparedPluginKVStore
+
+        context = cast(Any, generation.instance).context
+        context.data_dir = production_data_dir
+        context.kv_store = PreparedPluginKVStore(
+            production_data_dir / ".kv.json",
+            can_write=lambda: _generation_can_write(generation),
+            writer_id=generation.generation_id,
+        )
+        if production.mcp_servers or production.proactive_sources:
+            generation.mcp_catalog = await self._mcp_host.prepare(
+                generation.generation_id,
+                server_specs=production.mcp_servers,
+                required_tools=_required_mcp_tools(production.proactive_sources),
+                scope=generation.scope,
+            )
+            generation.scope.defer(
+                "production_mcp_catalog",
+                lambda: self._mcp_host.close(generation.generation_id),
+            )
+        replacement = self._compile_generation_snapshot(generation)
+        if replacement.snapshot_id != ready.snapshot.snapshot_id:
+            raise RuntimeError(
+                "候选隔离资源恢复后 snapshot identity 发生变化: "
+                f"{ready.snapshot.snapshot_id} -> {replacement.snapshot_id}"
+            )
+        _replace_snapshot_payload(ready.snapshot, replacement)
+        self._compile_snapshot_event_handlers(ready.snapshot)
+        if self._dashboard_preparer is not None:
+            self._dashboard_preparer(ready.snapshot)
+        cast(Any, generation.instance).context.tool_registry = (
+            ready.snapshot.tool_registry
+        )
+        generation.production_contributions = None
+        generation.validation_managed_services = {}
+        generation.production_data_dir = None
+
+    async def drop_candidate(self, plugin_id: str) -> dict[str, object]:
         """Discard the one ready installed candidate and preserve stable."""
 
         async with self._candidate_prepare_lock:
-            return await self._discard_ready_candidate(plugin_id)
+            return await self._drop_ready(plugin_id)
 
-    async def _discard_ready_candidate(self, plugin_id: str) -> dict[str, object]:
+    async def _drop_ready(self, plugin_id: str) -> dict[str, object]:
         ready = self._require_ready_candidate(plugin_id)
         tx_id = ready.candidate.reload_tx_id
         if tx_id is None:
@@ -1618,7 +1969,7 @@ class PluginManager:
             raise RuntimeError(f"latest candidate 不能从 {phase} discard")
         artifact_base = _installed_artifact_base(ready.candidate)
         if artifact_base is not None:
-            _restore_ready_candidate_pointer(ready, artifact_base)
+            _restore_ready_pointer(ready, artifact_base)
         _, cancelled = await _complete_critical(
             self._snapshot_store.discard_latest(ready.snapshot)
         )
@@ -1681,6 +2032,73 @@ class PluginManager:
             "candidate_error": None if transaction is None else transaction.error,
         }
 
+    def candidate_child_evidence(
+        self,
+        plugin_id: str,
+        generation_id: str,
+        items: tuple[object, ...],
+    ) -> tuple[str, ...]:
+        """返回 child 真实成功使用的候选 Tool 或 Skill 证据。"""
+
+        # 1. 从冻结的 latest snapshot 判定 owner，不信任 child 自报。
+        ready = self._require_ready_candidate(plugin_id)
+        generation = ready.candidate
+        if generation.generation_id != generation_id:
+            raise RuntimeError(
+                "candidate child generation 身份不一致: "
+                f"expected={generation.generation_id} actual={generation_id}"
+            )
+        registry = ready.snapshot.tool_registry
+        if registry is None:
+            raise RuntimeError("candidate RuntimeSnapshot 缺少 ToolRegistry")
+        plugin_name = str(getattr(generation.instance, "name", plugin_id))
+        owned_tools = registry.get_source_tool_names(
+            "plugin", plugin_name, risk="read-only"
+        )
+        for server_name in generation.contributions.mcp_servers:
+            owned_tools.update(
+                registry.get_source_tool_names(
+                    "mcp", server_name, risk="read-only"
+                )
+            )
+        owned_skills = {
+            skill_dir.name
+            for root in generation.contributions.skill_roots
+            for skill_dir in root.iterdir()
+            if skill_dir.is_dir() and (skill_dir / "SKILL.md").is_file()
+        }
+        skill_catalog_generation_id = (
+            generation.skill_catalog.generation_id
+            if generation.skill_catalog is not None
+            else None
+        )
+
+        # 2. 只接受成功工具 item 或本轮真实注入的候选 Skill。
+        evidence: set[str] = set()
+        for item in items:
+            kind = getattr(getattr(item, "kind", None), "value", None)
+            data = getattr(item, "data", None)
+            if not isinstance(data, dict):
+                continue
+            if kind == "toolCall":
+                name = data.get("name")
+                if data.get("status") == "success" and name in owned_tools:
+                    evidence.add(f"tool:{name}")
+                provenance = data.get("runtimeProvenance")
+                if (
+                    data.get("status") == "success"
+                    and name == "load_skill"
+                    and isinstance(provenance, dict)
+                    and provenance.get("kind") == "plugin-skill"
+                    and provenance.get("pluginId") == plugin_id
+                    and provenance.get("skillName") in owned_skills
+                    and provenance.get("skillCatalogGenerationId")
+                    == skill_catalog_generation_id
+                    and provenance.get("runtimeSnapshotId") == ready.snapshot.snapshot_id
+                ):
+                    evidence.add(f"skill:{provenance['skillName']}")
+        return tuple(sorted(evidence))
+
     def _ready_candidate_status(self) -> dict[str, object]:
         ready = self._ready_candidate
         if ready is None:
@@ -1704,7 +2122,42 @@ class PluginManager:
         generation = self._prepared_generations.get(plugin_id)
         if generation is None:
             raise KeyError(f"插件没有待发布候选: {plugin_id}")
+        active = self._active_generations.get(plugin_id)
+        stage_latest = _installed_generation_is_candidate(generation)
+        production = generation.production_contributions or generation.contributions
+        production_endpoint_changed = (
+            active.contributions.managed_services if active is not None else {}
+        ) != production.managed_services or (
+            active.contributions.channels if active is not None else ()
+        ) != production.channels
         try:
+            if stage_latest:
+                if (
+                    generation.production_contributions is None
+                    or generation.production_data_dir is None
+                ):
+                    raise RuntimeError("installed candidate 缺少隔离 plugin-data 身份")
+                if (
+                    generation.mcp_catalog is not None
+                    and not generation.contributions.mcp_servers
+                    and not generation.contributions.proactive_sources
+                ):
+                    await self._mcp_host.close(generation.generation_id)
+                    generation.mcp_catalog = None
+                if generation.validation_managed_services:
+                    if self._candidate_service_starter is None:
+                        raise RuntimeError("候选 managed service 隔离宿主未绑定")
+                    await self._candidate_service_starter(
+                        generation.generation_id,
+                        generation.validation_managed_services,
+                    )
+                    assert self._candidate_service_stopper is not None
+                    generation.scope.defer(
+                        "validation_managed_services",
+                        lambda: self._candidate_service_stopper(
+                            generation.generation_id
+                        ),
+                    )
             workspace_generations = tuple(
                 item
                 for item in (
@@ -1726,7 +2179,9 @@ class PluginManager:
                 )
             generation.runtime_snapshot = self._compile_generation_snapshot(generation)
             snapshot = generation.runtime_snapshot
-            cast(Any, generation.instance).context.tool_registry = snapshot.tool_registry
+            cast(Any, generation.instance).context.tool_registry = (
+                snapshot.tool_registry
+            )
         except (asyncio.CancelledError, Exception) as error:
             error_text = str(error) or type(error).__name__
             self._record_failed_gate(
@@ -1740,7 +2195,6 @@ class PluginManager:
                 error=f"publish_rebase: {error_text}",
             )
             raise
-        active = self._active_generations.get(plugin_id)
         try:
             await self._prepare_generation(generation)
         except (asyncio.CancelledError, Exception) as error:
@@ -1775,17 +2229,27 @@ class PluginManager:
         new_services = generation.contributions.managed_services
         old_channels = active.contributions.channels if active is not None else ()
         new_channels = generation.contributions.channels
-        endpoint_changed = (
+        endpoint_changed = not stage_latest and (
             old_services != new_services or old_channels != new_channels
         )
-        stage_latest = _installed_generation_is_candidate(generation)
-        if stage_latest and endpoint_changed:
-            error_text = "候选插件改变独占 managed service/channel，不能在线并存验证"
-            await self.discard_prepared(
-                plugin_id,
-                error=f"endpoint_coexistence: {error_text}",
+        if stage_latest and production_endpoint_changed:
+            self._reload_journal.annotate(
+                cast(str, generation.reload_tx_id),
+                {
+                    "event": "exclusive_endpoints_deferred",
+                    "managed_services_changed": (
+                        active is None
+                        or active.contributions.managed_services
+                        != production.managed_services
+                    ),
+                    "channels_changed": (
+                        active is None
+                        and bool(production.channels)
+                        or active is not None
+                        and active.contributions.channels != production.channels
+                    ),
+                },
             )
-            raise RuntimeError(error_text)
         self._compile_snapshot_event_handlers(snapshot)
         if self._dashboard_preparer is not None:
             try:
@@ -1825,9 +2289,7 @@ class PluginManager:
                 if self._endpoint_quiescer is not None:
                     await self._endpoint_quiescer()
                 if quiesced_snapshot is not None:
-                    await self._snapshot_store.wait_for_no_leases(
-                        quiesced_snapshot
-                    )
+                    await self._snapshot_store.wait_for_no_leases(quiesced_snapshot)
             except BaseException as error:
                 error_text = str(error) or type(error).__name__
                 await self._snapshot_store.resume(quiesced_snapshot)
@@ -1909,7 +2371,9 @@ class PluginManager:
             if self._endpoint_resumer is not None:
                 await self._endpoint_resumer()
             if endpoint_error is not None:
-                raise RuntimeError("Snapshot abort 后旧端点恢复失败") from endpoint_error
+                raise RuntimeError(
+                    "Snapshot abort 后旧端点恢复失败"
+                ) from endpoint_error
             raise
 
         commit_error: BaseException | None = None
@@ -2202,7 +2666,10 @@ class PluginManager:
                 raise RuntimeError("RuntimeSnapshot MCP client 已断开")
         workspace_mcp = snapshot.workspace_mcp_generation
         if workspace_mcp is not None:
-            if self._mcp_host.get(workspace_mcp.generation_id) is not workspace_mcp.catalog:
+            if (
+                self._mcp_host.get(workspace_mcp.generation_id)
+                is not workspace_mcp.catalog
+            ):
                 raise RuntimeError("RuntimeSnapshot workspace MCP catalog 不可用")
             self._validate_workspace_mcp_generation(workspace_mcp)
         for item in snapshot.generations.values():
@@ -2210,13 +2677,16 @@ class PluginManager:
                 raise RuntimeError("RuntimeSnapshot 插件作用域已关闭")
             if item.scope.resource_count < item.minimum_resource_count:
                 raise RuntimeError("RuntimeSnapshot 插件资源数量不足")
-            if item.job_catalog is not None and self._job_host.get(
-                item.generation_id
-            ) is not item.job_catalog:
+            if (
+                item.job_catalog is not None
+                and self._job_host.get(item.generation_id) is not item.job_catalog
+            ):
                 raise RuntimeError("RuntimeSnapshot Job catalog 不可用")
-            if item.proactive_catalog is not None and self._proactive_host.get(
-                item.generation_id
-            ) is not item.proactive_catalog:
+            if (
+                item.proactive_catalog is not None
+                and self._proactive_host.get(item.generation_id)
+                is not item.proactive_catalog
+            ):
                 raise RuntimeError("RuntimeSnapshot proactive catalog 不可用")
 
     def _advance_reload(
@@ -2278,9 +2748,13 @@ class PluginManager:
 
         # 3. 清理异常优先暴露，避免把半完成恢复伪装成原始发布失败。
         if pointer_error is not None:
-            raise RuntimeError("候选发布失败后 artifact pointer 恢复失败") from pointer_error
+            raise RuntimeError(
+                "候选发布失败后 artifact pointer 恢复失败"
+            ) from pointer_error
         if snapshot_error is not None:
-            raise RuntimeError("候选发布失败后 RuntimeSnapshot 回收失败") from snapshot_error
+            raise RuntimeError(
+                "候选发布失败后 RuntimeSnapshot 回收失败"
+            ) from snapshot_error
 
     def _track_reload_drain(
         self,
@@ -2300,8 +2774,8 @@ class PluginManager:
             self._advance_reload(generation, "complete")
             return
         snapshot_id = previous_snapshot.snapshot_id
-        if snapshot_id in self._drained_before_journal:
-            self._drained_before_journal.remove(snapshot_id)
+        if snapshot_id in self._drained_before_commit:
+            self._drained_before_commit.remove(snapshot_id)
             self._advance_reload(generation, "complete")
             return
         self._advance_reload(generation, "draining")
@@ -2313,7 +2787,7 @@ class PluginManager:
             return
         record = self._reload_journal.get(tx_id)
         if record.phase in {"commit_started", "promoting"}:
-            self._drained_before_journal.add(snapshot_id)
+            self._drained_before_commit.add(snapshot_id)
             return
         if record.phase == "committed":
             self._reload_journal.advance(tx_id, "draining")
@@ -2337,9 +2811,11 @@ class PluginManager:
                 self.latest_snapshot.snapshot_id
                 if publication_state == "latest_ready"
                 and self.latest_snapshot is not None
-                else self.current_snapshot.snapshot_id
-                if self.current_snapshot is not None
-                else None
+                else (
+                    self.current_snapshot.snapshot_id
+                    if self.current_snapshot is not None
+                    else None
+                )
             ),
             "stable_snapshot_id": (
                 self.current_snapshot.snapshot_id
@@ -2455,9 +2931,7 @@ class PluginManager:
                     _skill_descriptions(prepared) if prepared is not None else {}
                 ),
                 "drift_skill_descriptions": (
-                    _drift_skill_descriptions(prepared)
-                    if prepared is not None
-                    else {}
+                    _drift_skill_descriptions(prepared) if prepared is not None else {}
                 ),
                 "skill_body_hashes": (
                     _skill_body_hashes(prepared, drift=False)
@@ -2477,9 +2951,7 @@ class PluginManager:
                 ),
                 "jobs": _job_keys(prepared) if prepared is not None else [],
                 "proactive_sources": (
-                    _proactive_source_keys(prepared)
-                    if prepared is not None
-                    else []
+                    _proactive_source_keys(prepared) if prepared is not None else []
                 ),
                 "job_specs": (
                     _job_spec_evidence(prepared) if prepared is not None else {}
@@ -2510,8 +2982,13 @@ class PluginManager:
         initial_plugin_id = _resolve_plugin_id(mod)
         if activate and initial_plugin_id in self._active_generations:
             return self._active_generations[initial_plugin_id]
-        plugin_manifest = load_plugin_manifest(_plugins_home(self._installed_cache_root))
-        if not mod.get("package_id") and plugin_manifest.get(initial_plugin_id, True) is False:
+        plugin_manifest = load_plugin_manifest(
+            _plugins_home(self._installed_cache_root)
+        )
+        if (
+            not mod.get("package_id")
+            and plugin_manifest.get(initial_plugin_id, True) is False
+        ):
             logger.info("插件已禁用（manifest.toml）: %s", initial_plugin_id)
             return None
         tool_names: list[str] = []
@@ -2536,12 +3013,8 @@ class PluginManager:
         try:
             source_revision = _source_revision(plugin_dir)
         except Exception as error:
-            revision = hashlib.sha256(
-                f"{plugin_dir}:{error}".encode()
-            ).hexdigest()
-            generation_id = (
-                f"{initial_plugin_id}:{revision[:12]}:{generation_sequence}"
-            )
+            revision = hashlib.sha256(f"{plugin_dir}:{error}".encode()).hexdigest()
+            generation_id = f"{initial_plugin_id}:{revision[:12]}:{generation_sequence}"
             reload_tx_id = (
                 self._begin_reload_attempt(
                     plugin_id=initial_plugin_id,
@@ -2662,6 +3135,7 @@ class PluginManager:
             )
             return None
         from agent.plugins.context import PluginContext, PluginKVStore
+
         scope = PluginScope(plugin_id)
         instance.context = PluginContext(  # type: ignore[attr-defined]
             event_bus=None,  # type: ignore[arg-type]
@@ -2703,7 +3177,8 @@ class PluginManager:
                     self._cleanup_failures.append(
                         CleanupFailure(
                             resource=f"plugin:{plugin_id}:terminate",
-                            error=str(terminate_error) or type(terminate_error).__name__,
+                            error=str(terminate_error)
+                            or type(terminate_error).__name__,
                         )
                     )
             self._cleanup_failures.extend(await scope.aclose())
@@ -2722,7 +3197,9 @@ class PluginManager:
             del self._proactive_modules[proactive_module_count_before:]
             del self._proactive_lifecycles[proactive_lifecycle_count_before:]
             del self._proactive_module_factories[proactive_factory_count_before:]
-            del self._proactive_runtime_factories[proactive_runtime_factory_count_before:]
+            del self._proactive_runtime_factories[
+                proactive_runtime_factory_count_before:
+            ]
             del self._proactive_sources[proactive_source_count_before:]
             del self._jobs[job_count_before:]
             del self._channels[channel_count_before:]
@@ -2860,6 +3337,40 @@ class PluginManager:
             )
             self._gate_results[plugin_id] = gate_result
             generation.gate_result = gate_result
+            if not activate and _installed_generation_is_candidate(generation):
+                generation.production_contributions = contributions
+                generation.production_data_dir = generation.data_dir
+                validation_root = (
+                    self._workspace
+                    / "runtime"
+                    / "plugin-validation"
+                    / generation.generation_id
+                )
+                if validation_root.exists():
+                    raise RuntimeError(
+                        f"候选验证目录已存在: {validation_root}"
+                    )
+                validation_workspace = validation_root / "workspace"
+                validation_data_dir = (
+                    validation_workspace
+                    / "plugin-data"
+                    / generation.data_dir.name
+                )
+                validation_data_dir.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(generation.data_dir, validation_data_dir)
+                generation.scope.defer(
+                    "validation_plugin_data",
+                    lambda: asyncio.to_thread(
+                        _remove_validation_data_dir, validation_root
+                    ),
+                )
+                generation.data_dir = validation_data_dir
+                generation.contributions = _validation_contributions(
+                    generation,
+                    self._active_generations.get(plugin_id),
+                    validation_workspace=validation_workspace,
+                )
+                contributions = generation.contributions
             if (
                 not activate
                 or contributions.mcp_servers
@@ -2890,18 +3401,18 @@ class PluginManager:
                     lambda: self._mcp_host.close(generation_id),
                 )
                 try:
-                    raw_readiness_checks: object = await instance.readiness_semantic_checks(
-                        PluginReadinessContext(
-                            generation_id=generation_id,
-                            mcp_catalog=mcp_catalog,
-                            job_catalog=job_catalog,
-                            proactive_catalog=proactive_catalog,
+                    raw_readiness_checks: object = (
+                        await instance.readiness_semantic_checks(
+                            PluginReadinessContext(
+                                generation_id=generation_id,
+                                mcp_catalog=mcp_catalog,
+                                job_catalog=job_catalog,
+                                proactive_catalog=proactive_catalog,
+                            )
                         )
                     )
                     if not isinstance(raw_readiness_checks, list):
-                        raise RuntimeError(
-                            "readiness_semantic_checks 返回值不是 list"
-                        )
+                        raise RuntimeError("readiness_semantic_checks 返回值不是 list")
                     readiness_checks = cast(list[object], raw_readiness_checks)
                 except Exception as error:
                     readiness_passed = False
@@ -2910,7 +3421,8 @@ class PluginManager:
                     invalid_readiness = [
                         check
                         for check in readiness_checks
-                        if not isinstance(check, PluginSemanticCheck) or not check.passed
+                        if not isinstance(check, PluginSemanticCheck)
+                        or not check.passed
                     ]
                     readiness_passed = not invalid_readiness
                     normalized_readiness: list[dict[str, object]] = []
@@ -3035,6 +3547,8 @@ class PluginManager:
         assert generation.runtime_snapshot is not None
         self._compile_snapshot_event_handlers(generation.runtime_snapshot)
         await self._publish_committed_snapshot(generation.runtime_snapshot)
+        if generation.mcp_catalog is not None:
+            self._mcp_host.mark_active(generation.generation_id)
         logger.info("插件已加载: %s", mod["name"])
         return generation
 
@@ -3080,10 +3594,7 @@ class PluginManager:
             for server_name in generation.contributions.mcp_servers
         }
         workspace_mcp_sources: set[tuple[str, str]] = (
-            {
-                ("mcp", server_name)
-                for server_name in workspace_mcp.catalog.servers
-            }
+            {("mcp", server_name) for server_name in workspace_mcp.catalog.servers}
             if workspace_mcp is not None
             else set()
         )
@@ -3116,12 +3627,23 @@ class PluginManager:
             if generation.mcp_catalog is None:
                 continue
             for server in generation.mcp_catalog.servers.values():
+                server_spec = generation.contributions.mcp_servers[server.name]
+                candidate_read_only_tools = _candidate_mcp_read_only_tools(
+                    generation,
+                    server.name,
+                    server_spec,
+                    {tool.name for tool in server.tools},
+                )
                 for tool in server.tools:
                     if registry.has_tool(tool.name):
                         raise RuntimeError(f"MCP 工具名称重复: {tool.name}")
                     registry.register(
                         tool,
-                        risk="external-side-effect",
+                        risk=(
+                            "read-only"
+                            if tool.name in candidate_read_only_tools
+                            else "external-side-effect"
+                        ),
                         source_type="mcp",
                         source_name=server.name,
                     )
@@ -3186,7 +3708,9 @@ class PluginManager:
                             f"plugin:{getattr(generation.instance, 'name', generation.module_path)}:"
                             f"{metadata.handler_name}"
                         ),
-                        handler=functools.partial(metadata.handler, generation.instance),
+                        handler=functools.partial(
+                            metadata.handler, generation.instance
+                        ),
                         tool_name_filter=metadata.hook_tool_name,
                     )
                 )
@@ -3224,9 +3748,7 @@ class PluginManager:
         jobs: list[RegisteredPluginJob] = []
         for spec in _load_module_list(instance, "jobs"):
             if not isinstance(spec, PluginJobSpec):
-                raise RuntimeError(
-                    f"插件 {plugin_id}.jobs 返回值不是 PluginJobSpec"
-                )
+                raise RuntimeError(f"插件 {plugin_id}.jobs 返回值不是 PluginJobSpec")
             jobs.append(
                 RegisteredPluginJob(
                     plugin_id=plugin_id,
@@ -3271,18 +3793,12 @@ class PluginManager:
             before_step_modules=tuple(
                 _load_module_list(instance, "before_step_modules")
             ),
-            after_step_modules=tuple(
-                _load_module_list(instance, "after_step_modules")
-            ),
+            after_step_modules=tuple(_load_module_list(instance, "after_step_modules")),
             after_reasoning_modules=tuple(
                 _load_module_list(instance, "after_reasoning_modules")
             ),
-            after_turn_modules=tuple(
-                _load_module_list(instance, "after_turn_modules")
-            ),
-            proactive_modules=tuple(
-                _load_module_list(instance, "proactive_modules")
-            ),
+            after_turn_modules=tuple(_load_module_list(instance, "after_turn_modules")),
+            proactive_modules=tuple(_load_module_list(instance, "proactive_modules")),
             proactive_lifecycles=tuple(
                 _load_module_list(instance, "proactive_lifecycles")
             ),
@@ -3345,9 +3861,7 @@ class PluginManager:
         )
         lifecycle_type = type(instance)
         legacy_lifecycle = [
-            name
-            for name in ("initialize",)
-            if name in lifecycle_type.__dict__
+            name for name in ("initialize",) if name in lifecycle_type.__dict__
         ]
         check(
             "lifecycle_api",
@@ -3358,7 +3872,9 @@ class PluginManager:
             and inspect.iscoroutinefunction(instance.terminate),
             {"legacy": legacy_lifecycle},
         )
-        metadata = plugin_registry.get_handlers_by_module_path(type(instance).__module__)
+        metadata = plugin_registry.get_handlers_by_module_path(
+            type(instance).__module__
+        )
         tool_names = [
             md.tool_name or md.handler_name
             for md in metadata
@@ -3437,12 +3953,14 @@ class PluginManager:
         check(
             "channel_names",
             (
-                all(channel_names)
-                and not _duplicates(channel_names)
-                and not occupied_channels.intersection(channel_names)
-            )
-            if channel_names
-            else True,
+                (
+                    all(channel_names)
+                    and not _duplicates(channel_names)
+                    and not occupied_channels.intersection(channel_names)
+                )
+                if channel_names
+                else True
+            ),
             {
                 "duplicates": _duplicates(channel_names),
                 "occupied": sorted(occupied_channels.intersection(channel_names)),
@@ -3614,7 +4132,9 @@ class PluginManager:
         self._fresh_importer.unregister(module_name)
         plugin_registry.remove_module_tree(module_name)
         for imported_name in tuple(sys.modules):
-            if imported_name == module_name or imported_name.startswith(f"{module_name}."):
+            if imported_name == module_name or imported_name.startswith(
+                f"{module_name}."
+            ):
                 _ = sys.modules.pop(imported_name, None)
 
     def _register_tools(
@@ -3667,9 +4187,7 @@ class PluginManager:
         # 1. 先关闭当前 generation admission，再完成快照回收
         for generation in self._active_generations.values():
             self._retire_generation(generation)
-        _, externally_cancelled = await _complete_critical(
-            self._snapshot_store.close()
-        )
+        _, externally_cancelled = await _complete_critical(self._snapshot_store.close())
         self._ready_candidate = None
         for plugin_id in tuple(self._prepared_generations):
             _, cancelled = await _complete_critical(self.discard_prepared(plugin_id))
@@ -3786,11 +4304,14 @@ class _CandidateRejected(Exception):
 
 def _gate_failure_details(gate: GateResult) -> str:
     """把失败 Gate 的 check 与证据压成可持久诊断文本。"""
-    return "; ".join(
-        f"{check.check_id}: {check.evidence}"
-        for check in gate.checks
-        if check.status == "failed"
-    ) or gate.failure_reason
+    return (
+        "; ".join(
+            f"{check.check_id}: {check.evidence}"
+            for check in gate.checks
+            if check.status == "failed"
+        )
+        or gate.failure_reason
+    )
 
 
 def _with_gate_check(
@@ -3830,13 +4351,16 @@ def _load_plugin_config(
         except (OSError, tomllib.TOMLDecodeError) as e:
             raise _PluginConfigError(str(e)) from e
     if config_model is not None:
-        if not isinstance(config_model, type) or not issubclass(config_model, BaseModel):
+        if not isinstance(config_model, type) or not issubclass(
+            config_model, BaseModel
+        ):
             raise _PluginConfigError("ConfigModel 必须继承 pydantic.BaseModel")
         try:
             return config_model.model_validate(raw_config)
         except ValidationError as e:
             raise _PluginConfigError(_format_validation_error(e)) from e
     from agent.plugins.config import PluginConfig
+
     return PluginConfig(raw_config) if raw_config else None
 
 
@@ -3958,7 +4482,7 @@ def _installed_candidate_base_from_root(plugin_dir: Path) -> Path | None:
     return plugin_base
 
 
-def _promote_ready_candidate_pointer(
+def _switch_ready_pointer(
     ready: _ReadyPluginCandidate,
     plugin_base: Path,
 ) -> None:
@@ -3974,7 +4498,7 @@ def _promote_ready_candidate_pointer(
     _ = write_pointers(plugin_base, stable=candidate, latest=candidate)
 
 
-def _restore_ready_candidate_pointer(
+def _restore_ready_pointer(
     ready: _ReadyPluginCandidate,
     plugin_base: Path,
 ) -> None:
@@ -4086,7 +4610,11 @@ def _resolve_mobile_ui_asset(
         raise RuntimeError("插件 mobile UI 声明必须是 MobileUiContribution")
     root = plugin_dir.resolve(strict=False)
     module_path = (plugin_dir / declared.module).resolve(strict=False)
-    if not module_path.is_relative_to(root) or module_path.suffix != ".js" or not module_path.is_file():
+    if (
+        not module_path.is_relative_to(root)
+        or module_path.suffix != ".js"
+        or not module_path.is_file()
+    ):
         raise RuntimeError(f"插件 mobile UI module 无效: {declared.module}")
     allowed_slots = {
         "turn.before_reasoning",
@@ -4138,6 +4666,21 @@ def _resolve_mobile_ui_asset(
     )
 
 
+def _plugin_process_environment(
+    declared: Mapping[str, str],
+    data_dir: Path,
+    workspace: Path,
+) -> dict[str, str]:
+    """构造插件子进程环境，新旧 runtime 同时可读 workspace。"""
+
+    environment = {
+        **declared,
+        "AKA_PLUGIN_DATA_DIR": str(data_dir),
+    }
+    set_roxy_env_in(environment, "WORKSPACE", str(workspace))
+    return environment
+
+
 def _resolve_managed_services(
     plugin_dir: Path,
     data_dir: Path,
@@ -4160,6 +4703,11 @@ def _resolve_managed_services(
                 for key, value in spec.env.items()
             )
             or not isinstance(spec.readiness_url, str)
+            or not isinstance(spec.validation_port_env, str)
+            or (
+                spec.validation_port_env
+                and not spec.validation_port_env.replace("_", "A").isalnum()
+            )
         ):
             raise RuntimeError(f"插件 managed service 声明无效: {spec!r}")
         if spec.id in services:
@@ -4182,11 +4730,7 @@ def _resolve_managed_services(
                 venv_python = _venv_python(runtime_root / ".venv")
                 if venv_python.exists():
                     command[0] = str(venv_python)
-        service_env = {
-            **spec.env,
-            "AKA_PLUGIN_DATA_DIR": str(data_dir),
-        }
-        set_roxy_env_in(service_env, "WORKSPACE", str(workspace))
+        service_env = _plugin_process_environment(spec.env, data_dir, workspace)
         _fall_back_to_current_python(command, service_env)
         services[spec.id] = {
             "command": command,
@@ -4195,6 +4739,7 @@ def _resolve_managed_services(
             "readiness_url": spec.readiness_url,
             "startup_timeout_seconds": spec.startup_timeout_seconds,
             "revision": source_revision,
+            "validation_port_env": spec.validation_port_env,
         }
     return services
 
@@ -4217,6 +4762,16 @@ def _resolve_mcp_servers(
             for key, value in spec.env.items()
         ):
             raise RuntimeError(f"插件 MCP env 声明无效: {spec.name}")
+        if (
+            not isinstance(spec.candidate_read_only_tools, tuple)
+            or not all(
+                isinstance(value, str) and value
+                for value in spec.candidate_read_only_tools
+            )
+            or len(set(spec.candidate_read_only_tools))
+            != len(spec.candidate_read_only_tools)
+        ):
+            raise RuntimeError(f"插件 MCP candidate 只读工具声明无效: {spec.name}")
         if spec.name in servers:
             raise RuntimeError(f"插件 MCP server 名称重复: {spec.name}")
         command = [
@@ -4231,11 +4786,7 @@ def _resolve_mcp_servers(
         )
         _require_plugin_path(plugin_root, resolved_cwd, "MCP cwd")
         cwd = str(resolved_cwd)
-        env = {
-            **spec.env,
-            "AKA_PLUGIN_DATA_DIR": str(data_dir),
-        }
-        set_roxy_env_in(env, "WORKSPACE", str(workspace))
+        env = _plugin_process_environment(spec.env, data_dir, workspace)
         if _is_python_command(command[0]):
             runtime_root = _resolve_mcp_runtime_root(plugin_dir, cwd, command)
             if runtime_root is not None:
@@ -4243,8 +4794,173 @@ def _resolve_mcp_servers(
                 if venv_python.exists():
                     command[0] = str(venv_python)
         _fall_back_to_current_python(command, env)
-        servers[spec.name] = {"command": command, "env": env, "cwd": cwd}
+        servers[spec.name] = {
+            "command": command,
+            "env": env,
+            "cwd": cwd,
+            "candidate_read_only_tools": spec.candidate_read_only_tools,
+        }
     return servers
+
+
+def _validation_contributions(
+    candidate: PluginGeneration,
+    previous: PluginGeneration | None,
+    *,
+    validation_workspace: Path,
+) -> PluginContributions:
+    """构造候选路径隔离视图；同 UID 进程仍可绕过它，它不是安全沙箱。"""
+
+    # 1. Allocate one loopback port for every changed managed service.
+    production = candidate.contributions
+    old_services = (
+        previous.contributions.managed_services if previous is not None else {}
+    )
+    validation_services: dict[str, dict[str, Any]] = {}
+    validation_env: dict[str, str] = {}
+    for service_id, spec in production.managed_services.items():
+        if old_services.get(service_id) == spec:
+            continue
+        port_env = str(spec.get("validation_port_env") or "")
+        readiness_url = str(spec.get("readiness_url") or "")
+        if not port_env or not readiness_url:
+            raise RuntimeError(
+                "候选插件改变独占 managed service，但未声明通用隔离端口: "
+                f"plugin={candidate.plugin_id} service={service_id} "
+                "需要 ManagedServiceSpec.validation_port_env 和 readiness_url"
+            )
+        port = _allocate_validation_port()
+        validation_env[port_env] = str(port)
+        isolated = dict(spec)
+        isolated["env"] = _plugin_process_environment(
+            {
+                **dict(spec.get("env") or {}),
+                port_env: str(port),
+            },
+            candidate.data_dir,
+            validation_workspace,
+        )
+        isolated["readiness_url"] = _replace_url_port(readiness_url, port)
+        validation_services[service_id] = isolated
+
+    # 2. Candidate MCP processes inherit only declared endpoint variables.
+    mcp_servers = {
+        name: {
+            **spec,
+            "env": _plugin_process_environment(
+                {
+                    **dict(spec.get("env") or {}),
+                    **validation_env,
+                },
+                candidate.data_dir,
+                validation_workspace,
+            ),
+        }
+        for name, spec in production.mcp_servers.items()
+    }
+    candidate.validation_managed_services = validation_services
+    return replace(
+        production,
+        mcp_servers=mcp_servers,
+        managed_services=validation_services,
+        channels=(previous.contributions.channels if previous is not None else ()),
+    )
+
+
+def _candidate_mcp_read_only_tools(
+    generation: PluginGeneration,
+    server_name: str,
+    server_spec: dict[str, Any],
+    available_tools: set[str],
+) -> frozenset[str]:
+    """严格校验并返回只对候选开放的 MCP 只读工具集合。"""
+
+    # 1. 正式 snapshot 不继承候选验证专用的只读声明。
+    if (
+        generation.production_data_dir is None
+        or generation.data_dir == generation.production_data_dir
+    ):
+        return frozenset()
+
+    # 2. 候选声明精确匹配且默认拒绝；未知工具直接失败。
+    raw_names = server_spec.get("candidate_read_only_tools", ())
+    if not isinstance(raw_names, tuple) or not all(
+        isinstance(name, str) and name for name in raw_names
+    ):
+        raise RuntimeError(
+            f"MCP candidate 只读工具声明无效: server={server_name}"
+        )
+    declared = frozenset(raw_names)
+    public_names = frozenset(
+        f"mcp_{server_name}__{remote_name}" for remote_name in declared
+    )
+    unknown = public_names.difference(available_tools)
+    if unknown:
+        raise RuntimeError(
+            "MCP candidate 只读工具不存在: "
+            f"server={server_name} tools={', '.join(sorted(declared))}"
+        )
+    return public_names
+
+
+def _allocate_validation_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        return cast(int, listener.getsockname()[1])
+
+
+def _remove_validation_data_dir(path: Path) -> None:
+    if path.exists():
+        shutil.rmtree(path)
+
+
+def _replace_url_port(url: str, port: int) -> str:
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"http", "https"} or parsed.hostname is None:
+        raise RuntimeError(f"managed service readiness_url 无效: {url}")
+    host = parsed.hostname
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return urlunsplit(
+        (parsed.scheme, f"{host}:{port}", parsed.path, parsed.query, parsed.fragment)
+    )
+
+
+def _replace_snapshot_payload(
+    target: RuntimeSnapshot,
+    source: RuntimeSnapshot,
+) -> None:
+    """Refresh an unleased candidate while preserving store-owned lifecycle fields."""
+
+    if target.lease_count or target.state != "committed":
+        raise RuntimeError("只能刷新无 lease 的 committed candidate snapshot")
+    for name in (
+        "generations",
+        "before_turn_modules",
+        "before_reasoning_modules",
+        "prompt_render_modules",
+        "before_step_modules",
+        "after_step_modules",
+        "after_reasoning_modules",
+        "after_turn_modules",
+        "jobs",
+        "proactive_sources",
+        "proactive_modules",
+        "proactive_lifecycles",
+        "proactive_module_factories",
+        "proactive_runtime_factories",
+        "tool_hooks",
+        "channels",
+        "skill_catalog_generation_id",
+        "mcp_catalog_generation_ids",
+        "workspace_mcp_generation",
+        "managed_services",
+        "dashboard_bindings",
+        "tool_registry",
+        "plugin_skill_index",
+        "event_handlers",
+    ):
+        setattr(target, name, getattr(source, name))
 
 
 def _resolve_command_item(
@@ -4282,13 +4998,13 @@ def _fall_back_to_current_python(
     command: list[str],
     environment: Mapping[str, str],
 ) -> None:
-    """让未提供 ``python`` 命令的开发机仍能运行声明为 Python 的插件。"""
+    """让没有 ``python`` shim 的开发机仍能运行声明为 Python 的插件。"""
 
     executable = command[0]
     if not _is_python_command(executable):
         return
     search_path = environment.get("PATH", os.environ.get("PATH"))
-    if Path(executable).is_absolute() or shutil.which(executable, path=search_path) is not None:
+    if Path(executable).is_absolute() or shutil.which(executable, path=search_path):
         return
     command[0] = sys.executable
 
@@ -4349,6 +5065,7 @@ def _make_execute(bound: Any) -> Any:
         if inspect.isawaitable(result):
             result = await result
         return str(result)
+
     return execute
 
 
@@ -4424,9 +5141,7 @@ def _source_revision(plugin_dir: Path) -> str:
         "node_modules",
     }
     for current, directories, filenames in os.walk(plugin_dir, followlinks=False):
-        directories[:] = sorted(
-            name for name in directories if name not in excluded
-        )
+        directories[:] = sorted(name for name in directories if name not in excluded)
         current_path = Path(current)
         for name in [*directories, *sorted(filenames)]:
             path = current_path / name
@@ -4460,9 +5175,7 @@ def _source_metadata_revision(plugin_dir: Path) -> bytes:
         "node_modules",
     }
     for current, directories, filenames in os.walk(plugin_dir, followlinks=False):
-        directories[:] = sorted(
-            name for name in directories if name not in excluded
-        )
+        directories[:] = sorted(name for name in directories if name not in excluded)
         current_path = Path(current)
         for name in [*directories, *sorted(filenames)]:
             path = current_path / name
@@ -4547,8 +5260,7 @@ def _required_mcp_tools(
         if source.spec.ack_tool:
             names.append(source.spec.ack_tool)
     return {
-        server_name: tuple(tool_names)
-        for server_name, tool_names in required.items()
+        server_name: tuple(tool_names) for server_name, tool_names in required.items()
     }
 
 

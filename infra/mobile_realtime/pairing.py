@@ -29,7 +29,7 @@ from infra.mobile_realtime.storage import (
 _PAIRING_SECRET_BYTES = 32
 _PAIRING_SECRET_DOMAIN = b"roxy-mobile-pairing-secret-v1\x00"
 _LEGACY_PAIRING_SECRET_DOMAIN = b"akasic-mobile-pairing-secret-v1\x00"
-_PAIRING_TTL = timedelta(seconds=120)
+_PAIRING_TTL = timedelta(minutes=8)
 _MAX_ENDPOINTS = 16
 
 
@@ -344,10 +344,13 @@ def _pairing_secret_hash(
 
 
 def _matches_pairing_secret_hash(stored_hash: str, one_time_secret: str) -> bool:
-    """让升级窗口内尚未过期的旧配对会话完成一次验证。"""
+    """允许升级窗口内尚未过期的旧配对会话完成一次验证。"""
 
     return any(
-        hmac.compare_digest(stored_hash, _pairing_secret_hash(one_time_secret, domain=domain))
+        hmac.compare_digest(
+            stored_hash,
+            _pairing_secret_hash(one_time_secret, domain=domain),
+        )
         for domain in (_PAIRING_SECRET_DOMAIN, _LEGACY_PAIRING_SECRET_DOMAIN)
     )
 

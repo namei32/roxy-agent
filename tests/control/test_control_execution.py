@@ -40,6 +40,7 @@ async def test_committed_control_turn_survives_shell_cleanup_error(
     loop._interrupt_states = {}
     loop._session_lanes = SessionLaneRegistry()
     loop._runtime_snapshot_store = None
+    loop._llm_services = SimpleNamespace(provider=object())
     loop._resume_interrupted_message = AsyncMock(
         side_effect=lambda message, _key: (message, False)
     )
@@ -70,7 +71,7 @@ async def test_committed_control_turn_survives_shell_cleanup_error(
             session_message_id="mobile:cleanup:1",
         )
 
-    loop._core_runner = SimpleNamespace(process=process)
+    loop._react = process
 
     async def fail_cleanup(_owner_session_key: str) -> None:
         raise PermissionError("Operation not permitted")
@@ -144,6 +145,10 @@ async def test_tool_started_is_published_before_core_execution_finishes(tmp_path
                     final_arguments={"query": "now"},
                     status="completed",
                     result_preview="found",
+                    runtime_provenance={
+                        "kind": "plugin-skill",
+                        "runtimeSnapshotId": "snapshot-latest",
+                    },
                     turn_id=turn_id,
                 )
             )
@@ -192,6 +197,10 @@ async def test_tool_started_is_published_before_core_execution_finishes(tmp_path
         TurnItemKind.ASSISTANT_MESSAGE,
     ]
     assert result.items[-1].data["sessionMessageId"] == "programmatic:live:1"
+    assert result.items[1].data["runtimeProvenance"] == {
+        "kind": "plugin-skill",
+        "runtimeSnapshotId": "snapshot-latest",
+    }
     await runtime.shutdown()
     await bus.aclose()
     store.close()

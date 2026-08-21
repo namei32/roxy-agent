@@ -7,12 +7,13 @@ import logging
 import re
 import sqlite3
 from collections import defaultdict
-from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
+from collections.abc import AsyncGenerator, Iterator, Mapping
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from time import monotonic
 from typing import TYPE_CHECKING, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from bus.events import (
     ChannelMessage,
@@ -20,12 +21,14 @@ from bus.events import (
     DeliveryStatus,
     InboundMessage,
     OutboundMessage,
+    TurnTerminalStatus,
     channel_message_from_outbound,
 )
 from bus.events_lifecycle import (
     StreamDeltaReady,
     ToolCallCompleted,
     ToolCallStarted,
+    TurnOutputCompleted,
     TurnStarted,
 )
 from agent.plugins.mobile_ui import (
@@ -36,6 +39,9 @@ from agent.plugins.mobile_ui import (
     MobileUiRpcInvalidRequest,
     MobileUiStaleRevision,
 )
+from agent.control.models import TurnStatus
+from agent.model_runtime.session_selection import read_session_model_selection
+from core.common.diagnostic_log import turn_milestone
 from infra.mobile_realtime.runtime_inspection import (
     RuntimeInspectionError,
     RuntimeInspectionService,
@@ -58,6 +64,7 @@ from infra.mobile_realtime.protocol import (
     MessageReplyReference,
     MessageSendCommand,
     MAX_JSON_FRAME_BYTES,
+    TURN_OUTPUT_COMPLETED_CAPABILITY,
 )
 from infra.mobile_realtime.plugin_ui import PluginUiQuery, PluginUiQueryScheduler
 from infra.mobile_realtime.remote_media import (
@@ -74,6 +81,7 @@ from infra.mobile_realtime.storage import (
 )
 
 if TYPE_CHECKING:
+    from agent.model_runtime.registry import ModelRegistry
     from agent.plugins.mobile_ui import MobileUiProvider
     from infra.mobile_realtime.gateway import MobileGatewayRuntime
 
@@ -94,6 +102,7 @@ class CommandReply:
     session_id: str | None = None
     turn_id: str | None = None
     binary: AttachmentChunk | None = None
+    replayed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,11 +126,20 @@ class _ProcessTurnState:
     thinking_block: tuple[str, int] | None
     tool_blocks: dict[str, tuple[str, int, float]]
     answer_segments: list[str]
+    control_turn_id: str = ""
+    first_thinking_received: bool = False
+    first_answer_received: bool = False
+    first_thinking_published: bool = False
+    first_answer_published: bool = False
+    client_message_id: str = ""
+    final_suffix_emitted: str = ""
 
 
 _DELTA_FLUSH_BYTES = 4 * 1024
-_DELTA_FLUSH_INTERVAL_SECONDS = 1.0 / 60.0
+_DELTA_TRANSPORT_COALESCE_SECONDS = 0.008
 _MAX_DELTA_BATCHES = 256
+_MAX_DEVICE_CAPABILITIES = 128
+_MAX_DEVICE_CAPABILITY_LENGTH = 512
 _BOT_COMMAND_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 _PLUGIN_SEGMENT = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 _PLUGIN_ID_PATTERN = re.compile(rf"^{_PLUGIN_SEGMENT}(?:@{_PLUGIN_SEGMENT})?$")
@@ -196,8 +214,11 @@ class MobileRealtimeChannel:
         self._receipt_completion_failures: set[tuple[str, str]] = set()
         self._active_turn_ids: dict[str, str] = {}
         self._process_turns: dict[tuple[str, str], _ProcessTurnState] = {}
+        self._send_received_at: dict[tuple[str, str], float] = {}
+        self._turn_started_at: dict[tuple[str, str], float] = {}
         self._delta_batches: dict[tuple[str, str], _DeltaBatch] = {}
         self._delta_locks = defaultdict[tuple[str, str], asyncio.Lock](asyncio.Lock)
+        self._turn_terminals: dict[tuple[str, str], str] = {}
         self._delta_failure: BaseException | None = None
         self._attachments: AttachmentTransferService | None = None
         self._mobile_ui_provider: MobileUiProvider | None = None
@@ -205,6 +226,7 @@ class MobileRealtimeChannel:
         self._mobile_ui_catalog_identity = ""
         self._mobile_ui_hot_connections: dict[str, int] = {}
         self._runtime_inspection: RuntimeInspectionService | None = None
+        self._model_registry: ModelRegistry | None = None
 
     def bind_runtime_inspection(self, service: RuntimeInspectionService) -> None:
         """绑定只读运行时检查服务。"""
@@ -212,6 +234,13 @@ class MobileRealtimeChannel:
         if self._runtime_inspection is not None:
             raise RuntimeError("Runtime inspection service 已绑定")
         self._runtime_inspection = service
+
+    def bind_model_registry(self, registry: ModelRegistry) -> None:
+        """绑定 Core 模型目录，移动端只消费该权威快照。"""
+
+        if self._model_registry is not None:
+            raise RuntimeError("Model runtime registry 已绑定")
+        self._model_registry = registry
 
     def bind_mobile_ui_provider(self, provider: MobileUiProvider) -> None:
         """绑定读取当前插件快照的移动 UI 提供器。"""
@@ -265,12 +294,41 @@ class MobileRealtimeChannel:
         _ = ctx.event_bus.on(StreamDeltaReady, self._on_stream_delta)
         _ = ctx.event_bus.on(ToolCallStarted, self._on_tool_call_started)
         _ = ctx.event_bus.on(ToolCallCompleted, self._on_tool_call_completed)
+        _ = ctx.event_bus.on(TurnOutputCompleted, self._on_output_completed)
         _ = ctx.push_tool.register_channel(
             self.name,
             deliver=self._deliver_message,
         )
 
     async def stop(self) -> None:
+        """先发布活动 turn 的终态，再释放移动渠道运行态。"""
+
+        # 1. 计划停机必须把已向手机公开的活动 turn 收敛为终态；
+        #    每个 turn 都走同一 owner 的终态 barrier，避免与 in-flight final 竞态。
+        store = self._require_ctx().session_manager.control_store
+        for session_id, turn_id in tuple(self._active_turn_ids.items()):
+            turn = store.read_turn(turn_id)
+            if turn is not None and turn.status is TurnStatus.COMPLETED:
+                continue
+            payload = self._interrupt_payload(
+                session_id,
+                turn_id,
+                status=(
+                    turn.status.value
+                    if turn is not None and turn.status.is_terminal
+                    else TurnStatus.INTERRUPTED.value
+                ),
+                message="服务端正在维护，本轮生成已中断",
+                reason="runtime_shutdown",
+            )
+            _ = await self._publish_terminal(
+                session_id=session_id,
+                turn_id=turn_id,
+                event_type="turn.interrupted",
+                payload=payload,
+            )
+
+        # 2. 终态已持久化后再取消批处理并清理进程内状态
         for batch in self._delta_batches.values():
             _ = batch.timer.cancel()
         if self._delta_batches:
@@ -280,13 +338,56 @@ class MobileRealtimeChannel:
             )
         self._delta_batches.clear()
         self._delta_locks.clear()
+        self._turn_terminals.clear()
         self._delta_failure = None
         self._attachments = None
         self._ctx = None
         self._active_turn_ids.clear()
         self._process_turns.clear()
+        self._send_received_at.clear()
+        self._turn_started_at.clear()
         self._processing_commands.clear()
         self._receipt_completion_failures.clear()
+
+    async def reconcile_active_turns(
+        self,
+        *,
+        device_id: str,
+        active_turns: tuple[str, ...],
+    ) -> None:
+        """把客户端残留的活动 turn 与 SessionDB 权威终态对账。"""
+
+        # 1. 只接受属于移动会话且已被手机声明过的权威 turn
+        if not active_turns:
+            return
+        store = self._require_ctx().session_manager.control_store
+        for turn_id in active_turns:
+            turn = store.read_turn(turn_id)
+            if (
+                turn is None
+                or not turn.thread_id.startswith("mobile:")
+                or not self._runtime.storage.has_session_claim(turn.thread_id)
+            ):
+                continue
+
+            # 2. completed 由 durable message.final/history 恢复，其余终态补发关闭信号；
+            #    统一走每 turn 唯一 owner 的终态 barrier，保证 delta→terminal 顺序。
+            if not turn.status.is_terminal or turn.status is TurnStatus.COMPLETED:
+                continue
+            payload = self._interrupt_payload(
+                turn.thread_id,
+                turn.id,
+                status=turn.status.value,
+                message="服务端已确认本轮生成结束",
+                reason="resume_reconciliation",
+            )
+            _ = await self._publish_terminal(
+                session_id=turn.thread_id,
+                turn_id=turn.id,
+                event_type="turn.interrupted",
+                payload=payload,
+                device_id=device_id,
+            )
 
     async def handle_command(
         self,
@@ -322,7 +423,14 @@ class MobileRealtimeChannel:
                 and replay.type == "attachment.download.ok"
             ):
                 return self._download_attachment(frame, replay)
-            return replay
+            return CommandReply(
+                type=replay.type,
+                payload=replay.payload,
+                session_id=replay.session_id,
+                turn_id=replay.turn_id,
+                binary=replay.binary,
+                replayed=True,
+            )
 
         # 2. 当前实例只在命令实际执行期间拥有 processing 收据
         command_key = (device_id, frame.id)
@@ -408,7 +516,9 @@ class MobileRealtimeChannel:
         _expect_keys(frame.payload, {"message_id", "byte_length", "sha256"})
         session_id = self._require_mobile_session(frame.session_id)
         message_id = _expect_nonempty_string(frame.payload["message_id"], "message_id")
-        byte_length = _expect_nonnegative_int(frame.payload["byte_length"], "byte_length")
+        byte_length = _expect_nonnegative_int(
+            frame.payload["byte_length"], "byte_length"
+        )
         sha256 = _expect_sha256(frame.payload["sha256"], "sha256")
 
         # 2. 重新读取 SessionDB 权威正文，拒绝客户端猜测或过期 manifest
@@ -434,12 +544,16 @@ class MobileRealtimeChannel:
     ) -> bytes:
         """从 SessionDB 读取并核对票据绑定的完整 UTF-8 正文。"""
 
-        message = self._require_ctx().session_manager.control_store.get_message(message_id)
+        message = self._require_ctx().session_manager.control_store.get_message(
+            message_id
+        )
         if message is None or message["session_key"] != session_id:
             raise MobileCommandError("message_not_found", "消息正文不存在")
         content = str(message["content"]).encode("utf-8")
         if len(content) != byte_length or hashlib.sha256(content).hexdigest() != sha256:
-            raise MobileCommandError("content_changed", "消息正文与历史 manifest 不一致")
+            raise MobileCommandError(
+                "content_changed", "消息正文与历史 manifest 不一致"
+            )
         return content
 
     async def cancel_plugin_ui_device(self, device_id: str) -> None:
@@ -610,6 +724,7 @@ class MobileRealtimeChannel:
             "content": message,
             "attachments": [],
             "metadata": {"source": "message_push"},
+            "control_turn_id": f"turn:{uuid4().hex}",
         }
         if delivery_id is not None:
             payload["delivery_id"] = delivery_id
@@ -628,6 +743,8 @@ class MobileRealtimeChannel:
         self._raise_delta_failure()
         if message.metadata.get("_channel_commit_role") == "passive":
             return await self._deliver_passive_message(message)
+        if message.control_turn_id is None:
+            message = replace(message, control_turn_id=f"turn:{uuid4().hex}")
         session_id = self._session_id(message.chat_id)
         if not self._runtime.storage.list_active_devices():
             return DeliveryReceipt(
@@ -646,6 +763,7 @@ class MobileRealtimeChannel:
                 "content": message.content,
                 "attachments": [],
                 "metadata": {"source": "message_push"},
+                "control_turn_id": message.control_turn_id,
             }
             if delivery_id is not None:
                 payload["delivery_id"] = delivery_id
@@ -743,6 +861,7 @@ class MobileRealtimeChannel:
             "content": message.content,
             "attachments": [attachment_descriptor(record) for record in records],
             "metadata": {"source": "message_push"},
+            "control_turn_id": message.control_turn_id,
         }
         if delivery_id is not None:
             payload["delivery_id"] = delivery_id
@@ -754,6 +873,8 @@ class MobileRealtimeChannel:
         device_id: str,
         frame: ClientCommand,
     ) -> CommandReply:
+        if frame.type == "device.update":
+            return await self._update_device_capabilities(device_id, frame)
         if frame.type == "session.list":
             return await self._list_sessions(device_id, frame)
         if frame.type == "session.create":
@@ -816,6 +937,8 @@ class MobileRealtimeChannel:
                     server_name,
                 ),
             )
+        if frame.type == "model.catalog.get":
+            return await self._model_catalog(frame)
         if frame.type == "message.send":
             return await self._send_message(device_id, frame)
         if frame.type == "turn.stop":
@@ -827,6 +950,100 @@ class MobileRealtimeChannel:
         if frame.type == "attachment.download":
             return self._download_attachment(frame)
         raise MobileCommandError("unsupported_command", f"尚不支持命令: {frame.type}")
+
+    async def _update_device_capabilities(
+        self,
+        device_id: str,
+        frame: GenericCommand,
+    ) -> CommandReply:
+        """设备升级后刷新持久化能力声明，无需重新配对。
+
+        复用配对协议的边界约束：最多 128 项、每项 1..512 字符，杜绝通过
+        命令帧把超长 capability 集合写入 mobile_devices。
+        """
+
+        _expect_keys(frame.payload, {"capabilities"})
+        raw_capabilities = frame.payload["capabilities"]
+        if not isinstance(raw_capabilities, list):
+            raise MobileCommandError(
+                "invalid_payload",
+                "device.update capabilities 必须是字符串数组",
+            )
+        if len(raw_capabilities) > _MAX_DEVICE_CAPABILITIES:
+            raise MobileCommandError(
+                "invalid_payload",
+                f"device.update capabilities 最多 {_MAX_DEVICE_CAPABILITIES} 项",
+            )
+        capabilities: list[str] = []
+        for item in raw_capabilities:
+            if (
+                not isinstance(item, str)
+                or not item
+                or len(item) > _MAX_DEVICE_CAPABILITY_LENGTH
+            ):
+                raise MobileCommandError(
+                    "invalid_payload",
+                    f"device.update capability 必须是 1..{_MAX_DEVICE_CAPABILITY_LENGTH} 字符的非空字符串",
+                )
+            capabilities.append(item)
+        if len(set(capabilities)) != len(capabilities):
+            raise MobileCommandError(
+                "invalid_payload",
+                "device.update capabilities 不能包含重复项",
+            )
+        await self._runtime.refresh_device_capabilities(
+            device_id=device_id,
+            capabilities=tuple(capabilities),
+        )
+        return CommandReply(type="device.update.ok", payload={})
+
+    async def _model_catalog(self, frame: GenericCommand) -> CommandReply:
+        """返回当前模型 generation 和指定会话已经提交的选择。"""
+
+        _expect_keys(frame.payload, set())
+        session_id = self._normalize_session_id(frame.session_id)
+        registry = self._model_registry
+        if registry is None:
+            raise MobileCommandError("model_registry_unavailable", "模型注册表尚未绑定")
+        current = await registry.refresh()
+        runtimes = [
+            {
+                key: runtime[key]
+                for key in (
+                    "id",
+                    "provider",
+                    "model",
+                    "sourceId",
+                    "sourceName",
+                    "reasoningEffort",
+                    "supportedReasoningEfforts",
+                    "roles",
+                    "contextWindow",
+                    "inputModalities",
+                )
+            }
+            for runtime in registry.list_runtimes()
+        ]
+        selection = (
+            read_session_model_selection(
+                self._require_ctx().session_manager.get_existing(session_id).metadata
+            )
+            if self._require_ctx().session_manager.session_exists(session_id)
+            else None
+        )
+        return CommandReply(
+            type="model.catalog.get.ok",
+            session_id=session_id,
+            payload={
+                "generation_id": current.generation_id,
+                "default_runtime": current.role_runtime_ids["default"],
+                "selected_runtime_id": selection.model_ref if selection else "",
+                "selected_reasoning_effort": (
+                    selection.reasoning_effort if selection else ""
+                ),
+                "runtimes": runtimes,
+            },
+        )
 
     def _require_runtime_inspection(self) -> RuntimeInspectionService:
         service = self._runtime_inspection
@@ -1312,9 +1529,7 @@ class MobileRealtimeChannel:
             type="history.get.ok",
             session_id=session_id,
             payload={
-                key: value
-                for key, value in page_payload.items()
-                if key != "items"
+                key: value for key, value in page_payload.items() if key != "items"
             },
         )
 
@@ -1331,6 +1546,39 @@ class MobileRealtimeChannel:
             )
         if not frame.payload.text.strip() and not frame.payload.media_refs:
             raise MobileCommandError("empty_message", "文字和附件不能同时为空")
+        # 1. 时间链起点：客户端 message.send 到达服务端
+        turn_milestone(
+            logger,
+            "tl:send.received",
+            session_id=session_id,
+            client_message_id=frame.payload.client_message_id,
+        )
+        self._send_received_at[(session_id, frame.payload.client_message_id)] = (
+            monotonic()
+        )
+        try:
+            return await self._send_message_inner(device_id, frame, session_id)
+        except asyncio.CancelledError:
+            # 2a. turn 尚未 started 前被取消：显式删除自己的计时起点后原样重抛。
+            _ = self._send_received_at.pop(
+                (session_id, frame.payload.client_message_id),
+                None,
+            )
+            raise
+        except Exception:
+            # 2b. 任何异常都只删自己的计时起点，绝不连带同 session 排队消息。
+            _ = self._send_received_at.pop(
+                (session_id, frame.payload.client_message_id),
+                None,
+            )
+            raise
+
+    async def _send_message_inner(
+        self,
+        device_id: str,
+        frame: MessageSendCommand,
+        session_id: str,
+    ) -> CommandReply:
         ctx = self._require_ctx()
         claimed_session = self._runtime.storage.has_session_claim(session_id)
         if claimed_session and not ctx.session_manager.session_exists(session_id):
@@ -1355,6 +1603,11 @@ class MobileRealtimeChannel:
             "device_id": device_id,
             "require_existing_session": True,
         }
+        if frame.payload.model_runtime_id is not None:
+            metadata["model_runtime_id"] = frame.payload.model_runtime_id
+            metadata["model_reasoning_effort"] = (
+                frame.payload.model_reasoning_effort or ""
+            )
         if reply is not None:
             metadata.update(
                 {
@@ -1397,6 +1650,19 @@ class MobileRealtimeChannel:
         except BaseException:
             ctx.session_manager.release_admission(admission_id)
             raise
+        # 3. 时间链：入站消息被总线接受并返回 ACK
+        received_at = self._send_received_at.get(
+            (session_id, frame.payload.client_message_id)
+        )
+        turn_milestone(
+            logger,
+            "tl:send.ack",
+            session_id=session_id,
+            client_message_id=frame.payload.client_message_id,
+            duration_ms=(
+                (monotonic() - received_at) * 1_000 if received_at is not None else None
+            ),
+        )
         return CommandReply(
             type="message.send.ok",
             session_id=session_id,
@@ -1457,6 +1723,41 @@ class MobileRealtimeChannel:
         turn_id = frame.turn_id
         if turn_id is None:
             raise MobileCommandError("turn_id_required", "停止生成必须携带 turn_id")
+        turn = self._require_ctx().session_manager.control_store.read_turn(turn_id)
+        if (
+            turn is not None
+            and turn.thread_id == session_id
+            and turn.status.is_terminal
+        ):
+            # 已缓冲 delta 必须先于终态发布，保证 delta→terminal 顺序；
+            # completed 由 durable message.final 恢复，其余终态经 barrier 收口。
+            if turn.status is not TurnStatus.COMPLETED:
+                _ = await self._publish_terminal(
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    event_type="turn.interrupted",
+                    payload=self._interrupt_payload(
+                        session_id,
+                        turn_id,
+                        status=turn.status.value,
+                        message="服务端已确认本轮生成结束",
+                        reason="stop_reconciliation",
+                    ),
+                    device_id=device_id,
+                )
+            else:
+                _ = await self._flush_deltas(session_id, turn_id)
+            self._clear_turn_maps(session_id, turn_id)
+            return CommandReply(
+                type="turn.stop.ok",
+                session_id=session_id,
+                turn_id=turn_id,
+                payload={
+                    "status": "already_terminal",
+                    "terminal_status": turn.status.value,
+                    "message": "目标 turn 已经结束",
+                },
+            )
         active_turn_id = self._active_turn_ids.get(session_id)
         if active_turn_id is None:
             raise MobileCommandError("turn_not_active", "当前会话没有正在生成的内容")
@@ -1465,7 +1766,6 @@ class MobileRealtimeChannel:
         interrupt = self._require_ctx().interrupt_controller
         if interrupt is None:
             raise MobileCommandError("interrupt_unavailable", "当前未启用中断功能")
-        await self._flush_deltas(session_id, turn_id)
         result = interrupt.request_interrupt(
             session_key=session_id,
             sender=f"device:{device_id}",
@@ -1473,15 +1773,18 @@ class MobileRealtimeChannel:
         )
         if result.status not in {"interrupted", "idle"}:
             raise RuntimeError(f"中断控制器返回未知状态: {result.status}")
-        await self._runtime.publish_event(
-            event_type="turn.interrupted",
+        _ = await self._publish_terminal(
             session_id=session_id,
             turn_id=turn_id,
-            payload={"status": result.status, "message": result.message},
+            event_type="turn.interrupted",
+            payload=self._interrupt_payload(
+                session_id,
+                turn_id,
+                status=result.status,
+                message=result.message,
+            ),
         )
-        _ = self._active_turn_ids.pop(session_id, None)
-        _ = self._process_turns.pop((session_id, turn_id), None)
-        _ = self._delta_locks.pop((session_id, turn_id), None)
+        self._clear_turn_maps(session_id, turn_id)
         return CommandReply(
             type="turn.stop.ok",
             session_id=session_id,
@@ -1505,96 +1808,315 @@ class MobileRealtimeChannel:
             thinking_block=None,
             tool_blocks={},
             answer_segments=[],
+            control_turn_id=event.control_turn_id or turn_id,
+            client_message_id=event.client_message_id,
         )
+        self._turn_started_at[process_key] = monotonic()
+        # 同一 key 的旧终态墓碑（同 turn_id 重试）不得压制新一轮增量。
+        _ = self._turn_terminals.pop(process_key, None)
         await self._runtime.publish_event(
             event_type="turn.started",
             session_id=event.session_key,
             turn_id=turn_id,
-            payload={"content": event.content},
+            payload={
+                "content": event.content,
+                "client_message_id": event.client_message_id,
+                "control_turn_id": event.control_turn_id or turn_id,
+            },
+        )
+        # 3. 时间链：服务端接受 turn；duration 为 send.received → turn.started
+        received_at = self._send_received_at.get(
+            (event.session_key, event.client_message_id)
+        )
+        turn_milestone(
+            logger,
+            "tl:turn.started",
+            session_id=event.session_key,
+            turn_id=turn_id,
+            client_message_id=event.client_message_id,
+            duration_ms=(
+                (monotonic() - received_at) * 1_000 if received_at is not None else None
+            ),
         )
 
     async def _on_stream_delta(self, event: StreamDeltaReady) -> None:
         self._raise_delta_failure()
         if event.channel != self.name:
             return
-        turn_id = event.turn_id or self._current_turn_id(event.session_key)
-        if event.thinking_delta:
-            block_id, ordinal = self._thinking_block(event.session_key, turn_id)
-            await self._buffer_bounded_delta(
-                session_id=event.session_key,
+        session_id = event.session_key
+        turn_id = event.turn_id or self._current_turn_id(session_id)
+        # 0. 终态已收口（墓碑在而锁已清理）的迟到事件先读 closed 直接丢弃，
+        #    绝不等待锁、绝不重建 batch/timer/lock，也绝不让它滑向崩溃路径。
+        if (session_id, turn_id) in self._turn_terminals:
+            self._log_delta_dropped(session_id, turn_id, event)
+            return
+        # 1. 单 owner 原子接受：state mutation 与 bounded chunks 接受在同一把
+        #    per-turn 锁内，terminal 无法在检查与提交之间插入。
+        accepted, flush_now = await self._accept_delta(session_id, turn_id, event)
+        if not accepted or not flush_now:
+            return
+        # 2. 首段即时 flush 必须在锁外（锁内不做网络 I/O）；若 terminal 已代为
+        #    flush 并收口，不得错误再标 published。
+        published = await self._flush_deltas(session_id, turn_id)
+        if published and (session_id, turn_id) not in self._turn_terminals:
+            self._mark_first_deltas_published(session_id, turn_id)
+
+    async def _accept_delta(
+        self,
+        session_id: str,
+        turn_id: str,
+        event: StreamDeltaReady,
+    ) -> tuple[bool, bool]:
+        """锁内原子接受一个增量事件；返回 (是否接受, 是否需锁外 flush)。"""
+
+        flush_now = False
+        async with self._delta_locked(session_id, turn_id, require_state=True) as lock:
+            if lock is None:
+                self._log_delta_dropped(session_id, turn_id, event)
+                return False, False
+            state = self._require_process_state(session_id, turn_id)
+            started_at = self._turn_started_at.get((session_id, turn_id))
+            # 首段即时 flush 触发器：该类型首段尚未真实发布（失败可重试）。
+            first_thinking = not state.first_thinking_published
+            first_answer = not state.first_answer_published
+            # thinking 与 answer 两个非空字段各自无条件调用一次对应 locked
+            # helper；聚合 flush 决策不得参与 helper 是否执行——or 短路会让
+            # thinking 首段吞掉同一事件里的 content_delta。顺序仍 thinking→answer。
+            thinking_flush = False
+            answer_flush = False
+            if event.thinking_delta:
+                thinking_flush = (
+                    self._accept_thinking_delta_locked(
+                        session_id,
+                        turn_id,
+                        state,
+                        started_at,
+                        event.thinking_delta,
+                    )
+                    or first_thinking
+                )
+            if event.content_delta:
+                answer_flush = (
+                    self._accept_answer_delta_locked(
+                        session_id,
+                        turn_id,
+                        state,
+                        started_at,
+                        event.content_delta,
+                    )
+                    or first_answer
+                )
+            flush_now = thinking_flush or answer_flush
+        return True, flush_now
+
+    def _accept_thinking_delta_locked(
+        self,
+        session_id: str,
+        turn_id: str,
+        state: _ProcessTurnState,
+        started_at: float | None,
+        delta: str,
+    ) -> bool:
+        """锁内接受 thinking delta：块身份 → bounded chunks 入批 → 提交状态。"""
+
+        # 1. 创建/选择 thinking 块身份；锁内先不提交 ordinal 递增。
+        if state.thinking_block is None:
+            block_id = f"thinking:{turn_id}:{state.next_ordinal}"
+            ordinal = state.next_ordinal
+        else:
+            block_id, ordinal = state.thinking_block
+        # 2. bounded chunks 全部入批（持锁期间 terminal 不可能插入）。
+        flush_now = False
+        for chunk in _utf8_chunks(delta, _DELTA_FLUSH_BYTES):
+            if self._accept_segment_locked(
+                session_id=session_id,
                 turn_id=turn_id,
                 event_type="react.thinking.delta",
-                delta=event.thinking_delta,
+                delta=chunk,
                 block_id=block_id,
                 ordinal=ordinal,
+            ):
+                flush_now = True
+        # 3. 全部接受成功后才提交完整 state mutation。
+        if state.thinking_block is None:
+            state.next_ordinal += 1
+            state.thinking_block = (block_id, ordinal)
+        # 4. 时间链：首个 thinking delta 到达（每轮只打一次）。
+        if not state.first_thinking_received:
+            state.first_thinking_received = True
+            turn_milestone(
+                logger,
+                "tl:delta.first_thinking_received",
+                session_id=session_id,
+                turn_id=turn_id,
+                client_message_id=state.client_message_id,
+                duration_ms=(
+                    (monotonic() - started_at) * 1_000
+                    if started_at is not None
+                    else None
+                ),
             )
-        if event.content_delta:
-            state = self._require_process_state(event.session_key, turn_id)
-            state.answer_segments.append(event.content_delta)
-            await self._buffer_bounded_delta(
-                session_id=event.session_key,
+        return flush_now
+
+    def _accept_answer_delta_locked(
+        self,
+        session_id: str,
+        turn_id: str,
+        state: _ProcessTurnState,
+        started_at: float | None,
+        delta: str,
+    ) -> bool:
+        """锁内接受 answer delta：bounded chunks 全部入批后再追加正文。"""
+
+        flush_now = False
+        for chunk in _utf8_chunks(delta, _DELTA_FLUSH_BYTES):
+            if self._accept_segment_locked(
+                session_id=session_id,
                 turn_id=turn_id,
                 event_type="answer.delta",
-                delta=event.content_delta,
+                delta=chunk,
                 block_id=None,
                 ordinal=None,
+            ):
+                flush_now = True
+        # 全部接受成功后才提交完整 state mutation：state 有正文则 wire 必有。
+        state.answer_segments.append(delta)
+        if not state.first_answer_received:
+            state.first_answer_received = True
+            turn_milestone(
+                logger,
+                "tl:delta.first_answer_received",
+                session_id=session_id,
+                turn_id=turn_id,
+                client_message_id=state.client_message_id,
+                duration_ms=(
+                    (monotonic() - started_at) * 1_000
+                    if started_at is not None
+                    else None
+                ),
             )
+        return flush_now
+
+    def _log_delta_dropped(
+        self,
+        session_id: str,
+        turn_id: str,
+        event: StreamDeltaReady,
+    ) -> None:
+        """整事件原子丢弃：终态已收口后绝不让任何分片滑入批或 state。"""
+
+        if event.thinking_delta:
+            self._log_late_event_dropped(session_id, turn_id, "react.thinking.delta")
+        if event.content_delta:
+            self._log_late_event_dropped(session_id, turn_id, "answer.delta")
 
     async def _on_tool_call_started(self, event: ToolCallStarted) -> None:
         self._raise_delta_failure()
         if event.channel != self.name:
             return
-        turn_id = event.turn_id or self._current_turn_id(event.session_key)
-        await self._flush_deltas(event.session_key, turn_id)
-        state = self._require_process_state(event.session_key, turn_id)
-        state.thinking_block = None
-        if event.call_id in state.tool_blocks:
-            raise RuntimeError(f"mobile tool call_id 重复开始: {event.call_id}")
-        ordinal = state.next_ordinal
-        state.next_ordinal += 1
-        block_id = f"tool:{event.call_id}"
-        state.tool_blocks[event.call_id] = (block_id, ordinal, monotonic())
-        await self._runtime.publish_event(
-            event_type="react.tool.started",
-            session_id=event.session_key,
-            turn_id=turn_id,
-            payload={
-                "call_id": event.call_id,
-                "block_id": block_id,
-                "ordinal": ordinal,
-                "tool_name": event.tool_name,
-                "arguments": _mobile_tool_arguments(event.arguments),
-            },
-        )
+        session_id = event.session_key
+        turn_id = event.turn_id or self._current_turn_id(session_id)
+        # 0. 终态已收口的迟到事件先读 closed 直接丢弃，不触碰任何 per-turn 结构。
+        if (session_id, turn_id) in self._turn_terminals:
+            self._log_late_event_dropped(session_id, turn_id, "react.tool.started")
+            return
+        # 1. 与 terminal 同一 owner 锁内串行：flush 已接受 delta → mutate →
+        #    publish；terminal 之后排队的 tool 事件拿锁后见 closed 被丢弃。
+        async with self._delta_locked(session_id, turn_id, require_state=True) as lock:
+            if lock is None:
+                self._log_late_event_dropped(session_id, turn_id, "react.tool.started")
+                return
+            _ = await self._flush_batch_locked(session_id, turn_id)
+            state = self._require_process_state(session_id, turn_id)
+            state.thinking_block = None
+            if event.call_id in state.tool_blocks:
+                raise RuntimeError(f"mobile tool call_id 重复开始: {event.call_id}")
+            ordinal = state.next_ordinal
+            state.next_ordinal += 1
+            block_id = f"tool:{event.call_id}"
+            state.tool_blocks[event.call_id] = (block_id, ordinal, monotonic())
+            await self._runtime.publish_event(
+                event_type="react.tool.started",
+                session_id=session_id,
+                turn_id=turn_id,
+                payload={
+                    "call_id": event.call_id,
+                    "block_id": block_id,
+                    "ordinal": ordinal,
+                    "tool_name": event.tool_name,
+                    "arguments": _mobile_tool_arguments(event.arguments),
+                    "control_turn_id": state.control_turn_id,
+                },
+            )
 
     async def _on_tool_call_completed(self, event: ToolCallCompleted) -> None:
         self._raise_delta_failure()
         if event.channel != self.name:
             return
-        turn_id = event.turn_id or self._current_turn_id(event.session_key)
-        await self._flush_deltas(event.session_key, turn_id)
-        state = self._require_process_state(event.session_key, turn_id)
-        block = state.tool_blocks.get(event.call_id)
-        if block is None:
-            raise RuntimeError(f"mobile tool completed 缺少 started: {event.call_id}")
-        block_id, ordinal, started_at = block
-        await self._runtime.publish_event(
-            event_type="react.tool.completed",
-            session_id=event.session_key,
-            turn_id=turn_id,
-            payload={
-                "call_id": event.call_id,
-                "block_id": block_id,
-                "ordinal": ordinal,
-                "tool_name": event.tool_name,
-                "status": event.status,
-                "arguments": _mobile_tool_arguments(
-                    event.final_arguments,
-                ),
-                "result_preview": event.result_preview,
-                "duration_ms": max(0, round((monotonic() - started_at) * 1_000)),
-            },
-        )
+        session_id = event.session_key
+        turn_id = event.turn_id or self._current_turn_id(session_id)
+        if (session_id, turn_id) in self._turn_terminals:
+            self._log_late_event_dropped(session_id, turn_id, "react.tool.completed")
+            return
+        async with self._delta_locked(session_id, turn_id, require_state=True) as lock:
+            if lock is None:
+                self._log_late_event_dropped(
+                    session_id, turn_id, "react.tool.completed"
+                )
+                return
+            _ = await self._flush_batch_locked(session_id, turn_id)
+            state = self._require_process_state(session_id, turn_id)
+            block = state.tool_blocks.get(event.call_id)
+            if block is None:
+                raise RuntimeError(
+                    f"mobile tool completed 缺少 started: {event.call_id}"
+                )
+            block_id, ordinal, started_at = block
+            await self._runtime.publish_event(
+                event_type="react.tool.completed",
+                session_id=session_id,
+                turn_id=turn_id,
+                payload={
+                    "call_id": event.call_id,
+                    "block_id": block_id,
+                    "ordinal": ordinal,
+                    "tool_name": event.tool_name,
+                    "status": event.status,
+                    "arguments": _mobile_tool_arguments(
+                        event.final_arguments,
+                    ),
+                    "result_preview": event.result_preview,
+                    "duration_ms": max(0, round((monotonic() - started_at) * 1_000)),
+                    "control_turn_id": state.control_turn_id,
+                },
+            )
+
+    async def _on_output_completed(self, event: TurnOutputCompleted) -> None:
+        self._raise_delta_failure()
+        if event.channel != self.name:
+            return
+        session_id = event.session_key
+        turn_id = event.turn_id or self._current_turn_id(session_id)
+        # 终态已收口则丢弃迟到信号，绝不重建 per-turn 结构。
+        if (session_id, turn_id) in self._turn_terminals:
+            self._log_late_event_dropped(session_id, turn_id, "turn.output.completed")
+            return
+        # 与 terminal 同一 owner 锁内 flush + durable publish，保证 output.completed
+        # 要么先于 terminal 发布，要么在 terminal 已收口后被丢弃，绝不排在 terminal 之后。
+        async with self._delta_locked(session_id, turn_id, require_state=True) as lock:
+            if lock is None:
+                self._log_late_event_dropped(
+                    session_id, turn_id, "turn.output.completed"
+                )
+                return
+            _ = await self._flush_batch_locked(session_id, turn_id)
+            await self._runtime.publish_event(
+                event_type="turn.output.completed",
+                session_id=session_id,
+                turn_id=turn_id,
+                payload={"client_message_id": event.client_message_id},
+                required_capability=TURN_OUTPUT_COMPLETED_CAPABILITY,
+            )
 
     async def _on_response(self, message: OutboundMessage) -> None:
         outbound = channel_message_from_outbound(message)
@@ -1611,29 +2133,63 @@ class MobileRealtimeChannel:
 
         self._raise_delta_failure()
         session_id = self._session_id(message.chat_id)
-        turn_id = message.control_turn_id or self._current_turn_id(session_id)
-        await self._flush_deltas(session_id, turn_id)
-        state = self._process_turns.get((session_id, turn_id))
-        final_content = message.content
-        emitted_content = "" if state is None else "".join(state.answer_segments)
-        if emitted_content and message.content.startswith(emitted_content):
-            await self._publish_answer_suffix(
-                session_id,
-                turn_id,
-                message.content[len(emitted_content) :],
-            )
-            final_content = ""
-        elif (
-            not emitted_content
-            and len(message.content.encode("utf-8")) > _DELTA_FLUSH_BYTES
+        raw_attempt_id = message.execution_attempt_id
+        if raw_attempt_id is not None and (
+            not isinstance(raw_attempt_id, str) or not raw_attempt_id
         ):
-            await self._publish_answer_suffix(session_id, turn_id, message.content)
-            final_content = ""
+            raise RuntimeError("mobile final execution attempt id 无效")
+        turn_id = (
+            cast(str | None, raw_attempt_id)
+            or message.control_turn_id
+            or self._current_turn_id(session_id)
+        )
+        key = (session_id, turn_id)
         message_id = message.session_message_id
         media = [attachment.source for attachment in message.attachments]
         if media and message_id is None:
             raise RuntimeError("出站媒体缺少已持久化的 assistant 消息")
         source_metadata = dict(message.metadata)
+        client_message_id = source_metadata.get("client_message_id")
+        if client_message_id is not None and (
+            not isinstance(client_message_id, str) or not client_message_id
+        ):
+            raise RuntimeError("mobile final 缺少完整 client 消息标识")
+        if message.terminal_status in (
+            TurnTerminalStatus.INTERRUPTED,
+            TurnTerminalStatus.CANCELLED,
+        ):
+            # 1. 中断/取消使用权威 typed terminal；与 /stop 已发布终态共用墓碑幂等。
+            if message.control_turn_id is None:
+                raise RuntimeError("mobile interrupted terminal 缺少权威 turn_id")
+            payload: dict[str, object] = {
+                "status": message.terminal_status.value,
+                "message": message.content or "本轮已中断。",
+                "control_turn_id": message.control_turn_id,
+            }
+            if client_message_id is not None:
+                payload["client_message_id"] = client_message_id
+            started_at = self._turn_started_at.get(key)
+            published = await self._publish_terminal(
+                session_id=session_id,
+                turn_id=turn_id,
+                event_type="turn.interrupted",
+                payload=payload,
+            )
+            if published:
+                turn_milestone(
+                    logger,
+                    "tl:final.published",
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    client_message_id=cast(str, client_message_id or ""),
+                    duration_ms=(
+                        (monotonic() - started_at) * 1_000
+                        if started_at is not None
+                        else None
+                    ),
+                    counts=f"terminal={message.terminal_status.value}",
+                )
+            return DeliveryReceipt(DeliveryStatus.SUCCESS)
         metadata = {
             key: source_metadata[key]
             for key in ("mobile_attention",)
@@ -1663,55 +2219,88 @@ class MobileRealtimeChannel:
                 "message": "附件源暂时不可用",
             }
         final_payload: dict[str, object] = {
-            "content": final_content,
             "thinking": message.thinking or "",
             "attachments": attachments,
             "metadata": metadata,
+            "control_turn_id": message.control_turn_id or turn_id,
         }
         user_message_id = source_metadata.get("persisted_user_message_id")
-        client_message_id = source_metadata.get("client_message_id")
-        if user_message_id is not None or client_message_id is not None:
-            if not isinstance(user_message_id, str) or not isinstance(
-                client_message_id, str
-            ):
-                raise RuntimeError("mobile final 缺少完整的 user/client 消息标识")
+        # client_message_id 可单独存在（failed/中断终态）；persisted_user_message_id
+        # 若存在仍要求是非空字符串。逐项校验，绝不因单项缺失而整体失败或猜测。
+        if user_message_id is not None and (
+            not isinstance(user_message_id, str) or not user_message_id
+        ):
+            raise RuntimeError("mobile final 缺少完整 user 消息标识")
+        if user_message_id is not None:
             final_payload["user_message_id"] = user_message_id
+        if client_message_id is not None:
             final_payload["client_message_id"] = client_message_id
         if message_id is not None:
             final_payload["message_id"] = message_id
-        await self._runtime.publish_event(
-            event_type="message.final",
+        # 1. 与 terminal 同一 owner 锁内完成 flush → suffix → 收口，杜绝多段锁
+        #    之间的迟到 delta 插入造成 suffix 重复或正文丢失。
+        async with self._delta_locked(session_id, turn_id) as lock:
+            if lock is None:
+                # 2. 其他 owner 已先收口：不重复发布，完整正文由 durable history 恢复。
+                return DeliveryReceipt(
+                    DeliveryStatus.SUCCESS,
+                    canonical_media=tuple(media),
+                )
+            _ = await self._flush_batch_locked(session_id, turn_id)
+            state = self._process_turns.get(key)
+            emitted_content = (
+                ""
+                if state is None
+                else "".join(state.answer_segments) + state.final_suffix_emitted
+            )
+            # 3. 缺失正文锁内入批并记入已发布 suffix；publish 失败重试只补缺失部分，
+            #    绝不重复已 flush 的 delta。
+            _, final_content = self._accept_final_suffix_locked(
+                session_id,
+                turn_id,
+                message_content=message.content,
+                emitted_content=emitted_content,
+                control_turn_id=cast(str, final_payload["control_turn_id"]),
+            )
+            final_payload["content"] = final_content
+            started_at = self._turn_started_at.get(key)
+            published = await self._close_terminal_locked(
+                session_id,
+                turn_id,
+                event_type="message.final",
+                payload=final_payload,
+            )
+            if not published:
+                # 4. 其他 owner 已先收口；终态不重复发布。
+                return DeliveryReceipt(
+                    DeliveryStatus.SUCCESS,
+                    canonical_media=tuple(media),
+                )
+        # 5. 时间链：message.final 进入服务端发布路径（权威终态已落 SessionDB）
+        self._clear_turn_maps(session_id, turn_id)
+        # 进程内 state 缺失（恢复态）时用已验证 outbound client_message_id 贯通，
+        # 不用 current turn 猜；state 存在时仍以 turn.started 接受的同源 id 为准。
+        if state is not None and state.client_message_id:
+            trace_client_message_id = state.client_message_id
+        else:
+            trace_client_message_id = cast(
+                str, source_metadata.get("client_message_id") or ""
+            )
+        turn_milestone(
+            logger,
+            "tl:final.published",
             session_id=session_id,
             turn_id=turn_id,
-            payload=final_payload,
+            client_message_id=trace_client_message_id,
+            duration_ms=(
+                (monotonic() - started_at) * 1_000 if started_at is not None else None
+            ),
+            counts="terminal=completed",
         )
-        _ = self._active_turn_ids.pop(session_id, None)
-        _ = self._process_turns.pop((session_id, turn_id), None)
-        _ = self._delta_locks.pop((session_id, turn_id), None)
         return DeliveryReceipt(
             DeliveryStatus.SUCCESS,
             canonical_media=tuple(media),
         )
-
-    async def _publish_answer_suffix(
-        self,
-        session_id: str,
-        turn_id: str,
-        suffix: str,
-    ) -> None:
-        """用有界 delta 发布 final 尚未覆盖的正文后缀。"""
-
-        if not suffix:
-            return
-        await self._buffer_bounded_delta(
-            session_id=session_id,
-            turn_id=turn_id,
-            event_type="answer.delta",
-            delta=suffix,
-            block_id=None,
-            ordinal=None,
-        )
-        await self._flush_deltas(session_id, turn_id)
 
     async def _mobile_history_item(
         self,
@@ -1809,6 +2398,40 @@ class MobileRealtimeChannel:
             for snapshot in snapshots:
                 snapshot.path.unlink(missing_ok=True)
 
+    @asynccontextmanager
+    async def _delta_locked(
+        self,
+        session_id: str,
+        turn_id: str,
+        *,
+        may_create: bool = True,
+        require_state: bool = False,
+    ) -> AsyncGenerator[asyncio.Lock | None]:
+        """per-turn 串行临界区；终态已收口 yield None，绝不重建 per-turn 结构。"""
+
+        key = (session_id, turn_id)
+        lock = self._delta_locks.get(key)
+        if lock is None:
+            # 1. 先读 closed：墓碑在而锁已清理的 turn 绝不重建。
+            if key in self._turn_terminals:
+                yield None
+                return
+            if not may_create:
+                yield None
+                return
+            if require_state and key not in self._process_turns:
+                raise RuntimeError(
+                    f"mobile process turn 未开始: {session_id}/{turn_id}"
+                )
+            lock = asyncio.Lock()
+            self._delta_locks[key] = lock
+        async with lock:
+            # 2. 排队期间 terminal 可能已收口：拿锁后必须复核 closed。
+            if key in self._turn_terminals:
+                yield None
+                return
+            yield lock
+
     async def _buffer_delta(
         self,
         *,
@@ -1818,49 +2441,78 @@ class MobileRealtimeChannel:
         delta: str,
         block_id: str | None,
         ordinal: int | None,
-    ) -> None:
-        """在下一个事件循环轮次或 4KiB 时发布连续 delta。"""
+    ) -> bool:
+        """把连续 delta 聚合成 8ms/4KiB 传输批；已收口返回 False 且不重建任何结构。"""
+
+        flush_now = False
+        async with self._delta_locked(session_id, turn_id) as lock:
+            if lock is None:
+                self._log_late_event_dropped(session_id, turn_id, event_type)
+                return False
+            flush_now = self._accept_segment_locked(
+                session_id=session_id,
+                turn_id=turn_id,
+                event_type=event_type,
+                delta=delta,
+                block_id=block_id,
+                ordinal=ordinal,
+            )
+        if flush_now:
+            _ = await self._flush_deltas(session_id, turn_id)
+        return True
+
+    def _accept_segment_locked(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        event_type: str,
+        delta: str,
+        block_id: str | None,
+        ordinal: int | None,
+        merge: bool = True,
+    ) -> bool:
+        """锁内把一段 delta 聚合进批并返回是否需立即 flush；调用方必须持锁。"""
 
         key = (session_id, turn_id)
-        lock = self._delta_locks[key]
-        flush_now = False
-        async with lock:
-            batch = self._delta_batches.get(key)
-            if batch is None:
-                if len(self._delta_batches) >= _MAX_DELTA_BATCHES:
-                    raise RuntimeError("mobile delta batch 已达到 256 个活跃 turn 上限")
-                timer = asyncio.create_task(
-                    self._flush_after_interval(key),
-                    name=f"mobile-delta-flush:{turn_id}",
-                )
-                timer.add_done_callback(self._on_delta_timer_done)
-                batch = _DeltaBatch(segments=[], byte_count=0, timer=timer)
-                self._delta_batches[key] = batch
-            segment_identity = (event_type, block_id, ordinal)
-            if (
-                batch.segments
-                and (
-                    batch.segments[-1][0],
-                    batch.segments[-1][2],
-                    batch.segments[-1][3],
-                )
-                == segment_identity
-            ):
-                previous_type, previous_delta, previous_block, previous_ordinal = (
-                    batch.segments[-1]
-                )
-                batch.segments[-1] = (
-                    previous_type,
-                    previous_delta + delta,
-                    previous_block,
-                    previous_ordinal,
-                )
-            else:
-                batch.segments.append((event_type, delta, block_id, ordinal))
-            batch.byte_count += len(delta.encode("utf-8"))
-            flush_now = batch.byte_count >= _DELTA_FLUSH_BYTES
-        if flush_now:
-            await self._flush_deltas(session_id, turn_id)
+        batch = self._delta_batches.get(key)
+        if batch is None:
+            # 1. 有界批：8ms 只限制传输合批延迟；可见 React 发布
+            #    由共享 WebUI rAF 驱动。
+            if len(self._delta_batches) >= _MAX_DELTA_BATCHES:
+                raise RuntimeError("mobile delta batch 已达到 256 个活跃 turn 上限")
+            timer = asyncio.create_task(
+                self._flush_after_interval(key),
+                name=f"mobile-delta-flush:{turn_id}",
+            )
+            timer.add_done_callback(self._on_delta_timer_done)
+            batch = _DeltaBatch(segments=[], byte_count=0, timer=timer)
+            self._delta_batches[key] = batch
+        # 2. 连续同身份段原地合并，保持原始顺序；merge=False 时每段独立，
+        #    保证 bounded 分片逐条发布（final suffix 路径）。
+        if (
+            merge
+            and batch.segments
+            and (
+                batch.segments[-1][0],
+                batch.segments[-1][2],
+                batch.segments[-1][3],
+            )
+            == (event_type, block_id, ordinal)
+        ):
+            previous_type, previous_delta, previous_block, previous_ordinal = (
+                batch.segments[-1]
+            )
+            batch.segments[-1] = (
+                previous_type,
+                previous_delta + delta,
+                previous_block,
+                previous_ordinal,
+            )
+        else:
+            batch.segments.append((event_type, delta, block_id, ordinal))
+        batch.byte_count += len(delta.encode("utf-8"))
+        return batch.byte_count >= _DELTA_FLUSH_BYTES
 
     async def _buffer_bounded_delta(
         self,
@@ -1871,48 +2523,199 @@ class MobileRealtimeChannel:
         delta: str,
         block_id: str | None,
         ordinal: int | None,
-    ) -> None:
-        """按 UTF-8 字节边界把任意增量限制在单个事件预算内。"""
+    ) -> bool:
+        """按 UTF-8 字节边界分片入批；任一分片被收口拒绝即停止。"""
 
         for chunk in _utf8_chunks(delta, _DELTA_FLUSH_BYTES):
-            await self._buffer_delta(
+            if not await self._buffer_delta(
                 session_id=session_id,
                 turn_id=turn_id,
                 event_type=event_type,
                 delta=chunk,
                 block_id=block_id,
                 ordinal=ordinal,
-            )
+            ):
+                return False
+        return True
 
     async def _flush_after_interval(self, key: tuple[str, str]) -> None:
-        await asyncio.sleep(_DELTA_FLUSH_INTERVAL_SECONDS)
-        await self._flush_deltas(*key)
+        await asyncio.sleep(_DELTA_TRANSPORT_COALESCE_SECONDS)
+        _ = await self._flush_deltas(*key)
 
-    async def _flush_deltas(self, session_id: str, turn_id: str) -> None:
-        """按原始顺序发布一个 turn 当前已聚合的 delta 段。"""
+    async def _flush_deltas(self, session_id: str, turn_id: str) -> bool:
+        """按原始顺序发布已聚合 delta；已收口或无批返回 False，绝不重建锁。"""
+
+        async with self._delta_locked(session_id, turn_id, may_create=False) as lock:
+            if lock is None:
+                return False
+            return await self._flush_batch_locked(session_id, turn_id)
+
+    async def _flush_batch_locked(self, session_id: str, turn_id: str) -> bool:
+        """锁内逐段发布当前批；每段成功后才消费，失败保留失败段及后续段。"""
 
         key = (session_id, turn_id)
-        lock = self._delta_locks[key]
-        async with lock:
-            batch = self._delta_batches.pop(key, None)
-            if batch is None:
-                return
-            current = asyncio.current_task()
-            if batch.timer is not current:
-                _ = batch.timer.cancel()
-            for event_type, delta, block_id, ordinal in batch.segments:
-                payload: dict[str, object] = {"delta": delta}
-                if block_id is not None:
-                    if ordinal is None:
-                        raise AssertionError("thinking delta block 缺少 ordinal")
-                    payload["block_id"] = block_id
-                    payload["ordinal"] = ordinal
-                await self._runtime.publish_event(
-                    event_type=event_type,
+        batch = self._delta_batches.get(key)
+        if batch is None:
+            return False
+        published_any = False
+        while batch.segments:
+            event_type, delta, block_id, ordinal = batch.segments[0]
+            state = self._require_process_state(session_id, turn_id)
+            payload: dict[str, object] = {
+                "delta": delta,
+                "control_turn_id": state.control_turn_id,
+            }
+            if block_id is not None:
+                if ordinal is None:
+                    raise AssertionError("thinking delta block 缺少 ordinal")
+                payload["block_id"] = block_id
+                payload["ordinal"] = ordinal
+            await self._runtime.publish_event(
+                event_type=event_type,
+                session_id=session_id,
+                turn_id=turn_id,
+                payload=payload,
+            )
+            # 1. publish 确认成功后才消费该段，并精确扣减 UTF-8 byte_count；
+            #    失败段与后续段原样留在批里，成功段不回卷，重试不丢不重。
+            _ = batch.segments.pop(0)
+            batch.byte_count -= len(delta.encode("utf-8"))
+            published_any = True
+        # 2. 全部段发布成功后：从 map 移除批，并取消非当前任务的 timer。
+        _ = self._delta_batches.pop(key, None)
+        current = asyncio.current_task()
+        if batch.timer is not current:
+            _ = batch.timer.cancel()
+        return published_any
+
+    def _accept_final_suffix_locked(
+        self,
+        session_id: str,
+        turn_id: str,
+        *,
+        message_content: str,
+        emitted_content: str,
+        control_turn_id: str,
+    ) -> tuple[str, str]:
+        """锁内把 final 缺失正文入批并记账；返回 (suffix, final_content)。"""
+
+        suffix = ""
+        final_content = message_content
+        if emitted_content and message_content.startswith(emitted_content):
+            suffix = message_content[len(emitted_content) :]
+            final_content = ""
+        elif (
+            not emitted_content
+            and len(message_content.encode("utf-8")) > _DELTA_FLUSH_BYTES
+        ):
+            suffix = message_content
+            final_content = ""
+        if not suffix:
+            return suffix, final_content
+        key = (session_id, turn_id)
+        state = self._process_turns.get(key)
+        if state is None:
+            # 恢复态（本进程无流式 state）也记账，保证失败重试不重复发布。
+            state = _ProcessTurnState(
+                next_ordinal=0,
+                thinking_block=None,
+                tool_blocks={},
+                answer_segments=[],
+                control_turn_id=control_turn_id,
+                client_message_id="",
+            )
+            self._process_turns[key] = state
+        state.final_suffix_emitted += suffix
+        for chunk in _utf8_chunks(suffix, _DELTA_FLUSH_BYTES):
+            _ = self._accept_segment_locked(
+                session_id=session_id,
+                turn_id=turn_id,
+                event_type="answer.delta",
+                delta=chunk,
+                block_id=None,
+                ordinal=None,
+                merge=False,
+            )
+        return suffix, final_content
+
+    async def _publish_terminal(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        event_type: str,
+        payload: dict[str, object],
+        device_id: str | None = None,
+    ) -> bool:
+        """每 turn 唯一 owner 的终态收口：flush → publish → 成功后 closed → cleanup。"""
+
+        key = (session_id, turn_id)
+        async with self._delta_locked(session_id, turn_id, require_state=False) as lock:
+            if lock is None:
+                # 1. 其他 owner 已收口：不重复发布，也不重建任何 per-turn 结构。
+                state = self._process_turns.get(key)
+                turn_milestone(
+                    logger,
+                    "tl:terminal.dropped",
                     session_id=session_id,
                     turn_id=turn_id,
-                    payload=payload,
+                    client_message_id=(
+                        state.client_message_id if state is not None else ""
+                    ),
+                    outcome="already_closed",
+                    counts=f"event_type={event_type}",
                 )
+                return False
+            published = await self._close_terminal_locked(
+                session_id,
+                turn_id,
+                event_type=event_type,
+                payload=payload,
+                device_id=device_id,
+            )
+        if published:
+            self._clear_turn_maps(session_id, turn_id)
+        return published
+
+    async def _close_terminal_locked(
+        self,
+        session_id: str,
+        turn_id: str,
+        *,
+        event_type: str,
+        payload: dict[str, object],
+        device_id: str | None = None,
+    ) -> bool:
+        """锁内收口：flush 已接受 delta → durable publish → 成功后才提交墓碑。"""
+
+        key = (session_id, turn_id)
+        # 1. 锁内复核：其他 owner 已成功收口则不重复发布。
+        if key in self._turn_terminals:
+            return False
+        # 2. 按 wire 顺序先 flush 已接受 delta（含 final suffix）；已发布不回卷
+        #    不重复，失败重试时对应 batch 为空，process state 保留供 suffix 计算。
+        _ = await self._flush_batch_locked(session_id, turn_id)
+        # 3. durable 终态发布：await 成功返回前没有任何已提交 closed 墓碑。
+        if device_id is None:
+            await self._runtime.publish_event(
+                event_type=event_type,
+                session_id=session_id,
+                turn_id=turn_id,
+                payload=payload,
+            )
+        else:
+            await self._runtime.publish_event(
+                event_type=event_type,
+                session_id=session_id,
+                turn_id=turn_id,
+                payload=payload,
+                device_id=device_id,
+            )
+        # 4. publish 确认成功后才在同一锁内提交终态墓碑（有界 256）。
+        if len(self._turn_terminals) >= _MAX_DELTA_BATCHES:
+            _ = self._turn_terminals.pop(next(iter(self._turn_terminals)))
+        self._turn_terminals[key] = event_type
+        return True
 
     def _on_delta_timer_done(self, task: asyncio.Task[None]) -> None:
         if task.cancelled():
@@ -1934,14 +2737,6 @@ class MobileRealtimeChannel:
         error = self._delta_failure
         self._delta_failure = None
         raise error
-
-    def _thinking_block(self, session_id: str, turn_id: str) -> tuple[str, int]:
-        state = self._require_process_state(session_id, turn_id)
-        if state.thinking_block is None:
-            ordinal = state.next_ordinal
-            state.next_ordinal += 1
-            state.thinking_block = (f"thinking:{turn_id}:{ordinal}", ordinal)
-        return state.thinking_block
 
     def _require_process_state(
         self,
@@ -1992,6 +2787,113 @@ class MobileRealtimeChannel:
 
     def _current_turn_id(self, session_id: str) -> str:
         return self._active_turn_ids.get(session_id, session_id)
+
+    def _interrupt_payload(
+        self,
+        session_id: str,
+        turn_id: str,
+        *,
+        status: str,
+        message: str,
+        reason: str | None = None,
+    ) -> dict[str, object]:
+        """构造 turn.interrupted 载荷；进程内已知 client_message_id 必须贯通。"""
+
+        turn = self._require_ctx().session_manager.control_store.read_turn(turn_id)
+        control_turn_id: object = (
+            turn.metadata.get("interactionId", turn.id) if turn is not None else turn_id
+        )
+        if not isinstance(control_turn_id, str) or not control_turn_id:
+            raise RuntimeError("mobile interrupted logical turn id 无效")
+        payload: dict[str, object] = {
+            "status": status,
+            "message": message,
+            "control_turn_id": control_turn_id,
+        }
+        if reason is not None:
+            payload["reason"] = reason
+        state = self._process_turns.get((session_id, turn_id))
+        if state is not None and state.client_message_id:
+            payload["client_message_id"] = state.client_message_id
+        return payload
+
+    def _mark_first_deltas_published(
+        self,
+        session_id: str,
+        turn_id: str,
+    ) -> None:
+        """flush 真实发布成功后打 published 里程碑；terminal 收口后不得调用。"""
+
+        state = self._process_turns.get((session_id, turn_id))
+        if state is None:
+            return
+        started_at = self._turn_started_at.get((session_id, turn_id))
+        if state.first_thinking_received and not state.first_thinking_published:
+            state.first_thinking_published = True
+            turn_milestone(
+                logger,
+                "tl:delta.first_thinking_published",
+                session_id=session_id,
+                turn_id=turn_id,
+                client_message_id=state.client_message_id,
+                duration_ms=(
+                    (monotonic() - started_at) * 1_000
+                    if started_at is not None
+                    else None
+                ),
+            )
+        if state.first_answer_received and not state.first_answer_published:
+            state.first_answer_published = True
+            turn_milestone(
+                logger,
+                "tl:delta.first_answer_published",
+                session_id=session_id,
+                turn_id=turn_id,
+                client_message_id=state.client_message_id,
+                duration_ms=(
+                    (monotonic() - started_at) * 1_000
+                    if started_at is not None
+                    else None
+                ),
+            )
+
+    def _log_late_event_dropped(
+        self,
+        session_id: str,
+        turn_id: str,
+        event_type: str,
+    ) -> None:
+        """终态已收口后到达的迟到事件：结构化记录后丢弃，绝不重建 batch/timer。"""
+
+        state = self._process_turns.get((session_id, turn_id))
+        turn_milestone(
+            logger,
+            "tl:turn.late.drop",
+            session_id=session_id,
+            turn_id=turn_id,
+            client_message_id=state.client_message_id if state is not None else "",
+            outcome="terminal_closed",
+            counts=f"event_type={event_type}",
+        )
+
+    def _clear_turn_maps(self, session_id: str, turn_id: str) -> None:
+        """终态后清理本 turn 状态；active 与计时起点只删仍指向本 turn 的。"""
+
+        # 1. 先取出本 turn 绑定的身份，再移除 process 状态本身。
+        state = self._process_turns.pop((session_id, turn_id), None)
+        client_message_id = state.client_message_id if state is not None else ""
+        # 2. 只有 active 仍指向本 turn 时才 compare-delete，旧 A 绝不清新 B。
+        if self._active_turn_ids.get(session_id) == turn_id:
+            _ = self._active_turn_ids.pop(session_id, None)
+        # 3. 兜底清掉残留 delta 批并取消定时器，禁止终态后任何迟到发布。
+        batch = self._delta_batches.pop((session_id, turn_id), None)
+        if batch is not None:
+            _ = batch.timer.cancel()
+        _ = self._delta_locks.pop((session_id, turn_id), None)
+        _ = self._turn_started_at.pop((session_id, turn_id), None)
+        # 4. 只删本 turn 的 send 计时起点，绝不连带同 session 排队消息。
+        if client_message_id:
+            _ = self._send_received_at.pop((session_id, client_message_id), None)
 
     def _require_ctx(self) -> ChannelContext:
         if self._ctx is None:
@@ -2073,7 +2975,11 @@ def _history_query_payload(payload: Mapping[str, object]) -> dict[str, int | Non
         },
     )
     version = payload.get("content_ref_version", 0)
-    if not isinstance(version, int) or isinstance(version, bool) or version not in {0, 1}:
+    if (
+        not isinstance(version, int)
+        or isinstance(version, bool)
+        or version not in {0, 1}
+    ):
         raise MobileCommandError(
             "unsupported_content_ref_version",
             "content_ref_version 只支持 1",
@@ -2207,6 +3113,13 @@ def _mobile_history_item(item: Mapping[str, object]) -> dict[str, object]:
     client_message_id = item.get("client_message_id")
     if isinstance(client_message_id, str) and client_message_id:
         result["client_message_id"] = client_message_id
+    control_turn_id = item.get("control_turn_id")
+    if (
+        result["role"] == "assistant"
+        and isinstance(control_turn_id, str)
+        and control_turn_id
+    ):
+        mobile_extra["control_turn_id"] = control_turn_id
     for field in ("reply_to_message_id", "reply_role", "reply_preview"):
         value = item.get(field)
         if isinstance(value, str) and value:
@@ -2325,7 +3238,7 @@ def _fit_mobile_history_payload(
     # 3. 游标协议按真实帧预算缩小页面，后续请求会从新高水位继续
     if allow_content_refs:
         while len(items) > 1:
-            items.pop()
+            _ = items.pop()
             payload["next_after_seq"] = cast(int, items[-1]["seq"])
             payload["has_more"] = True
             if (

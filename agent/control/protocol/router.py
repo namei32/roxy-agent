@@ -213,7 +213,11 @@ class ConnectionRouter:
         if method == "server/status":
             return self._service.status()
         if method == "thread/start":
-            return self._service.start_thread(values["metadata"], values["runtime"])
+            return self._service.start_thread(
+                values["metadata"],
+                values["runtime"],
+                values["pluginRolloutCapability"],
+            )
         if method == "thread/resume":
             return self._service.resume_thread(values["threadId"])
         if method == "thread/list":
@@ -222,15 +226,6 @@ class ConnectionRouter:
             return self._service.read_thread(values["threadId"], values["includeTurns"])
         if method == "thread/delete":
             return self._service.delete_thread(values["threadId"])
-        if method == "thread/consolidate/start":
-            operation = self._service.start_consolidation(values["threadId"])
-            task = asyncio.create_task(
-                self._forward_operation(operation),
-                name=f"control-operation:{operation.id}",
-            )
-            self._event_tasks.add(task)
-            task.add_done_callback(self._event_tasks.discard)
-            return operation.record()
         if method == "turn/read":
             return self._service.read_turn(values["threadId"], values["turnId"])
         if method == "turn/interrupt":
@@ -243,6 +238,7 @@ class ConnectionRouter:
                 values["input"],
                 values["metadata"],
                 values["runtime"],
+                attached=not values["detached"],
             )
             if not values["detached"]:
                 self._attached_turns[handle.id] = handle
@@ -260,6 +256,7 @@ class ConnectionRouter:
                 values["marketplace"],
                 values["ref"],
                 values["sparse"],
+                values["ownerTurnId"],
             )
         if method == "plugin/status":
             return self._service.plugin_status()
@@ -268,14 +265,20 @@ class ConnectionRouter:
         if method == "plugin/discard":
             return await self._service.discard_plugin(values["pluginId"])
         if method == "plugin/uninstall/start":
-            operation = self._service.start_plugin_uninstall(values["pluginId"])
-            task = asyncio.create_task(
-                self._forward_operation(operation),
-                name=f"control-operation:{operation.id}",
+            if not values["ownerTurnId"]:
+                operation = self._service.start_plugin_uninstall(values["pluginId"])
+                task = asyncio.create_task(
+                    self._forward_operation(operation),
+                    name=f"control-operation:{operation.id}",
+                )
+                self._event_tasks.add(task)
+                task.add_done_callback(self._event_tasks.discard)
+                return operation.record()
+            return await self._service.register_plugin_uninstall(
+                values["pluginId"], values["ownerTurnId"]
             )
-            self._event_tasks.add(task)
-            task.add_done_callback(self._event_tasks.discard)
-            return operation.record()
+        if method == "plugin/revert":
+            return await self._service.revert_plugin(values["ownerTurnId"])
         if method == "deployment/prepare":
             return await self._service.prepare_deployment(
                 values["deploymentId"],

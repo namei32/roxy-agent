@@ -53,7 +53,8 @@ function listPluginPanels() {
 
 // Plugins build as ESM modules that bundle their own code but keep react /
 // react-dom / jsx-runtime / the dashboard UI external — those resolve to the
-// host's shared singletons via the page import map at runtime.
+// host's shared singletons via the page import map at runtime. Roxy 源码别名
+// 在构建边界归一为旧 specifier，兼容尚未迁移的静态 import map。
 function buildArgs(command, panel, { watch = false } = {}) {
   return [
     ...command.slice(1),
@@ -68,7 +69,7 @@ function buildArgs(command, panel, { watch = false } = {}) {
     "--external:react-dom",
     "--external:react-dom/client",
     "--external:react/jsx-runtime",
-    "--external:@roxy/dashboard-ui",
+    "--alias:@roxy/dashboard-ui=@akashic/dashboard-ui",
     "--external:@akashic/dashboard-ui",
     ...(watch ? ["--watch"] : []),
   ];

@@ -23,9 +23,12 @@ from agent.restart import RestartCoordinator
 from session.manager import SessionManager
 from session.memory_policy import validate_session_memory_metadata
 
-PluginInstall = Callable[[str, str, str, list[str]], Awaitable[dict[str, object]]]
+PluginInstall = Callable[..., Awaitable[dict[str, object]]]
 PluginAction = Callable[[str], Awaitable[dict[str, object]]]
 PluginStatus = Callable[[], dict[str, object]]
+PluginUninstall = Callable[[str, str], Awaitable[dict[str, object]]]
+PluginChildBinding = Callable[[str, bool], dict[str, str] | None]
+PluginTurnBarrier = Callable[[], Awaitable[None]]
 RuntimeSelector = Literal["stable", "latest"]
 logger = logging.getLogger(__name__)
 
@@ -34,6 +37,19 @@ def _require_runtime_selector(value: object) -> RuntimeSelector:
     if value not in {"stable", "latest"}:
         raise ValueError("runtime 必须是 stable 或 latest")
     return cast(RuntimeSelector, value)
+
+
+def _reject_plugin_rollout_metadata(
+    metadata: dict[str, Any],
+    *,
+    boundary: str,
+) -> None:
+    reserved = sorted(key for key in metadata if key.startswith("_pluginRollout"))
+    if reserved:
+        raise ValueError(
+            f"{boundary} metadata 包含 Core 保留的插件 rollout 字段: "
+            + ", ".join(reserved)
+        )
 
 
 class ControlService:
@@ -47,11 +63,14 @@ class ControlService:
         *,
         plugin_drain: Callable[[str], Awaitable[str]] | None = None,
         plugin_uninstall: Callable[[str], Awaitable[dict[str, object]]] | None = None,
+        plugin_uninstall_register: PluginUninstall | None = None,
         plugin_install: PluginInstall | None = None,
+        plugin_revert: PluginAction | None = None,
+        plugin_child_binding: PluginChildBinding | None = None,
+        plugin_turn_barrier: PluginTurnBarrier | None = None,
         plugin_status: PluginStatus | None = None,
         plugin_promote: PluginAction | None = None,
         plugin_discard: PluginAction | None = None,
-        consolidate: Callable[[str], Awaitable[bool]] | None = None,
         workspace_token: str | None = None,
         restart_coordinator: RestartCoordinator | None = None,
         boot_id: str | None = None,
@@ -62,16 +81,20 @@ class ControlService:
         self.workspace = workspace.resolve()
         self._plugin_drain = plugin_drain
         self._plugin_uninstall = plugin_uninstall
+        self._plugin_uninstall_register = plugin_uninstall_register
         self._plugin_install = plugin_install
+        self._plugin_revert = plugin_revert
+        self._plugin_child_binding = plugin_child_binding
+        self._plugin_turn_barrier = plugin_turn_barrier
         self._plugin_status = plugin_status
         self._plugin_promote = plugin_promote
         self._plugin_discard = plugin_discard
-        self._consolidate = consolidate
         self._workspace_token = workspace_token
         self._restart_coordinator = restart_coordinator
         self._boot_id = boot_id
         self._ready = ready
         self._operation_tasks: set[asyncio.Task[dict[str, object]]] = set()
+        self._plugin_child_capabilities: dict[str, str] = {}
 
     def initialize(self, params: InitializeParams) -> dict[str, object]:
         if self._workspace_token is not None and not secrets.compare_digest(
@@ -126,16 +149,25 @@ class ControlService:
         self,
         metadata: dict[str, Any],
         runtime: str = "stable",
+        plugin_rollout_capability: str = "",
     ) -> dict[str, object]:
         # 1. 外部输入边界校验：非 boolean 的 skip_post_memory 拒绝创建 session。
         stored_metadata = dict(metadata)
         validate_session_memory_metadata(stored_metadata)
-        _require_runtime_selector(runtime)
+        selected = _require_runtime_selector(runtime)
+        if selected != "stable":
+            raise ValueError("latest runtime 只能由已绑定的 attached 插件验证子 turn 使用")
         if "runtime" in stored_metadata:
             raise ValueError("thread metadata 的 runtime 为协议保留字段")
-        if runtime != "stable":
-            stored_metadata["runtime"] = runtime
+        _reject_plugin_rollout_metadata(stored_metadata, boundary="thread")
         thread_id = new_thread_id()
+        if plugin_rollout_capability:
+            if self._plugin_child_binding is None:
+                raise RuntimeError("当前 runtime 不支持插件候选因果绑定")
+            binding = self._plugin_child_binding(plugin_rollout_capability, False)
+            if binding is None:
+                raise ValueError("插件验证 child capability 无效或已经使用")
+            self._plugin_child_capabilities[thread_id] = plugin_rollout_capability
         session = self.sessions.get_or_create(thread_id)
         session.metadata.update(stored_metadata)
         self.sessions.save(session)
@@ -173,6 +205,7 @@ class ControlService:
             raise ThreadBusyError(f"thread 正在执行: {thread_id}")
         if not self.sessions.delete_session(thread_id):
             raise ThreadNotFoundError(f"thread 不存在: {thread_id}")
+        _ = self._plugin_child_capabilities.pop(thread_id, None)
         return {"id": thread_id, "deleted": True}
 
     async def start_turn(
@@ -181,25 +214,49 @@ class ControlService:
         input_text: str,
         metadata: dict[str, Any],
         runtime: str | None = None,
+        attached: bool = True,
     ) -> TurnHandle:
+        if self._plugin_turn_barrier is not None:
+            await self._plugin_turn_barrier()
         session_meta = self.sessions.control_store.get_session_meta(thread_id)
         if session_meta is None:
             raise ThreadNotFoundError(f"thread 不存在: {thread_id}")
         turn_metadata = dict(metadata)
         if "runtime" in turn_metadata:
             raise ValueError("turn metadata 的 runtime 为协议保留字段")
+        _reject_plugin_rollout_metadata(turn_metadata, boundary="turn")
         session_metadata = session_meta["metadata"]
         assert isinstance(session_metadata, dict)
-        selected = _require_runtime_selector(
+        requested = _require_runtime_selector(
             runtime
             if runtime is not None
             else session_metadata.get("runtime", "stable")
         )
+        selected: RuntimeSelector = "stable"
+        capability = self._plugin_child_capabilities.pop(thread_id, "")
+        binding: dict[str, str] | None = None
+        if capability:
+            assert self._plugin_child_binding is not None
+            binding = self._plugin_child_binding(capability, True)
+            if binding is None:
+                raise ValueError("插件验证 child capability 已失效")
+            if not attached:
+                raise ValueError("插件验证 child 必须 attached")
+            selected = "latest"
+            turn_metadata.update(
+                {
+                    "_pluginRolloutOwnerTurnId": binding["ownerTurnId"],
+                    "_pluginRolloutPluginId": binding["pluginId"],
+                    "_pluginRolloutGenerationId": binding["generationId"],
+                    "_pluginRolloutSourceRevision": binding["sourceRevision"],
+                }
+            )
+        if requested == "latest" and binding is None:
+            raise ValueError("latest runtime 只能由已绑定的 attached 插件验证子 turn 使用")
         turn_metadata["runtime"] = selected
         return await self.runtime.start_turn(
             TurnRequest(thread_id, input_text, turn_metadata)
         )
-
     def read_turn(self, thread_id: str, turn_id: str) -> dict[str, object]:
         return self.runtime.read_turn(thread_id, turn_id).to_dict()
 
@@ -218,11 +275,16 @@ class ControlService:
         marketplace: str,
         ref: str,
         sparse: list[str],
+        owner_turn_id: str = "",
     ) -> dict[str, object]:
         if self._plugin_install is None:
             raise RuntimeError("当前 runtime 不支持插件安装")
         try:
-            return await self._plugin_install(source, marketplace, ref, sparse)
+            if not owner_turn_id:
+                return await self._plugin_install(source, marketplace, ref, sparse)
+            return await self._plugin_install(
+                source, marketplace, ref, sparse, owner_turn_id
+            )
         except Exception as exc:
             logger.exception("runtime-owned plugin install failed")
             raise PluginManagementError(str(exc)) from exc
@@ -254,6 +316,30 @@ class ControlService:
             logger.exception("plugin discard failed plugin=%s", plugin_id)
             raise PluginManagementError(str(exc)) from exc
 
+    async def register_plugin_uninstall(
+        self,
+        plugin_id: str,
+        owner_turn_id: str,
+    ) -> dict[str, object]:
+        if self._plugin_uninstall_register is None:
+            return self.start_plugin_uninstall(plugin_id).record()
+        try:
+            return await self._plugin_uninstall_register(plugin_id, owner_turn_id)
+        except Exception as exc:
+            logger.exception(
+                "plugin uninstall registration failed plugin=%s", plugin_id
+            )
+            raise PluginManagementError(str(exc)) from exc
+
+    async def revert_plugin(self, owner_turn_id: str) -> dict[str, object]:
+        if self._plugin_revert is None:
+            raise RuntimeError("当前 runtime 不支持 plugin revert")
+        try:
+            return await self._plugin_revert(owner_turn_id)
+        except Exception as exc:
+            logger.exception("plugin revert failed owner_turn=%s", owner_turn_id)
+            raise PluginManagementError(str(exc)) from exc
+
     def start_plugin_uninstall(self, plugin_id: str) -> PluginOperationHandle:
         """启动服务端卸载任务，不阻塞调用 turn 持有的 snapshot lease。"""
 
@@ -270,51 +356,12 @@ class ControlService:
         task.add_done_callback(self._operation_tasks.discard)
         return PluginOperationHandle(operation_id, plugin_id, task)
 
-    def start_consolidation(self, thread_id: str) -> OperationHandle:
-        """启动 thread consolidation，并返回可独立观察的 operation。"""
-
-        _ = self._thread_record(thread_id)
-        if self._consolidate is None:
-            raise RuntimeError("当前 runtime 不支持 consolidation")
-        from agent.control.ids import new_operation_id
-
-        operation_id = new_operation_id()
-        task = asyncio.create_task(
-            self._run_consolidation(operation_id, thread_id),
-            name=f"control-consolidation:{operation_id}",
-        )
-        self._operation_tasks.add(task)
-        task.add_done_callback(self._operation_tasks.discard)
-        return OperationHandle(operation_id, thread_id, task)
-
     async def shutdown(self) -> None:
         for task in self._operation_tasks:
             task.cancel()
         if self._operation_tasks:
             await asyncio.gather(*self._operation_tasks, return_exceptions=True)
         self._operation_tasks.clear()
-
-    async def _run_consolidation(
-        self,
-        operation_id: str,
-        thread_id: str,
-    ) -> dict[str, object]:
-        assert self._consolidate is not None
-        try:
-            changed = await self._consolidate(thread_id)
-        except Exception as exc:
-            return {
-                "id": operation_id,
-                "threadId": thread_id,
-                "status": "failed",
-                "error": {"type": type(exc).__name__, "message": str(exc)},
-            }
-        return {
-            "id": operation_id,
-            "threadId": thread_id,
-            "status": "completed",
-            "result": {"consolidated": changed},
-        }
 
     async def _run_plugin_uninstall(
         self,
@@ -364,16 +411,6 @@ class ControlService:
             updated_at=updated_at,
             metadata=dict(meta["metadata"]),
         )
-
-
-@dataclass(frozen=True)
-class OperationHandle:
-    id: str
-    thread_id: str
-    task: asyncio.Task[dict[str, object]]
-
-    def record(self) -> dict[str, object]:
-        return {"id": self.id, "threadId": self.thread_id, "status": "in_progress"}
 
 
 @dataclass(frozen=True)

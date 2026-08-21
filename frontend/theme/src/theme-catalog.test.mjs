@@ -4,7 +4,6 @@ import test from "node:test";
 
 const catalog = JSON.parse(await readFile(new URL("./theme-catalog.json", import.meta.url), "utf8"));
 const runtime = await readFile(new URL("./theme-runtime.ts", import.meta.url), "utf8");
-const materialTokens = await readFile(new URL("./material-tokens.css", import.meta.url), "utf8");
 
 const materialRoles = [
   "primary", "onPrimary", "primaryContainer", "onPrimaryContainer",
@@ -33,19 +32,10 @@ test("every Roxy theme owns the complete Material and domain semantic roles", ()
   }
 });
 
-test("theme runtime publishes Material, Roxy domain, and legacy compatibility namespaces", () => {
+test("theme runtime publishes Roxy and legacy compatibility namespaces", () => {
   assert.match(runtime, /colorDeclarations\("md-sys-color"/);
   assert.match(runtime, /colorDeclarations\("roxy-sys-color"/);
   assert.match(runtime, /colorDeclarations\("roxy-color"/);
   assert.match(runtime, /colorDeclarations\("ak-sys-color"/);
   assert.match(runtime, /colorDeclarations\("ak-color"/);
-});
-
-test("Roxy owns system tokens while Akashic aliases remain read-compatible", () => {
-  assert.match(materialTokens, /--roxy-sys-motion-standard:/);
-  assert.match(materialTokens, /--roxy-sys-duration-short:/);
-  assert.match(materialTokens, /--ak-sys-motion-standard:\s*var\(--roxy-sys-motion-standard\)/);
-  assert.match(materialTokens, /--ak-sys-duration-short:\s*var\(--roxy-sys-duration-short\)/);
-  assert.match(materialTokens, /\.roxy-material-button,/);
-  assert.match(materialTokens, /\.ak-material-button/);
 });

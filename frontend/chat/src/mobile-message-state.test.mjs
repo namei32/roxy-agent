@@ -515,6 +515,8 @@ test("pending native share freezes the complete selection action group", () => {
 });
 
 test("image viewer owns only its matching history entry", () => {
+  assert.equal(isMobileImageViewerHistoryState({ roxyImageViewer: "image-1" }, "image-1"), true);
+  assert.equal(isMobileImageViewerHistoryState({ roxyImageViewer: "image-2" }, "image-1"), false);
   assert.equal(isMobileImageViewerHistoryState({ akashicImageViewer: "image-1" }, "image-1"), true);
   assert.equal(isMobileImageViewerHistoryState({ akashicImageViewer: "image-2" }, "image-1"), false);
   assert.equal(isMobileImageViewerHistoryState(null, "image-1"), false);

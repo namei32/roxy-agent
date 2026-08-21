@@ -59,6 +59,16 @@ def set_roxy_env_in(
         environment[f"{LEGACY_AKASHIC_ENV_PREFIX}{name}"] = value
 
 
+def unset_roxy_env_in(
+    environment: MutableMapping[str, str],
+    name: str,
+) -> None:
+    """从环境映射同时移除规范名称和旧别名。"""
+
+    environment.pop(f"{ROXY_ENV_PREFIX}{name}", None)
+    environment.pop(f"{LEGACY_AKASHIC_ENV_PREFIX}{name}", None)
+
+
 def roxy_workspace_path() -> Path:
     """返回新安装的默认 Roxy workspace。"""
 

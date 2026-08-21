@@ -123,12 +123,12 @@ export function attachJsonViewers(container: ParentNode): void {
 // ---------------------------------------------------------------------------
 
 const UI_TONES: Record<UiTone, string> = {
-  neutral: "roxy-chip--neutral",
-  success: "roxy-chip--success",
-  warning: "roxy-chip--warning",
-  danger: "roxy-chip--danger",
-  muted: "roxy-chip--muted",
-  accent: "roxy-chip--accent",
+  neutral: "roxy-chip--neutral ak-chip--neutral",
+  success: "roxy-chip--success ak-chip--success",
+  warning: "roxy-chip--warning ak-chip--warning",
+  danger: "roxy-chip--danger ak-chip--danger",
+  muted: "roxy-chip--muted ak-chip--muted",
+  accent: "roxy-chip--accent ak-chip--accent",
 };
 
 const UI_TONE_DOTS: Record<UiTone, string> = {
@@ -157,7 +157,7 @@ const UI_STACK = "roxy-plugin-stack ak-plugin-stack";
 const UI_GRID = "roxy-plugin-grid ak-plugin-grid";
 const UI_PANEL = "roxy-plugin-panel ak-plugin-panel";
 const UI_TOOLBAR = "roxy-plugin-toolbar ak-plugin-toolbar";
-const UI_BADGE_BASE = "roxy-chip inline-flex items-center gap-1.5 px-2.5 py-1 font-sans text-[11px] tabular-nums";
+const UI_BADGE_BASE = "roxy-chip ak-chip inline-flex items-center gap-1.5 px-2.5 py-1 font-sans text-[11px] tabular-nums";
 const UI_BTN_BASE = "roxy-control-button ak-control-button inline-flex select-none items-center gap-2 font-medium disabled:cursor-not-allowed disabled:opacity-40";
 const UI_INPUT = "roxy-control-input ak-control-input w-full text-[13px]";
 const UI_TILE = "relative rounded-xl bg-surface-2 p-5";
@@ -328,9 +328,8 @@ export async function loadPluginAssets(): Promise<void> {
       const jsVersion = panel.js_version as string | undefined;
       const v = jsVersion ? `?v=${encodeURIComponent(jsVersion)}` : "";
       if (panel.has_css) injectStylesheet(`/plugins/${plugin.id}/${panelName}.css${v}`);
-      // ESM modules: bare react / @roxy/dashboard-ui specifiers resolve via
-      // the host import map to shared singletons. The module registers itself
-      // as a side-effect of import.
+      // ESM modules: bare react 与 dashboard UI specifier 由构建边界归一后，
+      // 通过 host import map 解析为共享单例。模块通过 import 副作用注册。
       await importPanel(`/plugins/${plugin.id}/${panelName}.js${v}`);
     }
   }

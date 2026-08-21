@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,7 +12,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.control.context import current_turn_id
+from agent.control.context import running_turn_id
 from agent.looping.core import AgentLoop
 from agent.provider import LLMResponse
 from agent.subagent import SubAgent
@@ -77,6 +79,54 @@ async def test_short_command_returns_exit_without_execution_id() -> None:
         assert result["output"] == "short"
         assert "execution_id" not in result
     finally:
+        await manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_shell_logs_joinable_metadata_without_command_text(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    manager = ShellProcessManager()
+    command = "printf shell-log-private-marker"
+    session_token = current_session_key.set("session:logging")
+    try:
+        with caplog.at_level(logging.INFO, logger="agent.tools.shell"):
+            result = _decode(
+                await ShellTool(manager).execute(
+                    command=command,
+                    description="验证日志关联",
+                    yield_time_ms=250,
+                )
+            )
+        events = [
+            record.akashic_fields
+            for record in caplog.records
+            if hasattr(record, "akashic_fields")
+        ]
+
+        assert result["exit_code"] == 0
+        assert [event["event"] for event in events] == [
+            "shell.execution_admitted",
+            "shell.execution_result",
+        ]
+        admitted, completed = events
+        assert admitted["operation_id"] == completed["operation_id"]
+        assert admitted["session"] == "session:logging"
+        assert admitted["description"] == "验证日志关联"
+        assert admitted["shell_kind"] in {"bash", "zsh", "sh"}
+        assert admitted["login"] is True
+        assert (
+            admitted["command_fp"]
+            == hashlib.sha256(command.encode("utf-8")).hexdigest()[:16]
+        )
+        assert completed["outcome"] == "succeeded"
+        assert completed["exit_code"] == 0
+        assert completed["finish_reason"] == "natural"
+        assert completed["output_bytes"] == len(b"shell-log-private-marker")
+        assert command not in caplog.text
+        assert all(command not in repr(event) for event in events)
+    finally:
+        current_session_key.reset(session_token)
         await manager.shutdown()
 
 
@@ -389,6 +439,7 @@ async def test_agent_loop_turn_end_terminates_owner_shell() -> None:
     tools.register(shell)
     loop = AgentLoop.__new__(AgentLoop)
     loop.tools = tools
+    loop._llm_services = SimpleNamespace(provider=object())
     loop._processing_state = None
     loop._interrupt_states = {}
     loop._resume_interrupted_message = AsyncMock(
@@ -413,7 +464,7 @@ async def test_agent_loop_turn_end_terminates_owner_shell() -> None:
         assert opened["process_status"] == "running"
         return OutboundMessage(channel="cli", chat_id="owner", content="done")
 
-    loop._core_runner = SimpleNamespace(process=process)
+    loop._react = process
     message = InboundMessage(
         channel="cli",
         sender="user",
@@ -439,6 +490,7 @@ async def test_agent_loop_preserves_turn_failure_when_shell_cleanup_fails(
     tools.register(shell)
     loop = AgentLoop.__new__(AgentLoop)
     loop.tools = tools
+    loop._llm_services = SimpleNamespace(provider=object())
     loop._processing_state = None
     loop._interrupt_states = {}
     loop._resume_interrupted_message = AsyncMock(
@@ -452,7 +504,7 @@ async def test_agent_loop_preserves_turn_failure_when_shell_cleanup_fails(
     async def fail_cleanup(_owner_session_key: str) -> None:
         raise RuntimeError("cleanup failed")
 
-    loop._core_runner = SimpleNamespace(process=fail_process)
+    loop._react = fail_process
     monkeypatch.setattr(shell, "terminate_owner", fail_cleanup)
     message = InboundMessage(
         channel="cli",
@@ -476,16 +528,15 @@ async def test_agent_loop_returns_completed_reply_when_shell_cleanup_fails(
     tools.register(shell)
     loop = AgentLoop.__new__(AgentLoop)
     loop.tools = tools
+    loop._llm_services = SimpleNamespace(provider=object())
     loop._processing_state = None
     loop._interrupt_states = {}
     loop._resume_interrupted_message = AsyncMock(
         side_effect=lambda message, _key: (message, False)
     )
     loop._observe_turn_started = AsyncMock()
-    loop._core_runner = SimpleNamespace(
-        process=AsyncMock(
-            return_value=OutboundMessage("mobile", "owner", "completed reply")
-        )
+    loop._react = AsyncMock(
+        return_value=OutboundMessage("mobile", "owner", "completed reply")
     )
 
     async def fail_cleanup(_owner_session_key: str) -> None:
@@ -544,6 +595,14 @@ async def test_subagent_owner_end_shuts_down_shell_execution() -> None:
     assert await manager.active_execution_ids()
 
     class _Provider:
+        context_window = 1_000_000
+
+        def estimate_context_tokens(self, messages, tools) -> int:
+            return 1
+
+        def estimate_appended_message_tokens(self, messages) -> int:
+            return len(messages)
+
         async def chat(self, **_kwargs: Any) -> LLMResponse:
             return LLMResponse(content="done", tool_calls=[])
 
@@ -815,20 +874,48 @@ def test_shell_env_sets_noninteractive_defaults(monkeypatch, tmp_path: Path) -> 
     assert env["GIT_PAGER"] == "cat"
 
 
-def test_shell_env_defers_plugin_uninstall_owned_by_current_turn(
+def test_shell_env_exports_plugin_rollout_owner_turn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("ROXY_DEFER_PLUGIN_UNINSTALL", "stale")
-    monkeypatch.setenv("AKASHIC_DEFER_PLUGIN_UNINSTALL", "stale")
-    assert "ROXY_DEFER_PLUGIN_UNINSTALL" not in _shell_env()
-    assert "AKASHIC_DEFER_PLUGIN_UNINSTALL" not in _shell_env()
+    monkeypatch.setenv("AKASHIC_PLUGIN_ROLLOUT_OWNER_TURN", "stale")
+    monkeypatch.setenv("AKASHIC_PLUGIN_ROLLOUT_CAPABILITY", "stale")
+    monkeypatch.setenv("ROXY_PLUGIN_ROLLOUT_OWNER_TURN", "stale")
+    monkeypatch.setenv("ROXY_PLUGIN_ROLLOUT_CAPABILITY", "stale")
+    assert "AKASHIC_PLUGIN_ROLLOUT_OWNER_TURN" not in _shell_env()
+    assert "AKASHIC_PLUGIN_ROLLOUT_CAPABILITY" not in _shell_env()
+    assert "ROXY_PLUGIN_ROLLOUT_OWNER_TURN" not in _shell_env()
+    assert "ROXY_PLUGIN_ROLLOUT_CAPABILITY" not in _shell_env()
 
-    token = current_turn_id.set("turn:context-pressure-uninstall")
+    from agent.control.context import (
+        register_plugin_child_capability_minter,
+        unregister_plugin_child_capability_minter,
+    )
+
+    token = running_turn_id.set("turn:context-pressure-uninstall")
+    minter = lambda owner: f"capability-for:{owner}"
+    register_plugin_child_capability_minter(
+        "turn:context-pressure-uninstall",
+        minter,
+    )
     try:
-        assert _shell_env()["ROXY_DEFER_PLUGIN_UNINSTALL"] == "1"
-        assert _shell_env()["AKASHIC_DEFER_PLUGIN_UNINSTALL"] == "1"
+        assert _shell_env()["AKASHIC_PLUGIN_ROLLOUT_OWNER_TURN"] == (
+            "turn:context-pressure-uninstall"
+        )
+        assert _shell_env()["AKASHIC_PLUGIN_ROLLOUT_CAPABILITY"] == (
+            "capability-for:turn:context-pressure-uninstall"
+        )
+        assert _shell_env()["ROXY_PLUGIN_ROLLOUT_OWNER_TURN"] == (
+            "turn:context-pressure-uninstall"
+        )
+        assert _shell_env()["ROXY_PLUGIN_ROLLOUT_CAPABILITY"] == (
+            "capability-for:turn:context-pressure-uninstall"
+        )
     finally:
-        current_turn_id.reset(token)
+        unregister_plugin_child_capability_minter(
+            "turn:context-pressure-uninstall",
+            minter,
+        )
+        running_turn_id.reset(token)
 
 
 def test_old_shell_trace_reloads_as_history_without_runtime_alias(

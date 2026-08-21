@@ -16,7 +16,7 @@
 全文读取、正文替换、移动、共享、删除或自动导出。
 
 Consolidation、TurnCommitted、Scheduler、Proactive 和后台任务不会自动触发 Notes 写入。内容
-“重要”不能代替明确授权。默认入口仍要求当前用户消息明确保存；[0026](../decisions/0026-scoped-interview-images-may-auto-export-to-notes.md)
+“重要”不能代替明确授权。默认入口仍要求当前用户消息明确保存；[0036](../decisions/0036-scoped-interview-images-may-auto-export-to-notes.md)
 另行允许 Interview Coach 在默认关闭、固定 Telegram 私聊 chat、高置信度面经分类和可撤销配置
 同时成立时复用同一 Notes 提交协议。该授权不得被其他插件或运行模式继承。
 
@@ -40,7 +40,7 @@ AppleNotesService
     └── macOS 直接调用固定 AppleScript，或使用运行时 NotesBridgeBroker
              │ 用户内容只经 argv / 0600 临时文件传入
              ▼
-       Mac companion → Apple Notes / Akashic folder
+       Mac companion → Apple Notes / 已配置 folder
              │
              ├── 明确 note_id + folder_id ──▶ committed
              ├── 调用前确定失败 ─────────────▶ failed
@@ -96,7 +96,7 @@ receipt retention 或永久清理命令，因此运行时不得按年龄、数�
 
 ## 6. 并发、失败、取消与恢复
 
-同一 active generation 的 Notes 写入由一个 `asyncio.Lock` 串行。Akashic 继续依赖 workspace
+同一 active generation 的 Notes 写入由一个 `asyncio.Lock` 串行。Roxy 继续依赖 workspace
 唯一 runtime owner 与 turn snapshot lease，避免两个正式 runtime 同时拥有写权限。SQLite
 使用 `BEGIN IMMEDIATE` 预留幂等 operation；同一用户来源与同一请求只对应一条 receipt。
 
@@ -115,7 +115,9 @@ receipt retention 或永久清理命令，因此运行时不得按年龄、数�
 
 ## 7. 配置与使用
 
-插件默认写入默认 Notes account 下的 `Akashic` 文件夹；不存在时仅 `create` 可以创建。
+插件默认写入默认 Notes account 下的历史 `Akashic` 文件夹；不存在时仅 `create` 可以创建。
+该文件夹是外部用户数据，升级不会扫描、移动或重命名。只有用户显式配置 `folder = "Roxy"`
+后，新写入才切换到 Roxy 文件夹。
 正式配置位于：
 
 ```text

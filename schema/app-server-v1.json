@@ -122,6 +122,12 @@
     "plugin/disable-and-drain": {
       "additionalProperties": false,
       "properties": {
+        "ownerTurnId": {
+          "default": "",
+          "maxLength": 128,
+          "title": "Ownerturnid",
+          "type": "string"
+        },
         "pluginId": {
           "maxLength": 256,
           "minLength": 1,
@@ -138,6 +144,12 @@
     "plugin/discard": {
       "additionalProperties": false,
       "properties": {
+        "ownerTurnId": {
+          "default": "",
+          "maxLength": 128,
+          "title": "Ownerturnid",
+          "type": "string"
+        },
         "pluginId": {
           "maxLength": 256,
           "minLength": 1,
@@ -159,6 +171,12 @@
           "maxLength": 128,
           "minLength": 1,
           "title": "Marketplace",
+          "type": "string"
+        },
+        "ownerTurnId": {
+          "default": "",
+          "maxLength": 128,
+          "title": "Ownerturnid",
           "type": "string"
         },
         "ref": {
@@ -191,6 +209,12 @@
     "plugin/promote": {
       "additionalProperties": false,
       "properties": {
+        "ownerTurnId": {
+          "default": "",
+          "maxLength": 128,
+          "title": "Ownerturnid",
+          "type": "string"
+        },
         "pluginId": {
           "maxLength": 256,
           "minLength": 1,
@@ -204,6 +228,22 @@
       "title": "PluginDrainParams",
       "type": "object"
     },
+    "plugin/revert": {
+      "additionalProperties": false,
+      "properties": {
+        "ownerTurnId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Ownerturnid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ownerTurnId"
+      ],
+      "title": "PluginRevertParams",
+      "type": "object"
+    },
     "plugin/status": {
       "additionalProperties": false,
       "properties": {},
@@ -213,6 +253,12 @@
     "plugin/uninstall/start": {
       "additionalProperties": false,
       "properties": {
+        "ownerTurnId": {
+          "default": "",
+          "maxLength": 128,
+          "title": "Ownerturnid",
+          "type": "string"
+        },
         "pluginId": {
           "maxLength": 256,
           "minLength": 1,
@@ -230,22 +276,6 @@
       "additionalProperties": false,
       "properties": {},
       "title": "StrictModel",
-      "type": "object"
-    },
-    "thread/consolidate/start": {
-      "additionalProperties": false,
-      "properties": {
-        "threadId": {
-          "maxLength": 512,
-          "minLength": 1,
-          "title": "Threadid",
-          "type": "string"
-        }
-      },
-      "required": [
-        "threadId"
-      ],
-      "title": "ThreadIdParams",
       "type": "object"
     },
     "thread/delete": {
@@ -334,6 +364,12 @@
           "additionalProperties": true,
           "title": "Metadata",
           "type": "object"
+        },
+        "pluginRolloutCapability": {
+          "default": "",
+          "maxLength": 256,
+          "title": "Pluginrolloutcapability",
+          "type": "string"
         },
         "runtime": {
           "default": "stable",

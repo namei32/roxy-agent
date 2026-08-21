@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-import os
 import re
 import tomllib
 from pathlib import Path
 from typing import Mapping, cast
 
-from agent.identity import (
-    default_plugin_home_path,
-    roxy_env,
-    roxy_env_is_set,
-)
+from agent.identity import default_plugin_home_path, roxy_env, roxy_env_is_set
 from infra.persistence.json_store import atomic_write_text
 
 
@@ -18,8 +13,7 @@ def plugins_root(plugins_home: Path | None = None) -> Path:
     if plugins_home is not None:
         return plugins_home
     if roxy_env_is_set("PLUGIN_HOME"):
-        configured = roxy_env("PLUGIN_HOME")
-        configured = configured.strip()
+        configured = roxy_env("PLUGIN_HOME").strip()
         if not configured:
             raise ValueError("ROXY_PLUGIN_HOME 不能为空")
         return Path(configured).expanduser().resolve(strict=False)
@@ -157,19 +151,6 @@ def remove_plugin_manifest_entry(
         raise ValueError(f"插件未安装: {plugin_id}")
     del entries[plugin_id]
     return write_plugin_manifest(entries, plugins_home=plugins_home)
-
-
-def set_package_enabled(
-    package_id: str,
-    *,
-    enabled: bool,
-    plugins_home: Path | None = None,
-) -> Path:
-    packages = load_package_manifest(plugins_home)
-    if package_id not in packages:
-        raise ValueError(f"插件包未安装: {package_id}")
-    packages[package_id] = enabled
-    return write_package_manifest(packages, plugins_home=plugins_home)
 
 
 def write_package_manifest(

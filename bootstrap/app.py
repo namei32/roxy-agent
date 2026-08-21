@@ -3,9 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-import os
 import signal
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -13,15 +11,22 @@ from agent.config import resolve_app_server_endpoint
 from agent.control.models import TurnRequest
 from agent.control.runtime import ConversationRuntime
 from agent.control.service import ControlService
+from agent.host_bridge.monitor import build_host_bridge_monitor
+from agent.host_bridge.monitor import claim_host_bridge_boot
+from agent.identity import roxy_env
 from agent.restart import RestartCoordinator
 from agent.config_models import Config
-from agent.identity import roxy_env
 from bootstrap.channel_host import ChannelHost
 from bootstrap.channels import start_channels
 from bootstrap.chat_api import build_chat_server
 from bootstrap.cleanup import run_cleanup_steps
 from bootstrap.control_execution import execute_control_turn
 from bootstrap.dashboard_api import build_dashboard_server
+from bootstrap.web_runtime import (
+    chat_socket_path,
+    dashboard_socket_path,
+    prepare_runtime_socket,
+)
 from bootstrap.proactive import build_memory_optimizer_task, build_proactive_runtime
 from bootstrap.runtime_readiness import RuntimeReadiness
 from bootstrap.passive_worker import PassiveMessageWorker
@@ -32,12 +37,14 @@ from bus.event_bus import EventBus
 from bus.queue import MessageBus
 from agent.plugins.jobs import PluginJobRuntime
 from agent.plugins.service_host import PluginServiceHost
+from agent.plugins.turn_rollout import TurnPluginRollout
 from agent.plugins.watcher import PluginWatcher
 from core.net.http import (
     SharedHttpResources,
     clear_default_shared_http_resources,
     configure_default_shared_http_resources,
 )
+from core.common.diagnostic_log import configure_logging
 from infra.control.socket import SocketAppServer, is_tcp_endpoint
 from infra.notes_bridge import NOTES_BRIDGE_SERVICE_ID, NotesBridgeBroker
 from infra.notes_bridge.server import build_notes_bridge_server
@@ -46,13 +53,7 @@ from infra.notes_bridge.store import NotesBridgeAuditStore
 if TYPE_CHECKING:
     from proactive_v2.loop import ProactiveLoop
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
-    datefmt="%H:%M:%S",
-    stream=sys.stderr,
-    force=True,
-)
+configure_logging()
 logging.getLogger("agent.plugins.manager").setLevel(
     roxy_env("PLUGIN_LOG_LEVEL", "INFO").upper()
 )
@@ -199,25 +200,6 @@ def _close_mobile_gateway(runtime: Any | None) -> Callable[[], Awaitable[None]]:
     return close
 
 
-def _dashboard_bind_address() -> tuple[str, int]:
-    """Resolve and validate the dashboard listener from environment config."""
-
-    # 1. Normalize the process boundary before any runtime service starts.
-    host = roxy_env("DASHBOARD_HOST", "0.0.0.0").strip()
-    if not host:
-        raise ValueError("ROXY_DASHBOARD_HOST 不能为空")
-
-    # 2. Reject invalid ports instead of falling back to the formal listener.
-    raw_port = roxy_env("DASHBOARD_PORT", "2236")
-    try:
-        port = int(raw_port)
-    except ValueError as error:
-        raise ValueError("ROXY_DASHBOARD_PORT 必须是 1 到 65535 的整数") from error
-    if not 1 <= port <= 65_535:
-        raise ValueError("ROXY_DASHBOARD_PORT 必须是 1 到 65535 的整数")
-    return host, port
-
-
 class AppRuntime:
     def __init__(
         self,
@@ -231,11 +213,11 @@ class AppRuntime:
         self.workspace = workspace
         self.restart_coordinator = restart_coordinator
         self.readiness = readiness
-        self.dashboard_host, self.dashboard_port = _dashboard_bind_address()
         self.http_resources = SharedHttpResources()
         self.app_server: SocketAppServer | None = None
         self.conversation_runtime: ConversationRuntime | None = None
         self.control_service: ControlService | None = None
+        self.plugin_turn_rollout: TurnPluginRollout | None = None
         self.passive_worker: PassiveMessageWorker | None = None
         self.channel_host: ChannelHost | None = None
         self.core: CoreRuntime | None = None
@@ -284,6 +266,9 @@ class AppRuntime:
         if self.readiness is not None:
             self.readiness.mark_stage("workspace.locked")
         try:
+            claim = await claim_host_bridge_boot()
+            if claim is not None and self.readiness is not None:
+                self.readiness.mark_stage("host_bridge.owner")
             configure_default_shared_http_resources(self.http_resources)
             core_kwargs = (
                 {"restart_coordinator": self.restart_coordinator}
@@ -343,10 +328,23 @@ class AppRuntime:
                     request,
                 )
 
+            manager = getattr(self.core, "plugin_manager", None)
+            if manager is None:
+                raise RuntimeError("插件 Runtime 不可用")
+            self.plugin_turn_rollout = TurnPluginRollout(
+                manager,
+                workspace=self.workspace,
+                uninstall=self._uninstall_plugin,
+            )
+            assert self.agent_loop is not None
+            self.agent_loop.bind_plugin_rollout_fact_provider(
+                self.plugin_turn_rollout.consume_fact
+            )
             self.conversation_runtime = ConversationRuntime(
                 self.session_manager.control_store,
                 _execute_control_request,
                 restart_coordinator=self.restart_coordinator,
+                turn_terminal=self.plugin_turn_rollout.turn_terminal,
             )
             if self.restart_coordinator is not None:
                 self.restart_coordinator.bind_admission(
@@ -368,15 +366,21 @@ class AppRuntime:
                 self.workspace,
                 plugin_drain=self._disable_and_drain_plugin,
                 plugin_uninstall=self._uninstall_plugin,
+                plugin_uninstall_register=self._register_plugin_uninstall,
                 plugin_install=self._install_plugin,
+                plugin_revert=self._revert_plugin_operation,
+                plugin_turn_barrier=self.plugin_turn_rollout.wait_for_turn_boundary,
+                plugin_child_binding=lambda capability, consume: (
+                    self.plugin_turn_rollout.child_binding(
+                        capability,
+                        consume,
+                    )
+                    if self.plugin_turn_rollout is not None
+                    else None
+                ),
                 plugin_status=self._plugin_status,
                 plugin_promote=self._promote_plugin,
                 plugin_discard=self._discard_plugin,
-                consolidate=(
-                    self.agent_loop.trigger_memory_consolidation
-                    if self.config.app_server.enabled
-                    else None
-                ),
                 workspace_token=workspace_token,
                 restart_coordinator=self.restart_coordinator,
                 boot_id=self.readiness.boot_id if self.readiness else None,
@@ -437,6 +441,11 @@ class AppRuntime:
                 plugin_manager.bind_service_switcher(
                     self.plugin_service_host.swap_plugin_services
                 )
+                plugin_manager.bind_candidate_service_host(
+                    start=self.plugin_service_host.start_candidate,
+                    stop=self.plugin_service_host.stop_candidate,
+                    assert_healthy=self.plugin_service_host.assert_candidate_healthy,
+                )
             if self.readiness is not None:
                 self.readiness.mark_stage("services.ready")
             from infra.mobile_realtime.runtime_inspection import (
@@ -469,6 +478,11 @@ class AppRuntime:
                 self.bus.bind_durable_inbound_store(self.session_manager.control_store)
                 self.mobile_gateway_runtime.channel.bind_runtime_inspection(
                     runtime_inspection
+                )
+                if self.core.model_registry is None:
+                    raise RuntimeError("Mobile Gateway 启动需要模型注册表")
+                self.mobile_gateway_runtime.channel.bind_model_registry(
+                    self.core.model_registry
                 )
                 if plugin_ui_provider is not None:
                     self.mobile_gateway_runtime.channel.bind_mobile_ui_provider(
@@ -523,13 +537,19 @@ class AppRuntime:
                 self.bus.dispatch_outbound(),
                 self.scheduler.run(),
             ]
+            host_bridge_monitor = build_host_bridge_monitor()
+            if host_bridge_monitor is not None:
+                self.tasks.append(host_bridge_monitor)
             if plugin_manager is not None:
+                assert self.plugin_service_host is not None
+                self.tasks.append(self.plugin_service_host.wait_fatal_failure())
                 assert self.core.plugin_manager is not None
                 llm = self.core.plugin_manager.llm
                 if llm is not None:
                     self.plugin_job_runtime = PluginJobRuntime(
                         event_bus=event_bus,
                         llm=llm,
+                        model_provider=self.provider,
                         snapshot_store=plugin_manager.snapshot_store,
                     )
                     self.tasks.append(self.plugin_job_runtime.run())
@@ -541,9 +561,7 @@ class AppRuntime:
             self.tasks.extend(optimizer_tasks)
             self.dashboard_server = build_dashboard_server(
                 workspace=self.workspace,
-                host=self.dashboard_host,
-                port=self.dashboard_port,
-                manual_consolidator=self.agent_loop,
+                uds=prepare_runtime_socket(dashboard_socket_path(self.workspace)),
                 manual_memory_optimizer=self._memory_optimizer,
                 memory_admin=self.memory_runtime.engine,
                 memory_store=self.memory_runtime.markdown.store,
@@ -572,8 +590,7 @@ class AppRuntime:
                 self.chat_server = build_chat_server(
                     workspace=self.workspace,
                     channel=self.web_chat_channel,
-                    host=self.config.channels.chat.host,
-                    port=self.config.channels.chat.port,
+                    uds=prepare_runtime_socket(chat_socket_path(self.workspace)),
                     mobile_pairing_admin=(
                         self.mobile_gateway_runtime.admin
                         if self.mobile_gateway_runtime is not None
@@ -581,6 +598,7 @@ class AppRuntime:
                     ),
                     runtime_inspection=runtime_inspection,
                     plugin_ui_provider=plugin_ui_provider,
+                    model_registry=self.core.model_registry,
                 )
                 self.chat_task = asyncio.create_task(
                     self.chat_server.serve(),
@@ -657,6 +675,22 @@ class AppRuntime:
             except (asyncio.CancelledError, Exception) as rollback_error:
                 raise startup_error from rollback_error
             raise
+
+    async def reload_model_config(self, config_path: str | Path) -> dict[str, object]:
+        """Load and atomically publish a new model generation."""
+
+        # 1. Parse the complete candidate at the configuration boundary.
+        candidate = Config.load(config_path, workspace=self.workspace)
+        if self.core is None or self.core.model_registry is None:
+            raise RuntimeError("ModelRegistry 尚未启动")
+
+        # 2. Publish only after every provider in the candidate was constructed.
+        generation = await self.core.model_registry.reload(candidate)
+        self.config = candidate
+        return {
+            "generationId": generation.generation_id,
+            "configDigest": generation.config_digest,
+        }
 
     async def run(self) -> None:
         run_error: BaseException | None = None
@@ -844,10 +878,6 @@ class AppRuntime:
                 ),
                 ("message_bus.aclose", _close_message_bus(self.bus)),
                 (
-                    "mobile_gateway.close",
-                    _close_mobile_gateway(self.mobile_gateway_runtime),
-                ),
-                (
                     "plugin_watcher.stop",
                     _stop_plugin_watcher(
                         self.plugin_watcher,
@@ -883,8 +913,20 @@ class AppRuntime:
                     ),
                 ),
                 (
+                    "plugin_turn_rollout.shutdown",
+                    (
+                        self.plugin_turn_rollout.shutdown
+                        if self.plugin_turn_rollout
+                        else _noop_async
+                    ),
+                ),
+                (
                     "channels.stop",
                     self.channel_host.stop_all if self.channel_host else _noop_async,
+                ),
+                (
+                    "mobile_gateway.close",
+                    _close_mobile_gateway(self.mobile_gateway_runtime),
                 ),
                 (
                     "plugin_services.stop",
@@ -958,6 +1000,7 @@ class AppRuntime:
         marketplace: str,
         ref: str,
         sparse: list[str],
+        owner_turn_id: str = "",
     ) -> dict[str, object]:
         """安装 immutable artifact，并等待 runtime latest 已可租用。"""
 
@@ -966,16 +1009,36 @@ class AppRuntime:
             raise RuntimeError("插件 Runtime 不可用")
 
         # 1. PluginManager 与 watcher 共用一个 candidate 发布 owner。
-        result, status = await manager.install_candidate(
-            source=source,
-            marketplace=marketplace,
-            ref_name=ref,
-            sparse_paths=sparse,
-        )
+        rollout = getattr(self, "plugin_turn_rollout", None)
+        if rollout is None:
+            result, status = await manager.install_candidate(
+                source=source,
+                marketplace=marketplace,
+                ref_name=ref,
+                sparse_paths=sparse,
+            )
+        elif not owner_turn_id:
+            raise ValueError("plugin-install 必须由当前 active turn 发起")
+        else:
+            result, status = await rollout.install(
+                owner_turn_id,
+                source=source,
+                marketplace=marketplace,
+                ref_name=ref,
+                sparse_paths=sparse,
+            )
 
         # 2. 返回 manager 在 candidate owner 锁内冻结的发布结果。
         plugin_id = f"{result.plugin_name}@{result.marketplace}"
         publication = status["candidate_state"] if result.staged_candidate else "stable"
+        message = (
+            f"{plugin_id} 候选版本安装成功。当前 turn 仍使用原版本；"
+            "本 turn 启动的 attached programmatic 验证会自动使用新版本。"
+            "验证正确后请正常结束当前 turn，系统会在本轮结束后自动切换，"
+            "下一 turn 生效；如果结果或轨迹不正确，请先执行 plugin-revert。"
+            if result.staged_candidate
+            else f"{plugin_id} 已经是当前安装版本；没有创建候选，也不需要重启。"
+        )
         return {
             "pluginId": plugin_id,
             "version": result.plugin_version,
@@ -984,7 +1047,34 @@ class AppRuntime:
             "dataPath": str(result.data_path),
             "publicationState": publication,
             "candidate": self._plugin_status(status),
+            "message": message,
         }
+
+    async def _register_plugin_uninstall(
+        self,
+        plugin_id: str,
+        owner_turn_id: str,
+    ) -> dict[str, object]:
+        rollout = self.plugin_turn_rollout
+        if rollout is None:
+            raise RuntimeError("插件 turn rollout owner 不可用")
+        result = await rollout.uninstall(owner_turn_id, plugin_id)
+        result["message"] = (
+            f"{plugin_id} 卸载已确认。当前 turn 的已有操作可以完成；"
+            "本轮结束后系统会自动停止插件并删除已安装代码，plugin-data 会保留。"
+            "下一 turn 不再加载该插件。如需取消，请在本轮结束前执行 plugin-revert。"
+        )
+        return result
+
+    async def _revert_plugin_operation(self, owner_turn_id: str) -> dict[str, object]:
+        rollout = self.plugin_turn_rollout
+        if rollout is None:
+            raise RuntimeError("插件 turn rollout owner 不可用")
+        result = await rollout.revert(owner_turn_id)
+        result["message"] = (
+            "已撤销当前 turn 最近一次插件操作；已发布版本和 plugin-data 均未改变。"
+        )
+        return result
 
     def _plugin_status(
         self,
@@ -1011,13 +1101,13 @@ class AppRuntime:
         manager = getattr(self.core, "plugin_manager", None)
         if manager is None:
             raise RuntimeError("插件 Runtime 不可用")
-        return await manager.promote_latest_candidate(plugin_id)
+        return await manager.switch_ready(plugin_id)
 
     async def _discard_plugin(self, plugin_id: str) -> dict[str, object]:
         manager = getattr(self.core, "plugin_manager", None)
         if manager is None:
             raise RuntimeError("插件 Runtime 不可用")
-        return await manager.discard_latest_candidate(plugin_id)
+        return await manager.drop_candidate(plugin_id)
 
     async def _uninstall_plugin(self, plugin_id: str) -> dict[str, object]:
         """Disable, drain, and remove plugin code while retaining workspace data."""

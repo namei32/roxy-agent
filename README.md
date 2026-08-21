@@ -4,8 +4,8 @@
 
 一个**会主动找你**的 AI 伙伴——不只是被动回答问题，还能根据你订阅的信息源主动判断"现在该不该发消息、发什么"，在空闲时自主执行后台任务。
 
-> 本仓库的运行时与技术名称已迁移为 **Roxy**。新配置、路径、Socket、SDK 和 Skill
-> 一律使用 Roxy；旧 `Akashic` 名称只保留为已有安装的兼容入口，不会自动移动或删除你的数据。
+> 新配置、路径、Socket、SDK 和 Skill 统一使用 **Roxy**。旧 Akashic 名称只作为既有
+> 安装的兼容入口；升级不会自动移动、改写或删除 workspace 与外部数据。
 
 ---
 
@@ -65,16 +65,14 @@ uv venv && uv pip install -r requirements.txt
 
 没有 uv？先 `pip install uv`。
 
-**1. 启动设置中心**
+**1. 启动 Roxy Web**
 
 ```bash
 uv run python main.py
 ```
 
-Supervisor 会始终提供本机设置中心：
-
-- 设置中心：<http://127.0.0.1:6321>
-- Web Chat：<http://127.0.0.1:6322>
+Supervisor 会始终提供唯一的本机 Web 入口：<http://127.0.0.1:2236>。访问后直接进入
+Chat；没有模型配置时，Chat 会保留完整界面并引导进入“模型与认证”。
 
 第一次运行不需要先创建 `config.toml`。打开设置中心，选择一种认证方式：
 
@@ -85,12 +83,13 @@ Supervisor 会始终提供本机设置中心：
 | Codex Auth | 复用本机 Codex 登录，未登录时按页面提示完成设备授权 |
 
 ```text
-打开 6321
+打开 2236 Chat
    │
+   ├── 点击“连接模型”
    ├── 选择 Provider 与认证
    ├── 读取或填写模型
    ├── 发送最小真实请求验证
-   └── 保存配置 → 启动 Gateway → 打开 6322 对话
+   └── 保存配置 → 同一页面自动恢复对话
 ```
 
 API Key 会直接写入本机 `config.toml`，文件权限为 `0600`；设置 API 和页面不会回显
@@ -124,10 +123,11 @@ api_key = "sk-..."
 base_url = "https://api.deepseek.com/v1"
 enable_thinking = true          # 开启 reasoning
 context_window = 128000
-effective_context_percent = 0.9
-compaction_trigger_percent = 0.74
 max_output_tokens = 8192
 input_modalities = ["text"]
+
+[agent.context.compaction]
+keep_recent_tokens = 20000
 
 [llm.runtimes.qwen_fast]
 provider = "qwen"
@@ -153,8 +153,6 @@ allow_from = ["your_username"]
 
 [channels.chat]
 enabled = true
-host = "127.0.0.1"
-port = 6322
 channel_name = "web"
 ```
 
@@ -169,21 +167,38 @@ channel_name = "web"
 
 `workspace` 默认是 `~/.roxy/workspace`。临时切换隔离环境时传
 `--workspace PATH`；它的优先级高于 `ROXY_WORKSPACE` 和 `config.toml`。
-旧 `AKASHIC_WORKSPACE` 仍可读取，但与新变量同时存在时由 `ROXY_WORKSPACE` 优先。
 
 **个人推荐**：主模型使用 DeepSeek，轻量和视觉任务使用 Qwen。通信渠道推荐
-Telegram；只想先本机试用时，完成 6321 设置后直接打开 6322 即可。
+Telegram；只想先本机试用时，打开 2236 绑定模型后即可直接对话。
 
 **3. 运行与安全切换**
+
+下面的 `akashic-release` 是为既有 Linux Core + Host Bridge 部署保留的兼容安装合同。
+它使用同一远端 commit 安装；未指定 commit 时固定本次执行开始时
+`main` 的最新完整 SHA；需要复现或回滚测试时显式指定 40 位 SHA：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kachofugetsu09/akashic-agent/main/scripts/install-akashic.sh | sh
+
+curl -fsSL https://raw.githubusercontent.com/kachofugetsu09/akashic-agent/main/scripts/install-akashic.sh \
+  | sh -s -- --commit <full-40-character-sha>
+```
+
+安装器会显示 current/target identity 并等待确认；无人值守时加 `--yes`。只准备镜像、Bridge venv、
+manifest、unit 和稳定 CLI 而不启动服务时加 `--no-activate`。激活前
+`/srv/data/services/akashic/state` 必须已有经过批准的 `config.toml`、`workspace/` 和
+`plugin-home/`；安装器不会把软件更新授权解释成正式数据迁移授权。安装后使用
+`akashic-release doctor` 核对实际 Bridge/Core identity，使用 `akashic-release rollback --yes`
+回到 previous 软件代际。完整边界见 [Core 与 Host Bridge 安装设计](./docs/design/akashic-core-bridge-installer.md)。
 
 无参数启动会先进入内置 supervisor，再由它启动正式 gateway。这样核心代码或主配置
 确需完整重载时，Agent 可以通过当轮 `tool_search` 解锁 `agent_restart`，并在回复持久化、
 送达和私有提交证据全部完成后安全拉起下一代进程。需要让调试器直接附着未托管 gateway
 时，显式运行 `uv run python main.py gateway`；该模式不会注册自重启工具。
 
-在 6321 切换 Provider 时，Supervisor 会停止接收新 turn、等待已经接收的 turn 自然完成，
-再启动候选 Gateway。候选未通过 readiness 时会恢复配置并重新启动原 Gateway；设置中心在
-整个过程中保持可用。
+在 2236 的“模型与认证”切换 Provider、模型或默认角色时，Gateway 会原子发布新模型代际，不停止接收新
+turn，也不重启进程。已经开始的执行继续使用旧代，下一个真正开始的执行使用新代；候选
+配置或真实请求校验失败时保持原配置和当前代际。
 
 从终端或 supervisor 切换到 PyCharm 前，先优雅停止当前 workspace 的 runtime：
 
@@ -203,7 +218,7 @@ supervisor；需要直接调试 child 时把程序参数设为 `gateway`。也�
 
 ## 用 Android 手机接入
 
-Roxy Mobile 是一个通过独立实时网关连接 Roxy Agent 的 Android 客户端。远程接入推荐使用 Cloudflare Tunnel：Web Chat 和配对管理页继续留在本机 `127.0.0.1:6322`，Tunnel 只转发由 Roxy 设备认证保护的 `6323` 端口。
+Roxy Mobile 是一个通过独立实时网关连接 Roxy Agent 的 Android 客户端。远程接入推荐使用 Cloudflare Tunnel：Web Chat 和模型设置继续留在本机 `127.0.0.1:2236`，Tunnel 只转发由 Roxy 设备认证保护的 `6323` 端口。
 
 ```text
 1. 在 config.toml 启用 [mobile_realtime]
@@ -212,7 +227,8 @@ Roxy Mobile 是一个通过独立实时网关连接 Roxy Agent 的 Android 客�
 4. 两端核对六位确认码，在电脑上批准设备
 ```
 
-- Android 安装包仍从历史发布地址获取：<https://github.com/kachofugetsu09/akashic-mobile/releases/latest>
+- Android 安装包：<https://github.com/kachofugetsu09/akashic-mobile/releases/latest>
+  （发布仓仍沿用旧名称，不代表本仓库继续以 Akashic 作为新运行时身份）
 - 配置、Cloudflare、验证与排障：[移动端接入手册](./_handbook/mobile-access.md)
 
 首次配对成功后，手机会保存设备密钥，正常升级应用或重连无需再次扫码。
@@ -276,7 +292,7 @@ ROXY_WEBUI_SOURCE_COMMIT="$(git rev-parse HEAD)"
 ```
 你的消息 → [被动回复] ──→ agent loop ──→ 回复
                 │
-                ├── 记忆系统 ─── 每轮注入长期记忆 + 对话后 consolidation
+                ├── 记忆系统 ─── 每轮注入长期记忆 + 模型窗口水位 compaction
                 │
                 └── 插件系统 ─── 拦截命令、注入协议、阻断工具、挂载新工具...
 
@@ -287,8 +303,8 @@ ROXY_WEBUI_SOURCE_COMMIT="$(git rev-parse HEAD)"
 
 | 想看什么 | 文档 |
 |---------|------|
-| 怎么首次配置或切换 Provider | 启动后访问 `http://127.0.0.1:6321`，支持 API Key、OpenCode Go 和 Codex Auth |
-| 怎么打开本机 Web Chatbox | 启动后访问 `http://127.0.0.1:6322`，配置见 `config.toml` 的 `[channels.chat]` |
+| 怎么首次配置或切换 Provider | 启动后访问 `http://127.0.0.1:2236/settings`，支持 API Key、OpenCode Go 和 Codex Auth |
+| 怎么打开本机 Web Chat | 启动后访问 `http://127.0.0.1:2236`；没有模型时页面会直接引导配置 |
 | 怎么用 Android 手机远程连接 | [移动端接入手册](./_handbook/mobile-access.md) |
 | 怎么让 agent 主动推送消息、怎么配数据源 | [_handbook/proactive-guide.md](./_handbook/proactive-guide.md) |
 | 怎么写后台任务让 agent 空闲时自动干活 | [_handbook/drift-guide.md](./_handbook/drift-guide.md) |
@@ -315,7 +331,7 @@ Agent 根据电量模型自适应调整轮询频率——你刚聊完时不烦�
 
 ## 记忆系统
 
-对话通过 **consolidation** 自动提取为结构化事实：HISTORY.md（时间线事件） + PENDING.md（待归档缓冲） + RECENT_CONTEXT.md（近期上下文摘要）。**Optimizer** 定时将 PENDING 归档到 MEMORY.md——中间隔一层是为了保护 prompt cache（MEMORY.md 全文注入 system prompt，高频修改会破坏缓存）。同时 `memory2.db`（向量层）提供语义检索。
+对话通过 session context compaction ledger 按模型真实 context window 压缩；Markdown consolidation 从 checkpoint 的 exact source plan 提取 PENDING 候选，并发布 `ConsolidationCommitted` 供语义记忆消费。**Optimizer** 定时将 PENDING 归档到 MEMORY.md；当前运行时不创建或写入 `HISTORY.md`。
 
 见 [记忆系统](./_handbook/memory-markdown.md)。
 
@@ -332,8 +348,8 @@ Agent 根据电量模型自适应调整轮询频率——你刚聊完时不烦�
 ```bash
 uv run python main.py exec --new --final-only "总结最近上下文"
 uv run python main.py app-server --stdio # 父进程托管 JSON-RPC app-server
-uv run python main.py dashboard # 打开 Dashboard（默认 :2236）
-# Web Chatbox 跟主进程一起启动，默认 http://127.0.0.1:6322
+uv run python main.py dashboard # 单独运行 Dashboard 调试入口
+# 正式 Supervisor 只提供 http://127.0.0.1:2236，根页面是统一壳层并默认选中 Chat
 uv run python main.py --help    # 查看全部子命令
 
 pytest tests/
@@ -342,16 +358,17 @@ ROXY_RUN_SCENARIOS=1 pytest -c pytest-scenarios.ini tests_scenarios/
 
 ## 工作区
 
-所有运行时数据都在 `[runtime].workspace` 指定的目录下。新安装默认值是
+所有运行时数据都在 `[runtime].workspace` 指定的目录下。默认值是
 `~/.roxy/workspace`；可设置 `ROXY_WORKSPACE`，也可以为单条命令传入
 `--workspace /absolute/path`。优先级为 `--workspace`、`ROXY_WORKSPACE`、
-`config.toml`。不同测试环境使用不同目录，不共享会话、记忆、附件或插件数据。
-插件代码缓存和启停清单的新默认目录是 `$HOME/.roxy-plugin`；需要完整隔离插件安装状态时，
+`AKASHIC_WORKSPACE` 兼容别名、`config.toml`。不同测试环境使用不同目录，不共享会话、
+记忆、附件或插件数据。插件代码缓存和启停清单的新默认位置是
+`$HOME/.roxy-plugin`；新目录不存在但旧 `$HOME/.akashic-plugin` 已存在时继续读取旧目录。
+需要完整隔离插件安装状态时，
 额外设置 `ROXY_PLUGIN_HOME=/absolute/test/plugin-home`。
 
-### 从 Akashic 显式迁移到 Roxy
-
-升级不会扫描、移动、合并或删除旧数据。先在旧实例停止后执行预检，再执行一次明确的复制：
+旧 workspace 不会自动改名。先停止旧 runtime，用 dry-run 审阅，再显式复制到新路径；
+复制保留源目录，目标已存在时拒绝合并：
 
 ```bash
 uv run python main.py roxy-migrate \
@@ -364,34 +381,18 @@ uv run python main.py roxy-migrate \
   --to-workspace "$HOME/.roxy/workspace"
 ```
 
-该命令锁住旧 runtime、复制到唯一 staging、逐文件校验后原子发布。目标已经存在时会拒绝，
-源 workspace 始终保留；只有 `.instance.lock`、supervisor runtime 文件和旧/新 Socket 不会
-复制。若源目录从未有 `.instance.lock`，命令可能创建一个空锁文件以协调运行态，但绝不改写
-已有 owner 内容。`VEDA.md`、`SELF.md`、会话、记忆、附件和 `plugin-data` 保持原字节内容，
-不会因为品牌升级被重写。完成后，把 `config.toml` 的 `[runtime].workspace` 改为新路径，或显式设置
-`ROXY_WORKSPACE`；确认新实例正常后再由你自行决定是否保留旧目录。
-
-已有 `$HOME/.akashic-plugin` 会在 `$HOME/.roxy-plugin` 尚不存在时继续作为现有兼容根；
-旧 `~/.akashic/auth.json` 可被读取，下一次明确保存凭据会写到新的 `~/.roxy/auth.json`。
-这两个兼容路径都不会被自动复制、重命名或删除。旧 `AKASHIC_*` 环境变量和 `akashic.sock`
-同样只用于兼容，新的脚本、部署和 SDK 应使用 `ROXY_*` 与 `roxy.sock`。
-
-Apple Notes 是外部用户数据，绝不会自动迁移笔记文件夹。若现有插件配置仍为
-`folder = "Akashic"`，它会继续写入原文件夹；只有你显式改为 `folder = "Roxy"` 后才会使用
-新的文件夹。
-
-如果你的旧全局插件目录还保存了尚未归入 workspace 的 `data/`，可在新 workspace
-第一次启动前显式复制它；命令保留旧目录，目标已存在时拒绝覆盖：
+若旧版插件仍把运行数据放在插件目录，第一次重启前再显式复制这部分数据：
 
 ```bash
 uv run python scripts/migrate_plugin_data.py \
-  --workspace "$HOME/.roxy/workspace" \
+  --workspace "$HOME/.akashic/workspace" \
   --plugins-home "$HOME/.akashic-plugin"
 ```
 
 程序化客户端连接 workspace 下的 `roxy.sock`，先完成 JSON-RPC
 `initialize`/`initialized`，再使用 `thread/start`、`turn/start`、`turn/read` 和
-`turn/interrupt`。Python SDK 位于 `sdk/python/`；旧 TUI 和无 request id 的 IPC payload
+`turn/interrupt`。Python SDK 位于 `sdk/python/`，规范入口是 `roxy_sdk.Roxy`；
+`akashic_sdk.Akashic` 只保留为旧调用方的薄别名。旧 TUI 和无 request id 的 IPC payload
 已删除，不提供兼容 fallback。
 
 完整配置、协议和回滚说明见[程序化控制面迁移指南](./_handbook/programmatic-control-migration.md)。

@@ -6,12 +6,11 @@ import re
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from agent.core.types import ChatMessage, HistoryMessage, to_tool_call_groups
+from agent.core.types import HistoryMessage, to_tool_call_groups
 from agent.prompting import (
     PromptSectionRender,
     build_context_frame_content,
     build_context_frame_message,
-    is_context_frame,
 )
 
 if TYPE_CHECKING:
@@ -39,16 +38,6 @@ def collect_skill_mentions(content: str, skill_names: list[str]) -> list[str]:
     return result
 
 
-def to_chat_messages(messages: list[dict]) -> list[ChatMessage]:
-    return [
-        ChatMessage(
-            role=str(msg.get("role", "") or ""),
-            content=str(msg.get("content", "") or ""),
-        )
-        for msg in messages
-    ]
-
-
 def to_history_messages(messages: list[dict]) -> list[HistoryMessage]:
     out: list[HistoryMessage] = []
     for msg in messages:
@@ -70,11 +59,6 @@ def to_history_messages(messages: list[dict]) -> list[HistoryMessage]:
     return out
 
 
-def is_llm_context_frame(message: dict) -> bool:
-    content = message.get("content")
-    return isinstance(content, str) and is_context_frame(content)
-
-
 def build_context_hint_message(section_name: str, content: str) -> dict[str, str]:
     return build_context_frame_message(
         build_context_frame_content(
@@ -93,7 +77,6 @@ def build_post_reply_context_budget(
     *,
     context: "ContextBuilder",
     history: list[dict],
-    history_window: int,
 ) -> dict[str, int]:
     history_stats = estimate_history_budget(history)
     debug_breakdown = getattr(context, "last_debug_breakdown", []) or []
@@ -102,7 +85,6 @@ def build_post_reply_context_budget(
         for item in debug_breakdown
     )
     return {
-        "history_window": history_window,
         "history_messages": history_stats["messages"],
         "history_chars": history_stats["chars"],
         "history_tokens": history_stats["tokens"],
@@ -117,9 +99,8 @@ def log_post_reply_context_budget(
     budget: dict[str, int],
 ) -> None:
     context_logger.info(
-        "post_reply_context: session_key=%s history_window=%d history_messages=%d history_chars=%d history_tokens~=%d prompt_tokens~=%d next_turn_baseline_tokens~=%d",
+        "post_reply_context: session_key=%s history_messages=%d history_chars=%d history_tokens~=%d prompt_tokens~=%d next_turn_baseline_tokens~=%d",
         session_key,
-        budget["history_window"],
         budget["history_messages"],
         budget["history_chars"],
         budget["history_tokens"],
@@ -227,4 +208,3 @@ def predict_current_user_source_ref(
         if last_id:
             return last_id
     return ""
-

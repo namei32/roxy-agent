@@ -1,8 +1,8 @@
 # GitHub 到 WSL 的不可变拉取部署
 
 - 状态：实现中；源码与测试已建立，正式 WSL 激活必须在合并和 shadow 验证后执行
-- 决策：[0030](../decisions/0030-wsl-pulls-ci-promoted-immutable-releases.md)
-- 需求：RUN-004、RUN-009、CAP-002～CAP-003、PLG-013、ERR-001
+- 决策：[1003](../decisions/1003-wsl-pulls-ci-promoted-immutable-releases.md)
+- 需求：RUN-004、RUN-016、CAP-002～CAP-003、PLG-013、ERR-001
 
 ## 1. 任务合同
 

@@ -75,3 +75,17 @@ test("foreign or malformed history state returns to chat", () => {
     { kind: "chat" },
   );
 });
+
+test("new history writes Roxy identity and old entries remain readable", () => {
+  const history = new FakeHistory();
+  replaceMobileSurface(history, { kind: "runtime" });
+  assert.equal(history.entries[0].roxyMobileSurface, true);
+  assert.equal("akashicMobileSurface" in history.entries[0], false);
+  assert.deepEqual(
+    readMobileSurfaceHistoryState({
+      akashicMobileSurface: true,
+      surface: { kind: "plugins" },
+    }),
+    { kind: "plugins" },
+  );
+});

@@ -76,9 +76,7 @@ class _ActiveConnection:
                 raise
             except Exception as error:
                 self.closed = True
-                raise _BridgeDisconnected(
-                    "Mac Bridge 发送期间断开"
-                ) from error
+                raise _BridgeDisconnected("Mac Bridge 发送期间断开") from error
 
     def fail_pending(self) -> None:
         self.closed = True

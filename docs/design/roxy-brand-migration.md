@@ -8,7 +8,7 @@
 
 本设计只处理本仓库拥有的运行时名称和状态边界；Android 发布仓、用户的 Apple Notes 文件夹
 和旧 workspace 都不因本变更被自动重命名。外部插件组织由后续
-[0029](../decisions/0029-roxy-plugins-is-canonical-plugin-organization.md) 与
+[1002](../decisions/1002-roxy-plugins-is-canonical-plugin-organization.md) 与
 [Roxy 插件 GitHub 组织全量迁移](roxy-plugin-organization-migration.md) 独立拥有。
 
 ## 2. Canonical 名称与兼容边界
@@ -18,7 +18,7 @@
 | 环境变量 | `ROXY_*` | 读取 `AKASHIC_*`；两者同时设置时 Roxy 优先 |
 | workspace | `~/.roxy/workspace` | `~/.akashic/workspace` 仅在新根不存在时作为既有默认根 |
 | 全局插件根 | `~/.roxy-plugin` | `~/.akashic-plugin` 仅在新根不存在时作为既有默认根 |
-| 凭据 | `~/.roxy/auth.json` | 读取旧 `~/.akashic/auth.json`；明确写入时只写新文件 |
+| 全局 JSON 凭据 | `~/.roxy/auth.json` | 读取旧 `~/.akashic/auth.json`；明确写入时只写新文件；workspace 模型凭据仍由模型注册库拥有 |
 | 控制端点 | `roxy.sock` | 旧 workspace 未有新 Socket 时复用 `akashic.sock` |
 | SDK / Skill | `roxy_sdk`、`Roxy`、`roxy-call` | `akashic_sdk`、`Akashic`、旧 Skill 名为薄别名 |
 | Dashboard / Mobile | `RoxyDashboard`、`RoxyNative`、`RoxyMobile` | 旧全局、事件、DOM 属性和 native bridge 名继续指向同一实例 |
@@ -91,12 +91,16 @@ staging；目标和源均保持原状。目标存在时拒绝合并，不会覆�
 
 `agent.identity.roxy_env*` 在读取时给予 `ROXY_*` 优先级。由当前 runtime 启动的子进程会
 写入 Roxy 环境变量，并镜像旧变量，避免尚未升级的 helper 失去 workspace 或 lifecycle
-信息。短路径 Socket 回退仍使用 `/tmp/roxy-sockets`，不退回 TCP。
+信息。Supervisor、Host Bridge、插件 MCP/managed service、回放时钟、日志与 readiness 均使用这一边界。
+Host Bridge 发布 `roxy-runtime` 为主启动器，同目录保留 `akashic-runtime` 内容等价的兼容启动器。
+短路径 Socket 回退仍使用 `/tmp/roxy-sockets`，不退回 TCP。
 
-桌面 Dashboard 同时发布 Roxy 与旧的 import-map、全局、刷新事件、theme cookie/event 和
-插件 DOM 标记。Mobile 将旧 `AkashicNative` / `AkashicMobile` 与 Roxy 对象绑定为同一实例，
-因此历史 Android 壳不会产生第二个状态分支。新的 WebUI、SDK 文档、内建 Skill、插件工具名和
-Interview Coach 参数全部以 Roxy 名称为准。
+桌面 Dashboard 同时发布 Roxy 与旧的全局、刷新事件、theme cookie/event 和插件 DOM 标记。
+插件源码可使用 `@roxy/dashboard-ui`；构建边界会把它归一为旧 import map 已有的
+`@akashic/dashboard-ui` specifier，使新旧插件共用同一套 React/UI 单例。Mobile 将旧
+`AkashicNative` / `AkashicMobile` 与 Roxy 对象绑定为同一实例，因此历史 Android 壳不会产生
+第二个状态分支。新的 WebUI、SDK 文档、内建 Skill、插件工具名和 Interview Coach 参数全部以
+Roxy 名称为准。
 
 ## 6. 失败、回滚与外部边界
 
@@ -109,13 +113,13 @@ Interview Coach 参数全部以 Roxy 名称为准。
   的旧运行时别名。
 
 现有 `akashic-plugins` GitHub 组织与 `akashic-mobile` 发布 URL 是第三方/历史外部身份。
-本设计不假定它们已改名或有重定向；插件组织后续迁移按 0029 保留旧仓库并建立新的 canonical
+本设计不假定它们已改名或有重定向；插件组织后续迁移按 1002 保留旧仓库并建立新的 canonical
 source，Android 发布 URL 仍保持本设计原有边界。
 
 ## 7. 验收
 
-- [x] `ROXY_*` 优先，旧环境变量、Socket、SDK、Skill、Dashboard 和移动 bridge 均可兼容。
-- [x] 新 workspace、插件根、凭据路径、mobile keyset 与默认人格采用 Roxy。
+- [ ] `ROXY_*` 优先，旧环境变量、Socket、SDK、Skill、Dashboard 和移动 bridge 均可兼容。
+- [ ] 新 workspace、插件根、凭据路径、mobile keyset 与默认人格采用 Roxy。
 - [x] 迁移对源做锁、staging、树/hash 校验和原子发布；目标存在、非法符号链接、复制失败均拒绝。
 - [x] 迁移测试证明 VEDA、会话、plugin-data 与源 workspace 保留不变。
-- [x] 文档明确配置切换、Apple Notes 外部数据边界和旧 companion state 的保留规则。
+- [ ] 文档明确配置切换、Apple Notes 外部数据边界和旧 companion state 的保留规则。

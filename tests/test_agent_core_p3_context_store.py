@@ -49,7 +49,7 @@ class _DummySession:
 
 
 @pytest.mark.asyncio
-async def test_default_context_store_prepare_returns_bundle_with_legacy_metadata():
+async def test_default_context_store_prepare_returns_turn_context():
     retrieval = SimpleNamespace(
         retrieve=AsyncMock(
             return_value=RetrievalResult(
@@ -84,14 +84,10 @@ async def test_default_context_store_prepare_returns_bundle_with_legacy_metadata
 
     bundle = await store.prepare(msg=msg, session_key="cli:1", session=cast(Any, session))
 
-    assert [item.content for item in bundle.history] == ["hello", "world"]
-    assert bundle.memory_blocks == ["remembered"]
     assert bundle.skill_mentions == ["refactor", "known"]
     assert bundle.retrieved_memory_block == "remembered"
     assert bundle.retrieval_trace_raw == {"route": "RETRIEVE"}
-    assert bundle.retrieval_metadata == {"source": "memory2"}
     assert bundle.history_messages[0].tool_chain[0].calls[0].name == "read_file"
-    assert bundle.metadata == {}
     request = retrieval.retrieve.await_args.args[0]
     assert request.session_key == "cli:1"
     assert request.history[0].tools_used == ["read_file"]
@@ -156,7 +152,6 @@ async def test_default_context_store_prepare_skips_retrieval_when_requested():
     )
 
     retrieval.retrieve.assert_not_awaited()
-    assert bundle.memory_blocks == []
     assert bundle.retrieved_memory_block == ""
     assert bundle.retrieval_trace_raw is None
 
@@ -187,7 +182,6 @@ async def test_default_context_store_prepare_skips_session_history_when_requeste
     )
 
     retrieval.retrieve.assert_not_awaited()
-    assert bundle.history == []
     assert bundle.history_messages == []
 
 
@@ -254,10 +248,9 @@ def test_build_post_reply_context_budget_combines_history_and_prompt():
     budget = build_post_reply_context_budget(
         context=cast(Any, context),
         history=[{"role": "user", "content": "你好"}],
-        history_window=40,
     )
 
-    assert budget["history_window"] == 40
+    assert "history_window" not in budget
     assert budget["history_messages"] == 1
     assert budget["history_chars"] > 0
     assert budget["history_tokens"] == max(1, budget["history_chars"] // 3)

@@ -200,12 +200,12 @@ export function Btn({
 export type ChipTone = "neutral" | "success" | "warning" | "danger" | "muted" | "accent";
 
 const CHIP_TONES: Record<ChipTone, string> = {
-  neutral: "roxy-chip--neutral",
-  success: "roxy-chip--success",
-  warning: "roxy-chip--warning",
-  danger: "roxy-chip--danger",
-  muted: "roxy-chip--muted",
-  accent: "roxy-chip--accent",
+  neutral: "roxy-chip--neutral ak-chip--neutral",
+  success: "roxy-chip--success ak-chip--success",
+  warning: "roxy-chip--warning ak-chip--warning",
+  danger: "roxy-chip--danger ak-chip--danger",
+  muted: "roxy-chip--muted ak-chip--muted",
+  accent: "roxy-chip--accent ak-chip--accent",
 };
 
 const CHIP_DOTS: Record<ChipTone, string> = {
@@ -231,7 +231,7 @@ export function Chip({
   return (
     <span
       className={cn(
-        "roxy-chip inline-flex items-center gap-1.5 px-2.5 py-1 font-sans text-[11px] tabular-nums",
+        "roxy-chip ak-chip inline-flex items-center gap-1.5 px-2.5 py-1 font-sans text-[11px] tabular-nums",
         CHIP_TONES[tone],
         className,
       )}

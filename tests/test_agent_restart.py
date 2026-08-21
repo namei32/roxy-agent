@@ -18,7 +18,10 @@ from typing import Any, cast
 import pytest
 
 import agent.background.boot_guardian as boot_guardian_module
-from agent.control.context import current_turn_id
+import agent.supervisor as supervisor_module
+import main as main_module
+import utils.process_guard as process_guard_module
+from agent.control.context import running_turn_id
 from agent.control.errors import RuntimeClosedError
 from agent.control.models import TurnRequest
 from agent.control.protocol.router import ConnectionRouter
@@ -29,16 +32,14 @@ from agent.restart import (
     RestartState,
     SupervisorCommitChannel,
 )
-import agent.supervisor as supervisor_module
 from agent.supervisor import RESTART_EXIT_CODE, _wait_child, run_supervisor
 from agent.tools.agent_restart import AgentRestartTool
 from agent.tools.registry import ToolRegistry
 from agent.tools.tool_search import ToolSearchTool
-from bootstrap.runtime_readiness import RuntimeReadiness
 from bootstrap.app import AppRuntime
+from bootstrap.runtime_readiness import RuntimeReadiness
 from core.error_context import current_session_key
 from infra.control.connection import NdjsonConnection
-import main as main_module
 from session.store import SessionStore
 
 
@@ -253,7 +254,7 @@ async def test_agent_restart_requires_current_attempt_search_grant() -> None:
         preloadable=False,
         requires_turn_search=True,
     )
-    turn_token = current_turn_id.set("turn-a")
+    turn_token = running_turn_id.set("turn-a")
     session_token = current_session_key.set("programmatic:one")
     registry.set_context(
         channel="programmatic",
@@ -290,7 +291,7 @@ async def test_agent_restart_requires_current_attempt_search_grant() -> None:
     finally:
         registry.end_turn_search_scope(scope)
         current_session_key.reset(session_token)
-        current_turn_id.reset(turn_token)
+        running_turn_id.reset(turn_token)
 
     assert "agent_restart" in registry.get_non_preloadable_names()
     assert "agent_restart" not in registry.get_always_on_names()
@@ -298,7 +299,8 @@ async def test_agent_restart_requires_current_attempt_search_grant() -> None:
 
 def test_supervisor_commit_channel_uses_inherited_fd(monkeypatch: pytest.MonkeyPatch) -> None:
     read_fd, write_fd = os.pipe()
-    monkeypatch.setenv("AKASHIC_SUPERVISED", "1")
+    monkeypatch.delenv("AKASHIC_SUPERVISED", raising=False)
+    monkeypatch.setenv("ROXY_SUPERVISED", "1")
     monkeypatch.setenv("AKASHIC_BOOT_ID", "boot-a")
     monkeypatch.setenv("AKASHIC_RESTART_NONCE", "n" * 64)
     monkeypatch.setenv("AKASHIC_LIFECYCLE_FD", str(write_fd))
@@ -1177,8 +1179,9 @@ def test_supervisor_child_does_not_inherit_blocked_stop_signals(
     def launch(_argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
         assert "preexec_fn" not in kwargs
         code = """
-import pathlib, sys, time
-pathlib.Path(sys.argv[1]).write_text(pathlib.Path('/proc/self/status').read_text())
+import pathlib, signal, sys, time
+blocked = signal.pthread_sigmask(signal.SIG_BLOCK, [])
+pathlib.Path(sys.argv[1]).write_text(','.join(str(int(sig)) for sig in blocked))
 time.sleep(30)
 """
         return cast(
@@ -1201,12 +1204,11 @@ time.sleep(30)
         deadline = time.monotonic() + 2
         while not probe_path.exists() and time.monotonic() < deadline:
             time.sleep(0.01)
-        status = probe_path.read_text()
-        sigblk_line = next(
-            line for line in status.splitlines() if line.startswith("SigBlk:")
+        blocked = {int(value) for value in probe_path.read_text().split(",") if value}
+        observed["blocked"] = len(blocked)
+        observed["stop_blocked"] = int(
+            signal.SIGINT in blocked or signal.SIGTERM in blocked
         )
-        blocked = int(sigblk_line.split()[1], 16)
-        observed["blocked"] = blocked
         child.send_signal(signal.SIGTERM)
         exit_code = child.wait(timeout=2)
         os.close(read_fd)
@@ -1219,8 +1221,7 @@ time.sleep(30)
         config_path=tmp_path / "config.toml",
         workspace=tmp_path,
     ) == 128 + signal.SIGTERM
-    stop_mask = (1 << (signal.SIGINT - 1)) | (1 << (signal.SIGTERM - 1))
-    assert observed["blocked"] & stop_mask == 0
+    assert observed["stop_blocked"] == 0
 
 
 def test_settings_restart_bridge_waits_for_matching_ready_generation() -> None:
@@ -1238,6 +1239,46 @@ def test_settings_restart_bridge_waits_for_matching_ready_generation() -> None:
     thread.join(timeout=1)
 
     assert completed == [True]
+
+
+def test_lifecycle_accepts_settings_reload_only_after_ready() -> None:
+    state = supervisor_module._LifecycleState("boot-model", "nonce")
+    state.feed(b'{"type":"ready","bootId":"boot-model","pid":123}\n')
+    state.feed(
+        b'{"type":"settings_reloaded","bootId":"boot-model",'
+        b'"success":true,"detail":"digest"}\n'
+    )
+
+    assert state.protocol_error == ""
+    assert state.settings_results == [(True, "digest")]
+    assert not state.commit_valid
+
+    invalid = supervisor_module._LifecycleState("boot-model", "nonce")
+    invalid.feed(
+        b'{"type":"settings_reloaded","bootId":"boot-model",'
+        b'"success":true}\n'
+    )
+    assert invalid.protocol_error == "settings reload frame 无效"
+
+
+def test_settings_restart_bridge_exposes_candidate_rejection() -> None:
+    bridge = supervisor_module._SettingsRestartBridge(1)
+    failures: list[str] = []
+
+    def request() -> None:
+        try:
+            bridge.request_and_wait()
+        except RuntimeError as exc:
+            failures.append(str(exc))
+
+    thread = threading.Thread(target=request)
+    thread.start()
+    assert bridge.request_event.wait(1)
+    generation = bridge.take_request()
+    bridge.complete(generation, False)
+    thread.join(timeout=1)
+
+    assert failures == ["Gateway 拒绝候选模型配置"]
 
 
 def test_supervised_gateway_skips_duplicate_startup_migration(
@@ -1263,20 +1304,68 @@ def test_supervised_gateway_skips_duplicate_startup_migration(
     assert calls == []
 
 
-def test_platform_boundary_exposes_supervisor_only_on_linux(
+def test_platform_boundary_exposes_supervisor_on_linux_and_macos(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assert main_module._supervisor_supported("linux")
+    assert main_module._supervisor_supported("darwin")
     assert not main_module._supervisor_supported("win32")
-    assert not main_module._supervisor_supported("darwin")
+    assert supervisor_module._supervisor_platform_supported("darwin")
+    assert boot_guardian_module._guardian_platform_supported("darwin")
 
-    monkeypatch.setattr(supervisor_module.sys, "platform", "darwin")
-    with pytest.raises(RuntimeError, match="仅支持 Linux"):
+    monkeypatch.setattr(supervisor_module.sys, "platform", "win32")
+    with pytest.raises(RuntimeError, match="仅支持 Linux 和 macOS"):
         run_supervisor(
             config_path=tmp_path / "config.toml",
             workspace=tmp_path,
         )
+
+
+def test_darwin_process_discovery_uses_exact_boot_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(boot_guardian_module.sys, "platform", "darwin")
+    monkeypatch.setattr(boot_guardian_module, "_darwin_process_ids", lambda: [101, 102])
+    monkeypatch.setattr(
+        boot_guardian_module,
+        "_darwin_process_environ",
+        lambda pid: [b"AKASHIC_BOOT_ID=boot-a"] if pid == 101 else [b"OTHER=1"],
+    )
+    monkeypatch.setattr(boot_guardian_module.os, "getpid", lambda: 999)
+    monkeypatch.setattr(boot_guardian_module.os, "getpgrp", lambda: 500)
+    monkeypatch.setattr(boot_guardian_module.os, "getpgid", lambda pid: pid + 1000)
+    groups: set[int] = set()
+    direct_pids: set[int] = set()
+
+    boot_guardian_module._discover_boot_targets("boot-a", groups, direct_pids)
+
+    assert groups == {1101}
+    assert direct_pids == set()
+
+
+def test_darwin_subreaper_is_explicit_noop(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(boot_guardian_module.sys, "platform", "darwin")
+    boot_guardian_module._enable_child_subreaper()
+
+
+def test_process_ref_keeps_pidfd_on_linux_and_polls_on_darwin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(process_guard_module.sys, "platform", "linux")
+    read_fd, write_fd = os.pipe()
+    os.close(write_fd)
+    monkeypatch.setattr(process_guard_module, "open_pidfd", lambda _pid: read_fd)
+    linux_ref = process_guard_module.open_process_ref(123)
+    assert linux_ref.stable
+    assert process_guard_module.process_wait_timeout(linux_ref, None) is None
+    linux_ref.close()
+
+    monkeypatch.setattr(process_guard_module.sys, "platform", "darwin")
+    darwin_ref = process_guard_module.open_process_ref(123)
+    assert not darwin_ref.stable
+    assert process_guard_module.process_wait_timeout(darwin_ref, None) == 0.1
+    darwin_ref.close()
 
 
 def test_settings_server_rejects_non_loopback_host(
@@ -1284,7 +1373,8 @@ def test_settings_server_rejects_non_loopback_host(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     bridge = supervisor_module._SettingsRestartBridge(1)
-    monkeypatch.setenv("AKASHIC_SETTINGS_HOST", "0.0.0.0")
+    monkeypatch.setenv("AKASHIC_WEB_HOST", "0.0.0.0")
+    monkeypatch.delenv("AKASHIC_WEB_ALLOW_NON_LOOPBACK", raising=False)
     try:
         with pytest.raises(RuntimeError, match="只允许 127.0.0.1"):
             supervisor_module._start_settings_server(
@@ -1300,6 +1390,7 @@ def test_settings_server_rejects_non_loopback_host(
 async def test_settings_drain_waits_for_existing_turn_without_cancelling() -> None:
     runtime = object.__new__(ConversationRuntime)
     runtime._accepting_turns = True
+    runtime._admission_capacity_event = asyncio.Event()
     finished = asyncio.Event()
 
     async def existing_turn() -> None:

@@ -13,6 +13,8 @@ export interface RoxyRuntime {
   UI: typeof UI;
 }
 
+export type AkashicRuntime = RoxyRuntime;
+
 declare global {
   interface Window {
     __roxyRuntime?: RoxyRuntime;

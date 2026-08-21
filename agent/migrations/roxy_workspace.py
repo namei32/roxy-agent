@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import os
 import shutil
@@ -280,6 +279,10 @@ def _open_regular_lock_file(path: Path) -> TextIO:
 def _migration_lock(parent: Path, destination_name: str) -> Iterator[None]:
     """在目标父目录持有命名空间迁移锁，避免两个发布者竞争同一目标。"""
 
+    if os.name == "nt":
+        raise RuntimeError("Roxy workspace 迁移当前只支持 Linux 和 macOS")
+    import fcntl
+
     _reject_symlink_components(parent)
     parent.mkdir(parents=True, mode=0o700, exist_ok=True)
     _reject_symlink_components(parent)
@@ -296,6 +299,10 @@ def _migration_lock(parent: Path, destination_name: str) -> Iterator[None]:
 @contextmanager
 def _source_runtime_lock(source: Path) -> Iterator[None]:
     """与旧 runtime 使用同一把锁协调，但绝不改写已有 owner 信息。"""
+
+    if os.name == "nt":
+        raise RuntimeError("Roxy workspace 迁移当前只支持 Linux 和 macOS")
+    import fcntl
 
     lock_path = source / ".instance.lock"
     with _open_regular_lock_file(lock_path) as stream:

@@ -11,7 +11,7 @@ Automation is disabled by default. Runtime configuration belongs at
 auto_save_interview_images = true
 allowed_chat_ids = ["123456789"]
 classification_threshold = 0.85
-project_root = "/absolute/path/to/akasha-v2-engine"
+project_root = "/absolute/path/to/roxy-agent"
 ```
 
 Only positive Telegram private-chat IDs are accepted. The plugin stores batch

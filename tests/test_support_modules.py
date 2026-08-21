@@ -6,7 +6,7 @@ import asyncio
 import json
 import runpy
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -81,7 +81,7 @@ def test_agent_prompt_uses_authoritative_completion_rules(tmp_path: Path) -> Non
 
     assert VERIFIABLE_COMPLETION_RULES in prompt
     assert "每个主要工具结果后都要把新增证据对应到用户明确提出的要求" in prompt
-    assert "transport_status=\"success\"" in prompt
+    assert 'transport_status="success"' in prompt
     assert "只补尚未证明要求的最小缺口" in prompt
 
 
@@ -185,7 +185,9 @@ async def test_message_push_tool_covers_success_failure_and_fallbacks():
     assert await tool.execute(target_channel="telegram", target_chat_id=1) == (
         "错误：message、file、image 至少提供一个"
     )
-    assert "未注册" in await tool.execute(target_channel="qq", target_chat_id=1, message="x")
+    assert "未注册" in await tool.execute(
+        target_channel="qq", target_chat_id=1, message="x"
+    )
 
     async def unsupported_file(
         _chat_id: str,
@@ -207,7 +209,10 @@ async def test_message_push_tool_covers_success_failure_and_fallbacks():
 
     _ = tool.register_channel("limited", deliver=limited_deliver)
     limited = await tool.execute(
-        target_channel="limited", target_chat_id=1, file="/tmp/a.txt", image="/tmp/a.png"
+        target_channel="limited",
+        target_chat_id=1,
+        file="/tmp/a.txt",
+        image="/tmp/a.png",
     )
     assert "不支持发送文件" in limited
 
@@ -215,7 +220,9 @@ async def test_message_push_tool_covers_success_failure_and_fallbacks():
         raise RuntimeError("send failed")
 
     _register_text_channel(tool, "broken", broken)
-    assert "发送失败" in await tool.execute(target_channel="broken", target_chat_id=1, message="x")
+    assert "发送失败" in await tool.execute(
+        target_channel="broken", target_chat_id=1, message="x"
+    )
 
 
 @pytest.mark.asyncio
@@ -475,9 +482,7 @@ async def test_message_push_default_call_waits_for_passive_lane():
         events.append(message)
 
     _register_text_channel(tool, "cli", text)
-    inbound = InboundMessage(
-        channel="cli", sender="user", chat_id="1", content="hello"
-    )
+    inbound = InboundMessage(channel="cli", sender="user", chat_id="1", content="hello")
     await bus.publish_inbound(inbound)
     push_task = asyncio.create_task(
         tool.execute(target_channel="cli", target_chat_id="1", message="inline")
@@ -612,8 +617,12 @@ async def test_message_bus_outbound_snapshot_survives_subscription_close():
     first_subscription = bus.subscribe_outbound("cli", first_callback)
     bus.subscribe_outbound("cli", second_callback)
 
-    await bus._send_outbound(OutboundMessage("cli", "1", "first"))
-    await bus._send_outbound(OutboundMessage("cli", "1", "second"))
+    await bus._send_outbound(
+        OutboundMessage("cli", "1", "first"), fallback_allowed=True
+    )
+    await bus._send_outbound(
+        OutboundMessage("cli", "1", "second"), fallback_allowed=True
+    )
 
     assert delivered == ["first", "second", "second"]
 
@@ -868,7 +877,10 @@ def test_tool_base_and_timekit_and_json_store_cover_branches(
     numeric_type_errors = tool.validate_params(
         {"name": "ok", "count": True, "items": [False]}
     )
-    assert numeric_type_errors == ["count 应为 integer 类型", "items[0] 应为 number 类型"]
+    assert numeric_type_errors == [
+        "count 应为 integer 类型",
+        "items[0] 应为 number 类型",
+    ]
 
     class _BadSchemaTool(_DummyTool):
         @property
@@ -942,9 +954,6 @@ async def test_context_builder_debug_projection_is_turn_local(tmp_path: Path) ->
         def read_self(self) -> str:
             return ""
 
-        def read_recent_context(self) -> str:
-            return ""
-
         def get_memory_context(self) -> str:
             return ""
 
@@ -1015,9 +1024,6 @@ def test_context_builder_builds_prompt_messages_and_assistant_blocks(
 
         def read_self(self) -> str:
             return "self note"
-
-        def read_recent_context(self) -> str:
-            return ""
 
         def get_memory_context(self) -> str:
             return "memory block"
@@ -1217,9 +1223,6 @@ def test_context_builder_reproduces_temporal_conflict_baseline(
         def read_self(self) -> str:
             return ""
 
-        def read_recent_context(self) -> str:
-            return ""
-
         def get_memory_context(self) -> str:
             return ""
 
@@ -1272,13 +1275,15 @@ def test_context_builder_reproduces_temporal_conflict_baseline(
     assert "用户表示明天下午三点有面试" in context_frame
     assert "准备次日下午三点的字节跳动面试" in context_frame
     assert "4 月 9 日（周四）下午 3 点" in context_frame
-    assert user_message.startswith("[当前消息时间: 2026-04-08 17:57:00")
-    assert "request_time=2026-04-08T17:57:00+08:00" in user_message
-    assert "今天=2026-04-08" in user_message
-    assert "昨天=2026-04-07" in user_message
-    assert "明天=2026-04-09" in user_message
-    assert "后天=2026-04-10" in user_message
-    assert "weekday=Wednesday" in user_message
+    assert user_message.startswith(
+        f"[当前消息时间: {request_time:%Y-%m-%d %H:%M:%S}"
+    )
+    assert f"request_time={request_time.isoformat()}" in user_message
+    assert f"今天={request_time:%Y-%m-%d}" in user_message
+    assert f"昨天={request_time - timedelta(days=1):%Y-%m-%d}" in user_message
+    assert f"明天={request_time + timedelta(days=1):%Y-%m-%d}" in user_message
+    assert f"后天={request_time + timedelta(days=2):%Y-%m-%d}" in user_message
+    assert f"weekday={request_time:%A}" in user_message
     assert "相对时间以此为准" in user_message
     assert user_message.endswith("你还记得明天什么时候面试吗")
 

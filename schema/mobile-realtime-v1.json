@@ -40,6 +40,7 @@
     "message.send",
     "mobile.webui.content.prepare",
     "mobile.webui.release.get",
+    "model.catalog.get",
     "ping",
     "plugin.ui.asset.get",
     "plugin.ui.cancel",
@@ -87,7 +88,7 @@
     "sync.completed",
     "sync.reset_required",
     "turn.interrupted",
-    "turn.snapshot",
+    "turn.output.completed",
     "turn.started"
   ],
   "frame": {
@@ -568,6 +569,20 @@
             "default": null,
             "title": "Block Id"
           },
+          "control_turn_id": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Control Turn Id"
+          },
           "delta": {
             "maxLength": 65536,
             "minLength": 1,
@@ -656,6 +671,7 @@
               "session.open",
               "history.get",
               "message.content.prepare",
+              "model.catalog.get",
               "command.list",
               "runtime.document.list",
               "runtime.document.get",
@@ -833,6 +849,7 @@
               "react.tool.started",
               "react.tool.completed",
               "message.final",
+              "turn.output.completed",
               "turn.interrupted",
               "message.proactive",
               "attachment.progress",
@@ -1034,6 +1051,32 @@
             "maxItems": 10,
             "title": "Media Refs",
             "type": "array"
+          },
+          "model_reasoning_effort": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model Reasoning Effort"
+          },
+          "model_runtime_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model Runtime Id"
           },
           "reply_to": {
             "anyOf": [
@@ -1606,137 +1649,6 @@
         ],
         "title": "ThinkingDeltaEvent",
         "type": "object"
-      },
-      "TurnSnapshotEvent": {
-        "additionalProperties": false,
-        "properties": {
-          "connection_epoch": {
-            "minimum": 1,
-            "title": "Connection Epoch",
-            "type": "integer"
-          },
-          "event_seq": {
-            "minimum": 1,
-            "title": "Event Seq",
-            "type": "integer"
-          },
-          "id": {
-            "maxLength": 36,
-            "minLength": 26,
-            "pattern": "^(?:[0-9A-HJKMNP-TV-Z]{26}|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-7[0-9A-Fa-f]{3}-[89ABab][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12})$",
-            "title": "Id",
-            "type": "string"
-          },
-          "kind": {
-            "const": "event",
-            "title": "Kind",
-            "type": "string"
-          },
-          "payload": {
-            "$ref": "#/$defs/TurnSnapshotPayload"
-          },
-          "session_id": {
-            "anyOf": [
-              {
-                "maxLength": 512,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Session Id"
-          },
-          "turn_id": {
-            "maxLength": 512,
-            "minLength": 1,
-            "title": "Turn Id",
-            "type": "string"
-          },
-          "type": {
-            "const": "turn.snapshot",
-            "title": "Type",
-            "type": "string"
-          },
-          "v": {
-            "const": 1,
-            "title": "V",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "v",
-          "kind",
-          "type",
-          "id",
-          "connection_epoch",
-          "event_seq",
-          "turn_id",
-          "payload"
-        ],
-        "title": "TurnSnapshotEvent",
-        "type": "object"
-      },
-      "TurnSnapshotPayload": {
-        "additionalProperties": false,
-        "properties": {
-          "blocks": {
-            "items": {
-              "additionalProperties": {
-                "$ref": "#/$defs/JsonValue"
-              },
-              "type": "object"
-            },
-            "title": "Blocks",
-            "type": "array"
-          },
-          "content_so_far": {
-            "title": "Content So Far",
-            "type": "string"
-          },
-          "last_source_event_id": {
-            "anyOf": [
-              {
-                "maxLength": 36,
-                "minLength": 26,
-                "pattern": "^(?:[0-9A-HJKMNP-TV-Z]{26}|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-7[0-9A-Fa-f]{3}-[89ABab][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12})$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Source Event Id"
-          },
-          "status": {
-            "enum": [
-              "queued",
-              "running",
-              "completed",
-              "interrupted",
-              "failed"
-            ],
-            "title": "Status",
-            "type": "string"
-          },
-          "turn_id": {
-            "maxLength": 512,
-            "minLength": 1,
-            "title": "Turn Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "turn_id",
-          "status",
-          "blocks",
-          "content_so_far",
-          "last_source_event_id"
-        ],
-        "title": "TurnSnapshotPayload",
-        "type": "object"
       }
     },
     "discriminator": {
@@ -1755,6 +1667,7 @@
               "message.send": "#/$defs/MessageSendCommand",
               "mobile.webui.content.prepare": "#/$defs/MobileWebUiContentPrepareCommand",
               "mobile.webui.release.get": "#/$defs/MobileWebUiReleaseGetCommand",
+              "model.catalog.get": "#/$defs/GenericCommand",
               "ping": "#/$defs/GenericCommand",
               "plugin.ui.asset.get": "#/$defs/GenericCommand",
               "plugin.ui.cancel": "#/$defs/GenericCommand",
@@ -1852,7 +1765,7 @@
               "sync.completed": "#/$defs/GenericEvent",
               "sync.reset_required": "#/$defs/GenericEvent",
               "turn.interrupted": "#/$defs/GenericEvent",
-              "turn.snapshot": "#/$defs/TurnSnapshotEvent",
+              "turn.output.completed": "#/$defs/GenericEvent",
               "turn.started": "#/$defs/GenericEvent"
             },
             "propertyName": "type"
@@ -1863,9 +1776,6 @@
             },
             {
               "$ref": "#/$defs/AnswerDeltaEvent"
-            },
-            {
-              "$ref": "#/$defs/TurnSnapshotEvent"
             },
             {
               "$ref": "#/$defs/GenericEvent"
@@ -1890,6 +1800,7 @@
             "message.send": "#/$defs/MessageSendCommand",
             "mobile.webui.content.prepare": "#/$defs/MobileWebUiContentPrepareCommand",
             "mobile.webui.release.get": "#/$defs/MobileWebUiReleaseGetCommand",
+            "model.catalog.get": "#/$defs/GenericCommand",
             "ping": "#/$defs/GenericCommand",
             "plugin.ui.asset.get": "#/$defs/GenericCommand",
             "plugin.ui.cancel": "#/$defs/GenericCommand",
@@ -1955,7 +1866,7 @@
             "sync.completed": "#/$defs/GenericEvent",
             "sync.reset_required": "#/$defs/GenericEvent",
             "turn.interrupted": "#/$defs/GenericEvent",
-            "turn.snapshot": "#/$defs/TurnSnapshotEvent",
+            "turn.output.completed": "#/$defs/GenericEvent",
             "turn.started": "#/$defs/GenericEvent"
           },
           "propertyName": "type"
@@ -1966,9 +1877,6 @@
           },
           {
             "$ref": "#/$defs/AnswerDeltaEvent"
-          },
-          {
-            "$ref": "#/$defs/TurnSnapshotEvent"
           },
           {
             "$ref": "#/$defs/GenericEvent"

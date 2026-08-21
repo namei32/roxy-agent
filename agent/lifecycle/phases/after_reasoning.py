@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import logging
+from time import perf_counter
 from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
+from agent.control.context import running_turn_id
 from agent.core.passive_support import update_session_runtime_metadata
-from agent.control.ports import TurnInputSource, TurnUserInput
+from agent.control.ports import InputLock, TurnUserInput
 from agent.core.response_parser import parse_response
 from agent.lifecycle.phase import (
     PhaseFrame,
@@ -17,10 +20,12 @@ from agent.lifecycle.phase import (
 from agent.lifecycle.types import (
     AfterReasoningCtx,
     AfterReasoningInput,
-    AfterReasoningResult,
+    TurnSnapshot,
 )
 from bus.event_bus import EventBus
 from bus.events import OutboundMessage
+from core.common.diagnostic_log import turn_milestone
+from core.error_context import current_client_message_id, current_session_key
 
 if TYPE_CHECKING:
     from agent.looping.ports import SessionServices
@@ -29,8 +34,32 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _milestone(
+    logger: logging.Logger,
+    event: str,
+    *,
+    duration_ms: float | None = None,
+    counts: str = "",
+    outcome: str = "",
+    level: int = logging.INFO,
+) -> None:
+    """打一个 turn 尾里程碑；身份统一从 contextvar 读取，字段全部走 turn_milestone。"""
+
+    turn_milestone(
+        logger,
+        event,
+        session_id=current_session_key.get() or "",
+        turn_id=running_turn_id.get(),
+        client_message_id=current_client_message_id.get(),
+        duration_ms=duration_ms,
+        counts=counts,
+        outcome=outcome,
+        level=level,
+    )
+
+
 @dataclass
-class AfterReasoningFrame(PhaseFrame[AfterReasoningInput, AfterReasoningResult]):
+class AfterReasoningFrame(PhaseFrame[AfterReasoningInput, TurnSnapshot]):
     pass
 
 
@@ -50,8 +79,8 @@ _ASSISTANT_FIXED_FIELDS = {
     "tool_chain",
     "reasoning_content",
     "model_state",
-    "react_compaction",
 }
+_RETIRED_ASSISTANT_FIELDS = frozenset({"react_compaction"})
 _USER_FIXED_FIELDS = {
     "media",
     "timestamp",
@@ -175,16 +204,16 @@ class _PersistUserMessageModule:
             ):
                 value = turn_input.metadata.get(field)
                 if isinstance(value, str) and value:
-                    input_kwargs[
-                        "timestamp" if field == "client_created_at" else field
-                    ] = value
+                    input_kwargs[field] = value
             display_content = turn_input.metadata.get("display_content")
             persisted_users.append(
                 session.add_message(
                     "user",
-                    display_content
-                    if isinstance(display_content, str)
-                    else turn_input.content,
+                    (
+                        display_content
+                        if isinstance(display_content, str)
+                        else turn_input.content
+                    ),
                     media=list(turn_input.media) if turn_input.media else None,
                     **input_kwargs,
                 )
@@ -215,10 +244,6 @@ class _PersistAssistantMessageModule:
             assistant_kwargs["reasoning_content"] = ctx.thinking
         if frame.input.turn_result.model_state is not None:
             assistant_kwargs["model_state"] = frame.input.turn_result.model_state
-        if frame.input.turn_result.react_compaction is not None:
-            assistant_kwargs["react_compaction"] = dict(
-                frame.input.turn_result.react_compaction
-            )
         assistant_kwargs.update(_collect_persist_assistant_slots(frame.slots))
         turn_inputs = _turn_user_inputs(frame.input.state.msg)
         control_turn_id = str(
@@ -290,9 +315,36 @@ class _AppendMessagesModule:
             )
         if not messages:
             return frame
-        await self._session_services.session_manager.append_messages(
-            session,
-            messages,
+        _milestone(logger, "after_reasoning.append.start")
+        append_started = perf_counter()
+        try:
+            await self._session_services.session_manager.append_messages(
+                session,
+                messages,
+            )
+        except asyncio.CancelledError:
+            _milestone(
+                logger,
+                "after_reasoning.append.cancelled",
+                duration_ms=(perf_counter() - append_started) * 1000,
+                outcome="cancelled",
+                level=logging.WARNING,
+            )
+            raise
+        except Exception:
+            _milestone(
+                logger,
+                "after_reasoning.append.error",
+                duration_ms=(perf_counter() - append_started) * 1000,
+                outcome="error",
+                level=logging.ERROR,
+            )
+            raise
+        _milestone(
+            logger,
+            "after_reasoning.append.done",
+            duration_ms=(perf_counter() - append_started) * 1000,
+            outcome="done",
         )
         return frame
 
@@ -313,7 +365,7 @@ class _BuildOutboundMessageModule:
             )
             if not persisted_users:
                 raise RuntimeError("本轮 user 消息列表为空")
-            persisted_user = persisted_users[0]
+            persisted_user = persisted_users[-1]
             persisted_user_ids = [
                 str(item["id"])
                 for item in persisted_users
@@ -334,7 +386,9 @@ class _BuildOutboundMessageModule:
             elif ctx.channel == "mobile":
                 raise RuntimeError("本轮 mobile user 消息缺少客户端 ID")
         media = list(ctx.media)
-        _append_media(media, collect_prefixed_slots(frame.slots, _OUTBOUND_MEDIA_PREFIX))
+        _append_media(
+            media, collect_prefixed_slots(frame.slots, _OUTBOUND_MEDIA_PREFIX)
+        )
         session_message_id: str | None = None
         if frame.input.state.persistence.persist_assistant:
             persisted = cast(
@@ -354,20 +408,21 @@ class _BuildOutboundMessageModule:
             media=media,
             metadata=metadata,
             session_message_id=session_message_id,
+            control_turn_id=running_turn_id.get(),
         )
         return frame
 
 
 def _turn_user_inputs(msg: object) -> tuple[TurnUserInput, ...]:
-    """读取 sealed control source；普通内部 turn 投影为单条输入。"""
+    """读取已锁定的 control source；普通内部 turn 投影为单条输入。"""
 
     metadata = getattr(msg, "metadata", None) or {}
     raw_source = metadata.get("_control_turn_input_source")
     if raw_source is not None:
-        source = cast(TurnInputSource, raw_source)
-        inputs = source.consumed_inputs()
+        source = cast(InputLock, raw_source)
+        inputs = source.used_inputs()
         if not inputs:
-            raise RuntimeError("sealed control turn 缺少用户输入")
+            raise RuntimeError("locked control turn 缺少用户输入")
         return inputs
     return (
         TurnUserInput(
@@ -381,14 +436,15 @@ def _turn_user_inputs(msg: object) -> tuple[TurnUserInput, ...]:
     )
 
 
-class _ReturnAfterReasoningResultModule:
+class _BuildTurnSnapshotModule:
     slot = "after_reasoning.return"
     requires = ("after_reasoning.build_outbound", _CTX_SLOT, _OUTBOUND_SLOT)
 
     async def run(self, frame: AfterReasoningFrame) -> AfterReasoningFrame:
-        frame.output = AfterReasoningResult(
-            ctx=cast(AfterReasoningCtx, frame.slots[_CTX_SLOT]),
+        frame.output = TurnSnapshot(
+            state=frame.input.state,
             outbound=cast(OutboundMessage, frame.slots[_OUTBOUND_SLOT]),
+            ctx=cast(AfterReasoningCtx, frame.slots[_CTX_SLOT]),
         )
         return frame
 
@@ -406,7 +462,7 @@ def default_after_reasoning_modules(
         _UpdateSessionMetadataModule(),
         _AppendMessagesModule(session_services),
         _BuildOutboundMessageModule(),
-        _ReturnAfterReasoningResultModule(),
+        _BuildTurnSnapshotModule(),
     ]
     return cast(
         AfterReasoningModules,
@@ -415,6 +471,15 @@ def default_after_reasoning_modules(
 
 
 def _collect_persist_assistant_slots(slots: dict[str, object]) -> dict[str, object]:
+    retired = {
+        key.removeprefix(_PERSIST_ASSISTANT_PREFIX)
+        for key in slots
+        if key.startswith(_PERSIST_ASSISTANT_PREFIX)
+        and key.removeprefix(_PERSIST_ASSISTANT_PREFIX) in _RETIRED_ASSISTANT_FIELDS
+    }
+    if retired:
+        fields = ", ".join(sorted(retired))
+        raise ValueError(f"assistant extra 字段已退役: {fields}")
     return collect_prefixed_slots(
         slots,
         _PERSIST_ASSISTANT_PREFIX,

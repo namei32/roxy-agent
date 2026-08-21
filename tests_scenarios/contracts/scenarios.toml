@@ -5,6 +5,7 @@ async_accepted_before_visible = "tests/semantic/test_contract_oracles.py::test_c
 candidate_visible_before_activation = "tests/semantic/test_contract_oracles.py::test_plugin_publication_oracle_rejects_early_switch_mutant"
 derived_state_overwrites_session_source = "tests/semantic/test_contract_oracles.py::test_memory_oracle_rejects_derived_state_overwrite_mutant"
 historical_session_delete = "tests/semantic/test_context_history_contract.py::test_history_oracle_rejects_historical_delete_mutant"
+host_bridge_new_boot_overlaps_old_job = "tests/test_host_bridge.py::test_new_boot_claim_cleans_old_boot_long_job_before_admission"
 leader_exit_assumed_tree_exit = "tests/semantic/test_contract_oracles.py::test_process_lifecycle_oracle_rejects_leader_only_cleanup_mutant"
 cleanup_drops_unconfirmed_execution = "tests/semantic/test_contract_oracles.py::test_cleanup_ownership_oracle_rejects_forgetful_mutant"
 cleanup_retroactively_fails_turn = "tests/semantic/test_contract_oracles.py::test_turn_finality_oracle_rejects_cleanup_failure_mutant"
@@ -53,7 +54,7 @@ observes = ["workspace_path", "plugin_home_path", "fresh_config"]
 mutants = ["official_workspace_path"]
 
 [scenarios.wsl_deployment_contract]
-requirements = ["RUN-003", "RUN-004", "RUN-009", "CAP-002", "CAP-003", "PLG-013", "ERR-001", "TST-001", "TST-002", "TST-003", "TST-005", "TST-006"]
+requirements = ["RUN-003", "RUN-004", "RUN-016", "CAP-002", "CAP-003", "PLG-013", "ERR-001", "TST-001", "TST-002", "TST-003", "TST-005", "TST-006"]
 groups = ["deployment"]
 environment = "public_clean_workspace"
 timeout_seconds = 120
@@ -97,8 +98,8 @@ command = [
   "tests/test_shell_tool.py",
   "tests/test_unified_exec.py",
   "tests/test_agent_restart.py::test_boot_guardian_reaps_adopted_zombie_while_gateway_runs",
-  "tests/test_query_compaction.py",
-  "tests/test_tool_loop_guard.py::test_subagent_trim_pins_active_shell_result_until_terminal_call",
+  "tests/test_context_compaction_contract.py",
+  "tests/test_tool_loop_guard.py::test_subagent_compacts_in_memory_before_the_next_provider_call",
   "tests/test_tool_loop_guard.py::test_subagent_preserves_provider_failure_when_shell_cleanup_also_fails",
   "tests/proactive_v2/test_drift.py::test_drift_shell_tools_isolate_tick_owners",
   "tests/proactive_v2/test_drift.py::test_drift_preserves_execution_failure_when_shell_cleanup_fails",
@@ -117,7 +118,7 @@ observes = [
   "bounded_output",
   "capacity_pruning",
   "active_execution_compaction_pin",
-  "subagent_active_execution_pin",
+  "subagent_in_memory_context_compaction",
   "turn_owner_cleanup",
   "drift_owner_isolation",
   "cleanup_preserves_primary_error",
@@ -154,6 +155,35 @@ observes = [
 ]
 mutants = ["cleanup_retroactively_fails_turn", "cleanup_drops_unconfirmed_execution"]
 
+[scenarios.host_bridge_boot_fencing_contract]
+requirements = ["RUN-013", "RUN-014", "WSP-005", "SH-001", "SH-002", "SH-003", "ERR-001", "TST-001", "TST-003"]
+groups = ["host_execution"]
+environment = "public_clean_workspace"
+timeout_seconds = 120
+command = [
+  "python",
+  "-m",
+  "pytest",
+  "-q",
+  "tests/test_host_bridge.py",
+  "tests/test_akashic_release_installer.py",
+  "tests/test_runtime_identity.py",
+  "tests/test_host_runtime_healthcheck.py",
+]
+observes = [
+  "release_identity",
+  "boot_owner",
+  "old_boot_admission",
+  "old_execution_empty_set",
+  "new_boot_execution",
+  "runtime_readiness",
+  "bootstrap_stdlib_boundary",
+  "generation_owned_bridge_probe",
+  "activation_receipt",
+  "previous_recovery_maintenance",
+]
+mutants = ["host_bridge_new_boot_overlaps_old_job"]
+
 [scenarios.shell_privileged_cleanup_contract]
 requirements = ["SH-002", "RUN-003", "ERR-001", "TST-001", "TST-003"]
 groups = ["shell_finality"]
@@ -168,8 +198,8 @@ requirements = ["CTX-001", "SES-002", "SES-003", "SES-005", "TST-002", "TST-003"
 groups = ["context_projection", "session_persistence"]
 environment = "public_clean_workspace"
 timeout_seconds = 120
-command = ["python", "-m", "pytest", "-q", "tests/semantic/test_context_history_contract.py"]
-observes = ["retry_history_windows", "messages_full_snapshot", "message_embeddings_full_snapshot", "metadata_snapshot", "sqlite_write_set", "restart_sequence"]
+command = ["python", "-m", "pytest", "-q", "tests/semantic/test_context_history_contract.py", "tests/test_session_compaction_runtime.py"]
+observes = ["retry_history_windows", "messages_full_snapshot", "message_embeddings_full_snapshot", "metadata_snapshot", "sqlite_write_set", "restart_sequence", "receipt_v2_v3_recovery", "generation_zero_window", "markdown_task_lifecycle"]
 mutants = ["historical_session_delete"]
 
 [scenarios.mobile_realtime_contract]
@@ -187,7 +217,7 @@ command = [
   "tests/test_app_server.py",
   "tests/test_channel_host.py",
 ]
-observes = ["protocol_frames", "session_identity", "durable_delivery", "resume_cursor", "attachment_finality", "plugin_ui_snapshot"]
+observes = ["protocol_frames", "session_identity", "durable_delivery", "resume_cursor", "attachment_finality", "plugin_ui_snapshot", "master_key_write_set", "master_key_file", "keyset_manifest", "restart_identity"]
 mutants = ["unicode_utf16_command_length"]
 
 [scenarios.mobile_webui_contract]
@@ -304,8 +334,8 @@ command = [
   "tests/test_plugin_hot_reload.py::test_uninstall_waits_for_generation_retired_by_hot_reload",
   "tests/control/test_protocol.py::test_plugin_uninstall_returns_before_old_turn_drain_completes",
   "tests/control/test_protocol.py::test_plugin_uninstall_survives_deferred_client_disconnect",
-  "tests/test_shell_tool.py::test_shell_env_defers_plugin_uninstall_owned_by_current_turn",
-  "tests/test_runtime_smoke.py::test_plugin_uninstall_defers_only_inside_runtime_turn",
+  "tests/test_shell_tool.py::test_shell_env_exports_plugin_rollout_owner_turn",
+  "tests/test_runtime_smoke.py::test_plugin_uninstall_passes_active_turn_owner",
   "tests/test_plugin_install.py::test_plugin_enable_disable_and_uninstall_preserve_data",
 ]
 observes = [
@@ -360,12 +390,12 @@ command = [
   "tests/test_plugin_hot_reload.py::test_passive_runtime_admission_selects_latest_only_when_explicit",
   "tests/test_plugin_doctor.py::test_plugin_doctor_reads_latest_artifact_candidate",
   "tests/control/test_control_execution.py::test_control_execution_preserves_inbound_metadata",
-  "tests/control/test_exec_cli.py::test_exec_new_defaults_to_read_only_memory_and_selects_runtime",
+  "tests/control/test_exec_cli.py::test_exec_new_rejects_unbound_latest_and_defaults_to_stable",
   "tests/control/test_exec_cli.py::test_control_client_reads_terminal_larger_than_asyncio_default",
-  "tests/control/test_protocol.py::test_thread_runtime_selector_is_strict_and_inherited_by_turn",
+  "tests/control/test_protocol.py::test_thread_runtime_selector_rejects_persisted_latest",
   "tests/control/test_protocol.py::test_router_disconnect_interrupts_only_attached_turn",
   "tests/test_memory_engine_contract.py::test_default_memory_engine_respects_skip_post_memory_event_flag",
-  "tests/test_memory_engine_contract.py::test_markdown_maintenance_respects_skip_post_memory_event_flag",
+  "tests/test_session_compaction_runtime.py::test_excluded_session_commit_advances_ledger_without_markdown",
   "tests/test_support_modules.py::test_message_push_passive_role_does_not_wait_for_passive_lane",
   "tests/test_support_modules.py::test_message_push_passive_role_serializes_actual_same_chat_send",
   "tests/test_support_modules.py::test_context_builder_debug_projection_is_turn_local",

@@ -14,6 +14,7 @@ from agent.tools.base import ToolExecutionContext
 from .bridge import (
     AppleNotesExecutionBridge,
     NotesBridgeError,
+    NotesMutationReceipt,
     NotesOperationRejected,
     NotesOutcomeUnknown,
     NotesUnitFailed,
@@ -712,7 +713,7 @@ def _now() -> datetime:
 async def _find_existing_marker(
     bridge: AppleNotesExecutionBridge,
     operation_id: str,
-):
+) -> NotesMutationReceipt | None:
     """先查询 Roxy 标识；旧笔记只在未命中时走 Akashic 兼容标识。"""
 
     for prefix in ("ROXY_EXPORT", "AKASHIC_EXPORT"):

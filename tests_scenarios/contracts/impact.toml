@@ -19,7 +19,6 @@ executable_suffixes = [
 executable_names = ["Dockerfile"]
 always_full_paths = [
   ".github/workflows/**",
-  "AGENTS.md",
   "docker/debug/gate.py",
   "docker/debug/docker-compose.change-gate.yml",
   "docs/projectneed.md",
@@ -245,7 +244,7 @@ scenarios = ["contract_catalog", "plugin_uninstall_drain_finality"]
 
 [groups.deployment]
 priority = "p0"
-requirements = ["RUN-003", "RUN-004", "RUN-009", "CAP-002", "CAP-003", "PLG-013", "ERR-001", "TST-001", "TST-002", "TST-003", "TST-005", "TST-006"]
+requirements = ["RUN-003", "RUN-004", "RUN-016", "CAP-002", "CAP-003", "PLG-013", "ERR-001", "TST-001", "TST-002", "TST-003", "TST-005", "TST-006"]
 paths = [
   ".github/workflows/ci.yml",
   ".github/workflows/deploy-wsl.yml",
@@ -278,6 +277,7 @@ paths = [
   "agent/config_models.py",
   "agent/context.py",
   "agent/core/**",
+  "agent/identity.py",
   "agent/llm_json.py",
   "agent/model_runtime/**",
   "agent/persona.py",
@@ -300,7 +300,7 @@ paths = [
   "infra/__init__.py",
   "main.py",
   "prompts/**",
-  "tests/test_query_compaction.py",
+  "tests/test_context_compaction_contract.py",
   "tests/test_shell_tool.py",
   "tests/test_unified_exec.py",
   "utils/**",
@@ -322,6 +322,26 @@ paths = [
 ]
 depends_on = ["events", "session_persistence"]
 scenarios = ["shell_privileged_cleanup_contract", "shell_turn_finality_contract"]
+
+[groups.host_execution]
+priority = "p0"
+requirements = ["RUN-013", "RUN-014", "RUN-015", "WSP-005", "SH-001", "SH-002", "SH-003", "ERR-001", "TST-001", "TST-003", "TST-005", "TST-006"]
+paths = [
+  "agent/host_bridge/**",
+  "agent/runtime_identity.py",
+  "docker/host-runtime/**",
+  "mise.toml",
+  "scripts/akashic-release",
+  "scripts/akashic_release/**",
+  "scripts/build_host_runtime_release.py",
+  "scripts/install-akashic.sh",
+  "scripts/prepare_container_rehearsal.py",
+  "scripts/prepare_runtime_checkout.py",
+  "scripts/verify_host_runtime_deployment.py",
+  "tests/test_akashic_release_installer.py",
+]
+depends_on = ["runtime", "shell_finality", "session_persistence"]
+scenarios = ["host_bridge_boot_fencing_contract", "shell_privileged_cleanup_contract"]
 
 [groups.migrations]
 priority = "p0"
@@ -447,6 +467,7 @@ paths = [
   "config.example.toml",
   "docker/**",
   "docs/templates/**",
+  "mise.toml",
   "package.json",
   "pytest.ini",
   "pyproject.toml",

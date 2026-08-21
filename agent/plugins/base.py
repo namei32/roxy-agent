@@ -18,6 +18,8 @@ if TYPE_CHECKING:
     from agent.plugins.generation import PluginReadinessContext
 
 
+# 插件生命周期接口：现有插件实现这些回调和贡献方法。prepare、activate、
+# retire、terminate 的调用时机及贡献方法的含义，在插件迁移前不得改变。
 class Plugin(ABC):
     api_version: int = 2
     name: str | None = None
@@ -124,6 +126,9 @@ class Plugin(ABC):
     @classmethod
     def mobile_ui(cls) -> "MobileUiContribution | None":
         return None
+
+    def mobile_ui_available(self) -> bool:
+        return True
 
     def mobile_ui_query(
         self,

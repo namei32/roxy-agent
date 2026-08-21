@@ -14,6 +14,7 @@ _PROJECT_ROOT = Path(__file__).parents[1]
 def test_setup_main_does_not_import_agent_runtime(tmp_path: Path) -> None:
     """setup-main 应在完整 Agent runtime 依赖加载前完成分发。"""
     missing_config = tmp_path / "missing.toml"
+    workspace = tmp_path / "workspace"
 
     result = subprocess.run(
         [
@@ -23,7 +24,7 @@ def test_setup_main_does_not_import_agent_runtime(tmp_path: Path) -> None:
             "--config",
             str(missing_config),
             "--workspace",
-            str(tmp_path / "workspace"),
+            str(workspace),
         ],
         capture_output=True,
         text=True,
@@ -34,6 +35,7 @@ def test_setup_main_does_not_import_agent_runtime(tmp_path: Path) -> None:
     assert result.returncode != 0
     assert "配置文件不存在" in output
     assert "apscheduler" not in output
+    assert not workspace.exists()
 
 
 def test_init_records_yoyo_origin_in_workspace_ledger(tmp_path: Path) -> None:
@@ -69,6 +71,18 @@ def test_init_records_yoyo_origin_in_workspace_ledger(tmp_path: Path) -> None:
     assert applied == [
         ("20260802_01_yoyo_origin",),
         ("20260805_01_akasha_sparse_index_v9",),
+        ("20260807_01_model_registry_database",),
+        ("20260807_01_session_context_compaction_ledger",),
+        ("20260807_02_embedding_model_registry",),
+        ("20260808_01_restore_migrated_reasoning_efforts",),
+        ("20260808_01_session_mutation_audits",),
+        ("20260808_02_correct_opencode_go_variants",),
+        ("20260808_02_session_compaction_prepares",),
+        ("20260808_04_session_compaction_source_plan_digest",),
+        ("20260808_05_activate_session_compaction_cursor",),
+        ("20260808_03_remove_compaction_trigger",),
+        ("20260808_06_retire_legacy_context_state",),
+        ("20260817_01_akasha_sparse_index_v10",),
     ]
     assert not config_path.with_name("config.toml.migration-cursor").exists()
 

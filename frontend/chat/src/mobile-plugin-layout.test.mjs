@@ -23,7 +23,23 @@ const dashboardStyles = await readFile(
   "utf8",
 );
 const desktopSource = await readFile(
-  new URL("./main.tsx", import.meta.url),
+  new URL("./desktop-chat-view.tsx", import.meta.url),
+  "utf8",
+);
+const desktopAppSource = await readFile(
+  new URL("./desktop-chat-app.tsx", import.meta.url),
+  "utf8",
+);
+const desktopControllerSource = await readFile(
+  new URL("./use-desktop-chat-controller.ts", import.meta.url),
+  "utf8",
+);
+const desktopConversationSource = await readFile(
+  new URL("./desktop-conversation.tsx", import.meta.url),
+  "utf8",
+);
+const desktopSidebarSource = await readFile(
+  new URL("./desktop-sidebar.tsx", import.meta.url),
   "utf8",
 );
 const mobileSource = await readFile(
@@ -67,13 +83,14 @@ test("process plugin slots align with thinking and tool content", () => {
   assert.doesNotMatch(platformStyles, /\.mobile-plugin-slot\[data-slot="turn\.before_reasoning"\]/);
   assert.match(
     sharedStyles,
-    /\.process-line\s*\{[\s\S]*?left:\s*var\(--process-content-inset\);[\s\S]*?width:\s*var\(--process-rail-width\);[\s\S]*?transition:\s*height 420ms/,
+    /\.process-line\s*\{[\s\S]*?bottom:\s*0;[\s\S]*?left:\s*var\(--process-content-inset\);[\s\S]*?width:\s*var\(--process-rail-width\);/,
   );
   assert.match(
     sharedStyles,
     /\.process-line::before\s*\{[^}]*top:\s*0;[^}]*bottom:\s*0;[^}]*width:\s*1px;/,
   );
-  assert.match(sharedMessageSource, /new ResizeObserver\(scheduleLineHeight\)/);
+  assert.doesNotMatch(sharedMessageSource, /ResizeObserver/);
+  assert.doesNotMatch(sharedStyles, /transition:\s*height/);
   assert.match(
     sharedStyles,
     /\.process-node\.diamond\s*\{[^}]*width:\s*8px;[^}]*height:\s*8px;/,
@@ -96,12 +113,13 @@ test("streaming thinking uses the shared Streamdown renderer", () => {
 });
 
 test("desktop shares plugin shell slots without exposing mobile dashboards", () => {
-  assert.match(desktopSource, /import \{ loadWebPluginCatalog, MobilePluginSlot \} from "\.\/mobile-plugin-runtime";/);
-  assert.match(desktopSource, /<MobilePluginSlot name="drawer\.panel"/);
-  assert.match(desktopSource, /name="turn\.before_reasoning"/);
-  assert.match(desktopSource, /name="turn\.before_tool"/);
-  assert.match(desktopSource, /name="turn\.after_answer"/);
-  assert.doesNotMatch(desktopSource, /MobilePluginDashboard|useMobilePluginDashboards/);
+  assert.match(desktopControllerSource, /import \{ loadWebPluginCatalog \} from "\.\/mobile-plugin-runtime";/);
+  assert.match(desktopConversationSource, /import \{ MobilePluginSlot \} from "\.\/mobile-plugin-runtime";/);
+  assert.match(desktopConversationSource, /name="turn\.before_reasoning"/);
+  assert.match(desktopConversationSource, /name="turn\.before_tool"/);
+  assert.match(desktopConversationSource, /name="turn\.after_answer"/);
+  assert.doesNotMatch(desktopControllerSource, /MobilePluginDashboard|useMobilePluginDashboards/);
+  assert.doesNotMatch(desktopConversationSource, /MobilePluginDashboard|useMobilePluginDashboards/);
   assert.match(pluginRuntimeSource, /fetch\("\/api\/chat\/plugin-ui\/catalog"/);
   assert.match(pluginRuntimeSource, /fetch\("\/api\/chat\/plugin-ui\/query"/);
   assert.match(pluginRuntimeSource, /slot === "dashboard\.main"/);
@@ -115,11 +133,11 @@ test("desktop and mobile keep one shared conversation owner", () => {
   assert.doesNotMatch(platformStyles, /\.tool-step-disclosure\s*\{/);
   assert.doesNotMatch(platformStyles, /\.agent-content (?:ul|ol)\s*\{/);
   assert.doesNotMatch(desktopStyles, /\.tool-step-disclosure\s*\{/);
-  assert.match(desktopSource, /import "\.\/message-view\.css";/);
+  assert.match(desktopAppSource, /import "\.\/message-view\.css";/);
   assert.match(mobileSource, /import "\.\/message-view\.css";/);
-  assert.match(desktopSource, /<ConversationNavigation/);
+  assert.match(desktopSidebarSource, /<ConversationNavigation/);
   assert.match(mobileSource, /<ConversationNavigation/);
-  assert.match(desktopSource, /<SharedMessageActions/);
+  assert.match(desktopConversationSource, /<SharedMessageActions/);
   assert.match(mobileSource, /<SharedMessageActions/);
   assert.doesNotMatch(mobileSource, /mobile-message-actions/);
   assert.doesNotMatch(mobileSource, /SwipeToReply|useMotionValue/);
@@ -137,7 +155,7 @@ test("shared navigation keeps the compact mobile drawer language", () => {
   );
   assert.match(
     navigationStyles,
-    /\.conversation-navigation__action\.primary\s*\{[^}]*width:\s*fit-content;[^}]*border-radius:\s*24px;/,
+    /\.conversation-navigation__action\.primary\s*\{[^}]*width:\s*fit-content;[^}]*border-radius:\s*var\(--md-sys-shape-corner-full\);/,
   );
   assert.match(
     navigationStyles,
@@ -243,11 +261,12 @@ test("full native snapshots commit without waiting for another animation frame",
   assert.doesNotMatch(receiver[0], /requestAnimationFrame|startTransition/);
 });
 
-test("stream patches publish to the affected row without a starvable React transition", () => {
+test("stream patches publish by frame while terminal remains immediate", () => {
   const receiver = mobileSource.match(/receiveStreamPatch\(next\) \{[\s\S]*?\n[ ]{6}\},\n[ ]{6}receiveStatePatch/);
   assert.ok(receiver, "mobile stream receiver must remain discoverable");
   assert.match(receiver[0], /streamSnapshotRef\.current = nextSnapshot/);
-  assert.match(receiver[0], /streamStore\.publish\(/);
+  assert.match(receiver[0], /nextMessage\.streaming\) streamStore\.publishFrame\(/);
+  assert.match(receiver[0], /else streamStore\.publishImmediate\(/);
   assert.doesNotMatch(receiver[0], /requestAnimationFrame/);
   assert.doesNotMatch(receiver[0], /startTransition/);
 });

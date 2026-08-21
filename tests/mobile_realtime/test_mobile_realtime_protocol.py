@@ -18,7 +18,6 @@ from infra.mobile_realtime.protocol import (
     ProtocolDecodeError,
     ReplyFrame,
     ThinkingDeltaEvent,
-    TurnSnapshotEvent,
     frame_to_json,
     parse_frame,
 )
@@ -34,7 +33,6 @@ def test_golden_frames_round_trip() -> None:
     assert isinstance(parsed[0], MessageSendCommand)
     assert isinstance(parsed[1], ReplyFrame)
     assert isinstance(parsed[4], AuthAcceptedControl)
-    assert isinstance(parsed[6], TurnSnapshotEvent)
     assert [json.loads(frame_to_json(frame)) for frame in parsed] == frames
 
 
@@ -128,6 +126,22 @@ def test_message_send_accepts_real_client_creation_time() -> None:
 
     assert isinstance(parsed, MessageSendCommand)
     assert parsed.payload.client_created_at == "2026-07-16T12:34:56+08:00"
+
+
+def test_message_send_validates_model_selection() -> None:
+    frame = _golden_frame(0)
+    frame["payload"]["model_runtime_id"] = "  model-a  "
+    frame["payload"]["model_reasoning_effort"] = " high "
+
+    parsed = parse_frame(json.dumps(frame))
+
+    assert isinstance(parsed, MessageSendCommand)
+    assert parsed.payload.model_runtime_id == "model-a"
+    assert parsed.payload.model_reasoning_effort == "high"
+
+    frame["payload"]["model_runtime_id"] = ""
+    with pytest.raises(ValidationError, match="model_reasoning_effort"):
+        parse_frame(json.dumps(frame))
 
 
 @pytest.mark.parametrize(
@@ -308,10 +322,12 @@ def test_delta_process_block_fields_must_appear_together() -> None:
         "delta": "思考中",
         "block_id": "thinking:turn-1:0",
         "ordinal": 0,
+        "control_turn_id": "turn:logical-1",
     }
     parsed = parse_frame(json.dumps(frame))
     assert isinstance(parsed, ThinkingDeltaEvent)
     assert parsed.payload.block_id == "thinking:turn-1:0"
+    assert parsed.payload.control_turn_id == "turn:logical-1"
 
     frame["payload"].pop("ordinal")
     with pytest.raises(ValidationError, match="必须同时出现"):

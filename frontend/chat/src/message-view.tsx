@@ -12,7 +12,7 @@ import {
   Message,
   MessageContent,
 } from "@/components/ai-elements/message";
-import { messageNeedsMarkdown } from "@/message-rendering-policy";
+import { detectMessageRenderingFeatures, messageNeedsMarkdown } from "@/message-rendering-policy";
 import {
   Reasoning,
   ReasoningTrigger,
@@ -44,15 +44,37 @@ import type {
   MessageAttachment,
   ThinkingBlock,
   ToolBlock,
-} from "./main";
+} from "./chat-message";
+import { StaticMessageResponse } from "./static-message-response";
 
 const LazyMessageResponse = lazy(() =>
   import("@/components/ai-elements/message-response").then(({ MessageResponse }) => ({ default: MessageResponse })),
 );
 
-const MessageBody = memo(function MessageBody({ content, streaming }: { content: string; streaming: boolean }) {
+const MessageBody = memo(function MessageBody({
+  content,
+  streaming,
+  deferRichContent,
+  onError,
+}: {
+  content: string;
+  streaming: boolean;
+  deferRichContent: boolean;
+  onError?: (error: unknown) => void;
+}) {
   if (!messageNeedsMarkdown(content)) {
     return <p className="plain-message-response">{content}</p>;
+  }
+  if (deferRichContent) {
+    const features = detectMessageRenderingFeatures(content);
+    if (features.math || features.mermaid) {
+      return (
+        <Suspense fallback={<p className="plain-message-response">{content}</p>}>
+          <LazyMessageResponse isAnimating={false}>{content}</LazyMessageResponse>
+        </Suspense>
+      );
+    }
+    return <StaticMessageResponse onError={onError}>{content}</StaticMessageResponse>;
   }
   return (
     <Suspense fallback={<p className="plain-message-response">{content}</p>}>
@@ -69,6 +91,8 @@ export function ChatMessageView({
   beforeProcessBlock,
   answerEndContent,
   onCopyToolDetail,
+  onError,
+  deferRichContent = false,
 }: {
   message: ChatMessage;
   leadingContent?: ReactNode;
@@ -77,6 +101,8 @@ export function ChatMessageView({
   beforeProcessBlock?: (block: AgentBlock, index: number) => ReactNode;
   answerEndContent?: ReactNode;
   onCopyToolDetail?: (text: string) => void;
+  onError?: (error: unknown) => void;
+  deferRichContent?: boolean;
 }) {
   const attachments = attachmentContent !== undefined
     ? attachmentContent
@@ -90,7 +116,12 @@ export function ChatMessageView({
           {leadingContent}
           {attachments}
           {message.content ? (
-            <MessageBody content={message.content} streaming={message.streaming === true} />
+            <MessageBody
+              content={message.content}
+              streaming={message.streaming === true}
+              deferRichContent={deferRichContent}
+              onError={onError}
+            />
           ) : null}
         </MessageContent>
       </Message>
@@ -114,7 +145,12 @@ export function ChatMessageView({
         ) : null}
         {attachments}
         {message.content ? (
-          <MessageBody content={message.content} streaming={message.streaming === true} />
+          <MessageBody
+            content={message.content}
+            streaming={message.streaming === true}
+            deferRichContent={deferRichContent}
+            onError={onError}
+          />
         ) : null}
         {answerEndContent}
       </MessageContent>
@@ -226,51 +262,31 @@ const ProcessTrace = memo(function ProcessTrace({
     const flow = processFlowRef.current;
     if (!items || !line || !flow) return;
 
-    let animationFrame = 0;
-    const syncLineHeight = () => {
-      animationFrame = 0;
-      const firstNode = items.querySelector<HTMLElement>(".process-item .process-node");
-      const firstItem = firstNode?.closest<HTMLElement>(".process-item");
-      if (!firstNode || !firstItem) return;
+    // 1. 只在节点结构变化时定位起点；正文增长由 CSS bottom 自动延伸。
+    const firstNode = items.querySelector<HTMLElement>(".process-item .process-node");
+    const firstItem = firstNode?.closest<HTMLElement>(".process-item");
+    if (!firstNode || !firstItem) return;
+    const lineTop = items.offsetTop + firstItem.offsetTop + firstNode.offsetTop + firstNode.offsetHeight / 2;
+    line.style.top = `${lineTop}px`;
 
-      // 1. 从首个节点中心起笔，让轨迹高度追随当前文字内容。
-      const lineTop = items.offsetTop + firstItem.offsetTop + firstNode.offsetTop + firstNode.offsetHeight / 2;
-      const nextHeight = Math.max(0, items.offsetTop + items.offsetHeight - lineTop);
-      line.style.top = `${lineTop}px`;
-      line.style.height = `${nextHeight}px`;
-
-      // 2. 流光只覆盖上一个节点到当前活动内容末端。
-      const processItems = Array.from(items.querySelectorAll<HTMLElement>(".process-item"));
-      const activeItemIndex = processItems.findIndex((item) => item.classList.contains("active"));
-      if (activeItemIndex < 0) {
-        flow.dataset.active = "false";
-        flow.style.height = "0px";
-        return;
-      }
-      const activeItem = processItems[activeItemIndex];
-      const frontierItem = processItems[Math.max(0, activeItemIndex - 1)];
-      const frontierNode = frontierItem.querySelector<HTMLElement>(".process-node");
-      if (!frontierNode) return;
-      const flowTop = items.offsetTop + frontierItem.offsetTop + frontierNode.offsetTop + frontierNode.offsetHeight / 2;
-      const flowBottom = items.offsetTop + activeItem.offsetTop + activeItem.offsetHeight;
-      flow.style.top = `${flowTop}px`;
-      flow.style.height = `${Math.max(0, flowBottom - flowTop)}px`;
-      flow.dataset.active = "true";
-    };
-    const scheduleLineHeight = () => {
-      if (animationFrame) window.cancelAnimationFrame(animationFrame);
-      animationFrame = window.requestAnimationFrame(syncLineHeight);
-    };
-    // 3. 合并流式文字和新节点引起的连续尺寸变化。
-    const observer = new ResizeObserver(scheduleLineHeight);
-    observer.observe(items);
-    scheduleLineHeight();
-
-    return () => {
-      observer.disconnect();
-      if (animationFrame) window.cancelAnimationFrame(animationFrame);
-    };
-  }, [activeBlockIndex]);
+    // 2. 活动流光从上一个节点延伸到当前活动内容末端，不监听逐字尺寸变化。
+    const processItems = Array.from(items.querySelectorAll<HTMLElement>(".process-item"));
+    const activeItemIndex = processItems.findIndex((item) => item.classList.contains("active"));
+    if (activeItemIndex < 0) {
+      flow.dataset.active = "false";
+      return;
+    }
+    const activeItem = processItems[activeItemIndex];
+    const frontierItem = processItems[Math.max(0, activeItemIndex - 1)];
+    const frontierNode = frontierItem.querySelector<HTMLElement>(".process-node");
+    if (!frontierNode) return;
+    const flowTop = items.offsetTop + frontierItem.offsetTop + frontierNode.offsetTop + frontierNode.offsetHeight / 2;
+    const flowBottom = items.offsetTop + activeItem.offsetTop + activeItem.offsetHeight;
+    const contentHeight = items.parentElement?.offsetHeight ?? items.offsetTop + items.offsetHeight;
+    flow.style.top = `${flowTop}px`;
+    flow.style.bottom = `${Math.max(0, contentHeight - flowBottom)}px`;
+    flow.dataset.active = "true";
+  }, [activeBlockIndex, blocks.length]);
 
   return (
     <Reasoning

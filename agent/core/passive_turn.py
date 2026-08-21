@@ -5,23 +5,49 @@ import hashlib
 import json
 import logging
 import time
+import uuid
 from abc import ABC, abstractmethod
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal, cast
 
 import agent.core.passive_support as support
-from agent.control.context import current_turn_id
-from agent.control.ports import TurnInputSource, TurnUserInput
-from agent.model_runtime.query_compaction import QueryCompactor
+from agent.control.context import running_turn_id
+from agent.identity import roxy_env
+from core.common.diagnostic_log import (
+    diagnostic_context,
+    diagnostic_line,
+    turn_milestone,
+)
+from core.error_context import (
+    current_client_message_id,
+    current_provider_attempt,
+    current_provider_call_id,
+    current_provider_operation,
+    current_session_key,
+)
+from agent.control.ports import InputLock, TurnUserInput
+from agent.control.replay_format import split_replay_batches
+from agent.config_models import ContextCompactionConfig
+from agent.model_runtime.context_compaction import (
+    ContextCompactionError,
+    ContextCompactor,
+    ContextPayloadSegments,
+    PreparedQueryContext,
+    compaction_scope_id,
+    hard_input_limit,
+    window_initial_context_units,
+)
+from session.compaction_runtime import CompactionProjection, SessionCompactionPort
+from session.store import CompactionHead
 from agent.core.runtime_support import ToolDiscoveryState
 from agent.core.types import (
     ContextBundle,
-    LLMToolCall,
     ReasonerResult,
 )
-from agent.prompting import DEFAULT_CONTEXT_TRIM_PLANS, is_context_frame
-from agent.model_runtime.types import ModelUsage
+from agent.prompting import is_context_frame
+from agent.model_runtime.types import LLMResponse, ModelUsage
 from agent.model_runtime.usage import aggregate_usage
 from agent.provider import ContentSafetyError, ContextLengthError
 from agent.retrieval.protocol import RetrievalRequest, RetrievalResult
@@ -45,6 +71,7 @@ from bus.events import (
 from bus.events_lifecycle import (
     ToolCallCompleted,
     ToolCallStarted,
+    TurnOutputCompleted,
 )
 from agent.lifecycle.phase import Phase
 from agent.lifecycle.phases.after_reasoning import (
@@ -63,7 +90,6 @@ from agent.lifecycle.phases.before_step import (
 )
 from agent.lifecycle.phases.before_turn import (
     BeforeTurnFrame,
-    MemoryConsolidator,
     default_before_turn_modules,
 )
 from agent.lifecycle.phases.prompt_render import (
@@ -72,7 +98,6 @@ from agent.lifecycle.phases.prompt_render import (
 )
 from agent.lifecycle.types import (
     AfterReasoningInput,
-    AfterReasoningResult,
     AfterStepCtx,
     AfterToolResultCtx,
     BeforeReasoningCtx,
@@ -96,10 +121,25 @@ if TYPE_CHECKING:
     from agent.retrieval.protocol import MemoryRetrievalPipeline
     from agent.tool_hooks.base import ToolHook
     from agent.tools.registry import ToolRegistry
-from core.common.diagnostic_log import diagnostic_context, diagnostic_line
 
 # 1. 统一通过模块 logger 记录关键分支，供排障和回归测试抓取。
 logger = logging.getLogger(__name__)
+
+
+def _host_runtime_execution_hint() -> str:
+    if roxy_env("EXECUTION_MODE", "local") != "host-bridge":
+        return ""
+    commit = roxy_env("RUNTIME_COMMIT")
+    checkout = roxy_env("RUNTIME_CHECKOUT")
+    if not commit or not checkout:
+        raise RuntimeError("host-bridge 模式缺少运行时 commit/checkout")
+    return (
+        "【容器运行时】当前 Core commit="
+        f"{commit}，宿主只读参考源码={checkout}。Shell 在宿主执行；"
+        "调用当前运行时控制命令必须使用 roxy-runtime（或 $ROXY_RUNTIME_CLI）；"
+        "旧 akashic-runtime/$AKASHIC_RUNTIME_CLI 仅作兼容别名。"
+        "不要用 host 的 python 直接运行 checkout/main.py。调试修复请从该 commit 新建 worktree。"
+    )
 
 
 def _persistence_from_metadata(
@@ -114,7 +154,7 @@ def _persistence_from_metadata(
 # 被动链路核心入口，负责串起 lifecycle 模块链与 reasoner。
 #
 # ┌─ 输入
-# │  └─ AgentCore.process
+# │  └─ AgentLoop._react
 # │     └─ PassiveTurnPipeline.run
 # │        ├─ BeforeTurn
 # │        │  └─ 获取 session + ContextStore.prepare + EventBus.emit
@@ -135,7 +175,6 @@ def _persistence_from_metadata(
 # └─ 完成
 
 # ── 被动 turn 内联常量 ──────────────────────────────────────────
-_SAFETY_RETRY_RATIOS = (1.0, 0.5, 0.0)
 _SUMMARY_MAX_TOKENS = 512
 _INCOMPLETE_SUMMARY_PROMPT = """当前任务需要先暂停继续调用工具，请直接输出给用户看的中文阶段性回复。
 必须基于已有上下文，不要编造结果。
@@ -148,9 +187,62 @@ _INCOMPLETE_SUMMARY_PROMPT = """当前任务需要先暂停继续调用工具，
 禁止输出"已达到最大迭代次数"这类模板句；不要输出 JSON。"""
 
 
+@dataclass(frozen=True)
+class _ProviderCallResult:
+    response: LLMResponse
+    prepared: PreparedQueryContext | None
+    compaction_usages: tuple[ModelUsage, ...] = ()
+
+
+@dataclass(frozen=True)
+class _ProviderAttemptIdentity:
+    """一次逻辑 provider 调用 + 其中某次 attempt 的统一身份（1-based）。
+
+    通过 contextvar 共享给 compaction gate、provider attempt 里程碑和
+    first-delta 观测，保证同 call/attempt 的所有事件可以互相 join。
+    """
+
+    call_ordinal: int
+    provider_attempt: int = 0
+
+
+_provider_call_identity: ContextVar[_ProviderAttemptIdentity | None] = ContextVar(
+    "provider_call_identity",
+    default=None,
+)
+
+
+@dataclass
+class _TurnCompactionState:
+    runtime: SessionCompactionPort
+    session: "SessionLike"
+    compactor: ContextCompactor
+    head: CompactionHead
+    scope_channel: str
+    scope_chat_id: str
+    # 本 turn 内 provider 调用序号与里程碑状态（随 turn state 自然释放）；
+    # call_started_at 是当前 provider attempt 的启动时刻（attempt 2 会重置）。
+    provider_call_ordinal: int = 0
+    call_started_at: float = 0.0
+    first_any_logged: bool = False
+    first_thinking_logged: bool = False
+    first_answer_logged: bool = False
+
+
 def _turn_log_id(key: str, msg: InboundMessage) -> str:
+    persisted = msg.metadata.get("turnId")
+    if isinstance(persisted, str) and persisted:
+        return persisted
     raw = f"{key}|{msg.timestamp.isoformat()}|{msg.content[:80]}"
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:8]
+    return f"local-{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:16]}"
+
+
+def _phase_error_reason(phase: str) -> str:
+    return {
+        "before_turn": "before_turn_error",
+        "before_reasoning": "before_reasoning_error",
+        "reasoner": "provider_error",
+    }[phase]
 
 
 def _is_tool_loop_guard_denial(exec_result: ToolExecutionResult) -> bool:
@@ -182,7 +274,7 @@ class _NoopOutboundPort:
 
 
 @dataclass
-class AgentCoreDeps:
+class PassiveTurnDeps:
     session: "SessionServices"
     context_store: "ContextStore"
     context: "ContextBuilder"
@@ -190,8 +282,6 @@ class AgentCoreDeps:
     reasoner: "Reasoner"
     event_bus: "EventBus | None" = None
     outbound_port: "OutboundPort | None" = None
-    history_window: int = 500
-    memory_consolidator: MemoryConsolidator | None = None
     before_turn_plugin_modules: list[object] | None = None
     before_reasoning_plugin_modules: list[object] | None = None
     before_step_plugin_modules: list[object] | None = None
@@ -210,65 +300,10 @@ class _PassivePhaseBundle:
     ]
     after_reasoning: Phase[
         AfterReasoningInput,
-        AfterReasoningResult,
+        TurnSnapshot,
         AfterReasoningFrame,
     ]
     after_turn: Phase[TurnSnapshot, OutboundMessage, AfterTurnFrame]
-
-
-class AgentCore:
-    """
-    ┌──────────────────────────────────────┐
-    │ AgentCore                            │
-    ├──────────────────────────────────────┤
-    │ 1. 持有 PassiveTurnPipeline          │
-    │ 2. 委托 pipeline 处理被动消息        │
-    └──────────────────────────────────────┘
-    """
-
-    def __init__(self, deps: AgentCoreDeps) -> None:
-        self._passive_pipeline = PassiveTurnPipeline(deps)
-
-    @property
-    def pipeline(self) -> "PassiveTurnPipeline":
-        return self._passive_pipeline
-
-    def add_before_turn_plugin_modules(
-        self,
-        modules: list[object],
-    ) -> None:
-        self._passive_pipeline.add_before_turn_plugin_modules(modules)
-
-    def add_before_reasoning_plugin_modules(
-        self,
-        modules: list[object],
-    ) -> None:
-        self._passive_pipeline.add_before_reasoning_plugin_modules(modules)
-
-    def add_after_reasoning_plugin_modules(
-        self,
-        modules: list[object],
-    ) -> None:
-        self._passive_pipeline.add_after_reasoning_plugin_modules(modules)
-
-    def add_after_turn_plugin_modules(
-        self,
-        modules: list[object],
-    ) -> None:
-        self._passive_pipeline.add_after_turn_plugin_modules(modules)
-
-    async def process(
-        self,
-        msg: InboundMessage,
-        key: str,
-        *,
-        dispatch_outbound: bool = True,
-    ) -> OutboundMessage:
-        return await self._passive_pipeline.run(
-            msg,
-            key,
-            dispatch_outbound=dispatch_outbound,
-        )
 
 
 class PassiveTurnPipeline:
@@ -285,7 +320,7 @@ class PassiveTurnPipeline:
     └──────────────────────────────────────┘
     """
 
-    def __init__(self, deps: AgentCoreDeps) -> None:
+    def __init__(self, deps: PassiveTurnDeps) -> None:
         self._session = deps.session
         self._context_store = deps.context_store
         self._context = deps.context
@@ -300,8 +335,6 @@ class PassiveTurnPipeline:
                 list(deps.after_step_plugin_modules)
             )
         self._outbound_port = deps.outbound_port or _NoopOutboundPort()
-        self._history_window = deps.history_window
-        self._memory_consolidator = deps.memory_consolidator
         self._before_turn_plugin_modules = list(deps.before_turn_plugin_modules or [])
         self._before_reasoning_plugin_modules = list(
             deps.before_reasoning_plugin_modules or []
@@ -362,8 +395,6 @@ class PassiveTurnPipeline:
                 self._bus,
                 self._session.session_manager,
                 self._context_store,
-                keep_count=self._history_window,
-                consolidator=self._memory_consolidator,
                 plugin_modules=cast(
                     "list[Any]",
                     (
@@ -401,7 +432,7 @@ class PassiveTurnPipeline:
     def _build_after_reasoning_phase(
         self,
         plugin_modules: list[object] | None = None,
-    ) -> Phase[AfterReasoningInput, AfterReasoningResult, AfterReasoningFrame]:
+    ) -> Phase[AfterReasoningInput, TurnSnapshot, AfterReasoningFrame]:
         return Phase(
             default_after_reasoning_modules(
                 self._bus,
@@ -427,7 +458,6 @@ class PassiveTurnPipeline:
                 self._bus,
                 self._outbound_port,
                 self._context,
-                self._history_window,
                 plugin_modules=cast(
                     "list[Any]",
                     (
@@ -476,6 +506,8 @@ class PassiveTurnPipeline:
         dispatch_outbound: bool = True,
     ) -> OutboundMessage:
         started = time.perf_counter()
+        phase_started = started
+        active_phase = "before_turn"
         turn_id = _turn_log_id(key, msg)
         state = TurnState(
             msg=msg,
@@ -513,7 +545,9 @@ class PassiveTurnPipeline:
                             turn=turn_id,
                             action="abort",
                             reason="before_turn_abort",
-                            duration_ms=int((time.perf_counter() - started) * 1000),
+                            duration_ms=int(
+                                (time.perf_counter() - phase_started) * 1000
+                            ),
                         )
                     )
                     return await self._control_outbound(
@@ -534,11 +568,13 @@ class PassiveTurnPipeline:
                         session=key,
                         turn=turn_id,
                         action="continue",
-                        duration_ms=int((time.perf_counter() - started) * 1000),
+                        duration_ms=int((time.perf_counter() - phase_started) * 1000),
                     )
                 )
 
                 # Phase 2: BeforeReasoning 模块链（工具上下文、BeforeReasoning 事件、prompt warmup）。
+                active_phase = "before_reasoning"
+                phase_started = time.perf_counter()
                 with diagnostic_context(phase="before_reasoning"):
                     before_reasoning = (
                         await self._runtime_phases().before_reasoning.run(
@@ -556,7 +592,9 @@ class PassiveTurnPipeline:
                             turn=turn_id,
                             action="abort",
                             reason="before_reasoning_abort",
-                            duration_ms=int((time.perf_counter() - started) * 1000),
+                            duration_ms=int(
+                                (time.perf_counter() - phase_started) * 1000
+                            ),
                         )
                     )
                     return await self._control_outbound(
@@ -568,6 +606,14 @@ class PassiveTurnPipeline:
                             turn_disposition=TurnDisposition.SHORT_CIRCUITED,
                         ),
                     )
+                if msg.metadata.get("_pluginCandidateValidation") is True:
+                    state.extra_metadata["_activeSkillNames"] = list(
+                        before_reasoning.skill_names
+                    )
+                reasoning_hints = list(before_reasoning.extra_hints)
+                runtime_hint = _host_runtime_execution_hint()
+                if runtime_hint:
+                    reasoning_hints.append(runtime_hint)
                 logger.info(
                     diagnostic_line(
                         "PassiveTurnPipeline.run",
@@ -577,12 +623,14 @@ class PassiveTurnPipeline:
                         session=key,
                         turn=turn_id,
                         action="continue",
-                        counts=f"skills:{len(before_reasoning.skill_names)},hints:{len(before_reasoning.extra_hints)}",
-                        duration_ms=int((time.perf_counter() - started) * 1000),
+                        counts=f"skills:{len(before_reasoning.skill_names)},hints:{len(reasoning_hints)}",
+                        duration_ms=int((time.perf_counter() - phase_started) * 1000),
                     )
                 )
 
                 # Phase 3-4: Reasoning（BeforeStep/AfterStep 模块链在 Reasoner 内部执行）。
+                active_phase = "reasoner"
+                phase_started = time.perf_counter()
                 session = state.session
                 if session is None:
                     raise RuntimeError("Passive turn requires TurnState.session")
@@ -593,7 +641,7 @@ class PassiveTurnPipeline:
                         session=session,
                         base_history=None,
                         retrieved_memory_block=before_reasoning.retrieved_memory_block,
-                        extra_hints=list(before_reasoning.extra_hints) or None,
+                        extra_hints=reasoning_hints or None,
                     )
                 state.extra_metadata["turn_duration_ms"] = int(
                     (time.perf_counter() - started) * 1000
@@ -607,7 +655,7 @@ class PassiveTurnPipeline:
                         session=key,
                         turn=turn_id,
                         action="continue",
-                        duration_ms=int((time.perf_counter() - started) * 1000),
+                        duration_ms=int((time.perf_counter() - phase_started) * 1000),
                     )
                 )
             except Exception as exc:
@@ -616,12 +664,12 @@ class PassiveTurnPipeline:
                         "PassiveTurnPipeline.run",
                         event="phase_error",
                         flow="passive",
-                        phase="reasoner",
+                        phase=active_phase,
                         session=key,
                         turn=turn_id,
                         action="fail",
-                        reason="provider_error",
-                        duration_ms=int((time.perf_counter() - started) * 1000),
+                        reason=_phase_error_reason(active_phase),
+                        duration_ms=int((time.perf_counter() - phase_started) * 1000),
                         error_type=type(exc).__name__,
                         note=str(exc)[:160],
                     )
@@ -637,6 +685,7 @@ class PassiveTurnPipeline:
                     ),
                 )
 
+            phase_started = time.perf_counter()
             try:
                 # Phase 5: AfterReasoning 模块链（parse、AfterReasoning 事件、持久化、出站消息）。
                 with diagnostic_context(phase="after_reasoning"):
@@ -654,7 +703,7 @@ class PassiveTurnPipeline:
                         turn=turn_id,
                         action="fail",
                         reason="invalid_output",
-                        duration_ms=int((time.perf_counter() - started) * 1000),
+                        duration_ms=int((time.perf_counter() - phase_started) * 1000),
                         error_type=type(exc).__name__,
                         note=str(exc)[:160],
                     )
@@ -669,19 +718,16 @@ class PassiveTurnPipeline:
                     session=key,
                     turn=turn_id,
                     action="continue",
-                    duration_ms=int((time.perf_counter() - started) * 1000),
+                    duration_ms=int((time.perf_counter() - phase_started) * 1000),
                 )
             )
 
+            phase_started = time.perf_counter()
             try:
                 # Phase 6: AfterTurn 模块链（TurnCommitted fanout、AfterTurn fanout、dispatch）。
                 with diagnostic_context(phase="after_turn"):
                     outbound = await self._runtime_phases().after_turn.run(
-                        TurnSnapshot(
-                            state=state,
-                            outbound=after_reasoning.outbound,
-                            ctx=after_reasoning.ctx,
-                        )
+                        after_reasoning
                     )
             except Exception as exc:
                 logger.exception(
@@ -694,7 +740,7 @@ class PassiveTurnPipeline:
                         turn=turn_id,
                         action="fail",
                         reason="write_error",
-                        duration_ms=int((time.perf_counter() - started) * 1000),
+                        duration_ms=int((time.perf_counter() - phase_started) * 1000),
                         error_type=type(exc).__name__,
                         note=str(exc)[:160],
                     )
@@ -709,7 +755,7 @@ class PassiveTurnPipeline:
                     session=key,
                     turn=turn_id,
                     action="done",
-                    duration_ms=int((time.perf_counter() - started) * 1000),
+                    duration_ms=int((time.perf_counter() - phase_started) * 1000),
                 )
             )
             return outbound
@@ -734,13 +780,7 @@ class PassiveTurnPipeline:
         after_reasoning = await self._runtime_phases().after_reasoning.run(
             AfterReasoningInput(state=state, turn_result=turn_result)
         )
-        return await self._runtime_phases().after_turn.run(
-            TurnSnapshot(
-                state=state,
-                outbound=after_reasoning.outbound,
-                ctx=after_reasoning.ctx,
-            )
-        )
+        return await self._runtime_phases().after_turn.run(after_reasoning)
 
     # abort / 错误路径的统一 dispatch helper，只有 dispatch_outbound=True 时才发送。
     async def _control_outbound(
@@ -758,6 +798,9 @@ class PassiveTurnPipeline:
                     metadata=outbound.metadata,
                     media=outbound.media,
                     session_message_id=outbound.session_message_id,
+                    control_turn_id=(
+                        outbound.control_turn_id or running_turn_id.get() or None
+                    ),
                 )
             )
         return outbound
@@ -792,11 +835,9 @@ class DefaultContextStore(ContextStore):
         *,
         retrieval: "MemoryRetrievalPipeline",
         context: "ContextBuilder",
-        history_window: int = 500,
     ) -> None:
         self._retrieval = retrieval
         self._context = context
-        self._history_window = max(1, int(history_window))
 
     async def prepare(
         self,
@@ -827,7 +868,7 @@ class DefaultContextStore(ContextStore):
                     session_metadata=(
                         session.metadata if isinstance(session.metadata, dict) else {}
                     ),
-                    turn_id=current_turn_id.get(),
+                    turn_id=running_turn_id.get(),
                     timestamp=msg.timestamp,
                 )
             )
@@ -844,8 +885,6 @@ class DefaultContextStore(ContextStore):
             skill_names,
         )
         return ContextBundle(
-            history=support.to_chat_messages(raw_history),
-            memory_blocks=[retrieval_result.block] if retrieval_result.block else [],
             skill_mentions=skill_mentions,
             retrieved_memory_block=retrieval_result.block or "",
             retrieval_trace_raw=(
@@ -853,7 +892,6 @@ class DefaultContextStore(ContextStore):
                 if retrieval_result.trace is not None
                 else None
             ),
-            retrieval_metadata=dict(retrieval_result.metadata or {}),
             history_messages=history_messages,
         )
 
@@ -927,17 +965,19 @@ class DefaultReasoner(Reasoner):
         discovery: ToolDiscoveryState,
         *,
         tool_search_enabled: bool,
-        memory_window: int,
         context: "ContextBuilder | None" = None,
         event_bus: "EventBus | None" = None,
         non_preloadable_names: Callable[[], set[str]] | None = None,
+        compaction_runtime: SessionCompactionPort | None = None,
+        context_compaction: ContextCompactionConfig | None = None,
     ) -> None:
         self._llm = llm
         self._llm_config = llm_config
         self._tools = tools
         self._discovery = discovery
         self._tool_search_enabled = tool_search_enabled
-        self._memory_window = memory_window
+        self._compaction_runtime = compaction_runtime
+        self._context_compaction = context_compaction or ContextCompactionConfig()
         self._context = context
         self._event_bus = event_bus
         self._non_preloadable_names = non_preloadable_names or set
@@ -1112,6 +1152,122 @@ class DefaultReasoner(Reasoner):
             self._snapshot_step_phases = cached
         return cached[1]
 
+    def _build_compaction_state(
+        self,
+        *,
+        session: "SessionLike",
+        projection: CompactionProjection | None,
+        initial_messages: list[dict],
+        history_count: int,
+        attempt_replay: list[dict[str, Any]],
+        prior_tool_groups: int,
+        channel: str,
+        chat_id: str,
+    ) -> _TurnCompactionState:
+        """Bind one call-local projection to the ContextCompactor gate."""
+
+        if self._compaction_runtime is None or projection is None:
+            raise RuntimeError("session compaction projection is required")
+        if not initial_messages:
+            raise RuntimeError("provider payload must contain a system message")
+        full_expected_history = [
+            *projection.segments.prefix,
+            *[
+                message
+                for unit in projection.segments.committed_units
+                for message in unit.messages
+            ],
+        ]
+        if initial_messages[1 : 1 + history_count] != full_expected_history:
+            raise ContextCompactionError(
+                "session projection 与 prompt render history 不一致"
+            )
+        committed_units = projection.segments.committed_units
+        if projection.active is None and projection.head.next_generation == 1:
+            original_units = committed_units
+            committed_units = window_initial_context_units(
+                self._llm.provider,
+                committed_units,
+            )
+            if len(committed_units) != len(original_units):
+                logger.info(
+                    "[上下文窗口] generation-0 首次截断 session=%s units=%d→%d",
+                    session.key,
+                    len(original_units),
+                    len(committed_units),
+                )
+            windowed_history = [
+                *projection.segments.prefix,
+                *[message for unit in committed_units for message in unit.messages],
+            ]
+            initial_messages[1 : 1 + history_count] = windowed_history
+            history_count = len(windowed_history)
+        history_prefix = [
+            initial_messages[0],
+            *projection.segments.prefix,
+        ]
+        replay_start = 1 + history_count
+        replay_end = replay_start + len(attempt_replay)
+        replay_batches: list[list[dict[str, Any]]] = []
+        replay_tail: list[dict[str, Any]] = []
+        if attempt_replay:
+            replay_slice = initial_messages[replay_start:replay_end]
+            if replay_slice != attempt_replay:
+                raise RuntimeError("control attempt replay 未出现在完整 prompt history")
+            replay_batches, replay_tail = split_replay_batches(attempt_replay)
+        if len(replay_batches) != prior_tool_groups:
+            raise RuntimeError(
+                "control attempt replay 与 prior tool chain 数量不一致: "
+                f"replay={len(replay_batches)} tool_chain={prior_tool_groups}"
+            )
+        current_anchor: list[dict[str, Any]] = []
+        current_pending = [*replay_tail, *initial_messages[replay_end:]]
+        interaction_inputs = [
+            message.get("content")
+            for message in [*attempt_replay, *initial_messages[replay_end:]]
+            if message.get("role") == "user"
+            and not (
+                isinstance(message.get("content"), str)
+                and is_context_frame(cast(str, message["content"]))
+            )
+        ]
+        current_query = json.dumps(
+            {"logical_interaction_inputs": interaction_inputs},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        segments = ContextPayloadSegments(
+            prefix=tuple(history_prefix),
+            committed_units=committed_units,
+            current_anchor=tuple(current_anchor),
+            active_batches=tuple(tuple(batch) for batch in replay_batches),
+            pending=tuple(current_pending),
+        )
+        provider = self._llm.provider
+        compactor = ContextCompactor(
+            provider=provider,
+            model=self._llm_config.model,
+            scope_id=compaction_scope_id(session.key, session.created_at),
+            active_compaction=projection.active,
+            current_query=current_query,
+            payload_segments=segments,
+            max_output_tokens=self._llm_config.max_tokens,
+            keep_recent_tokens=self._context_compaction.keep_recent_tokens,
+            ledger_parent_generation=projection.head.parent_generation,
+            next_generation=projection.head.next_generation,
+            fallback_provider=self._llm.fallback_provider,
+            fallback_model=self._llm.fallback_model,
+            chat_call=self._call_compaction_summary,
+        )
+        return _TurnCompactionState(
+            runtime=self._compaction_runtime,
+            session=session,
+            compactor=compactor,
+            head=projection.head,
+            scope_channel=channel,
+            scope_chat_id=chat_id,
+        )
+
     def set_stream_sink_factory(
         self,
         factory: (
@@ -1145,11 +1301,22 @@ class DefaultReasoner(Reasoner):
             "selected_plan": None,
             "trimmed_sections": [],
         }
-        source_history = list(
-            base_history
-            if base_history is not None
-            else get_history_since_consolidated(session, self._memory_window)
+        if self._compaction_runtime is None:
+            raise RuntimeError("session compaction runtime required")
+        projection = await self._compaction_runtime.projection(
+            session,
+            prefix=[],
+            current_anchor=[],
+            pending=[],
         )
+        source_history = [
+            *projection.segments.prefix,
+            *[
+                message
+                for unit in projection.segments.committed_units
+                for message in unit.messages
+            ],
+        ]
         metadata = getattr(msg, "metadata", None) or {}
         raw_attempt_replay = metadata.get("_control_attempt_replay", [])
         if not isinstance(raw_attempt_replay, list) or not all(
@@ -1191,17 +1358,28 @@ class DefaultReasoner(Reasoner):
             else None
         )
         disabled_tools = _disabled_tools_from_msg(msg)
+        rollout_fact = str(
+            (getattr(msg, "metadata", None) or {}).get("_plugin_rollout_fact", "")
+        )
+        if rollout_fact:
+            extra_hints = [
+                *(extra_hints or []),
+                "【插件运行时事实】"
+                + rollout_fact
+                + " 这是 Core 已核实的上一轮结果；请用自然语言告诉用户，"
+                "不要要求用户查询状态。",
+            ]
         raw_turn_input_source = (getattr(msg, "metadata", None) or {}).get(
             "_control_turn_input_source"
         )
-        turn_input_source: TurnInputSource | None = None
+        turn_input_source: InputLock | None = None
         if raw_turn_input_source is not None:
             if not all(
                 callable(getattr(raw_turn_input_source, name, None))
-                for name in ("seal", "consumed_inputs")
+                for name in ("lock", "used_inputs")
             ):
                 raise RuntimeError("control turn input source 契约无效")
-            turn_input_source = cast(TurnInputSource, raw_turn_input_source)
+            turn_input_source = cast(InputLock, raw_turn_input_source)
         # session 级记忆排除：disable_memory_writes 展开为 memory 来源的写工具。
         if bool((getattr(msg, "metadata", None) or {}).get("disable_memory_writes")):
             disabled_tools |= self._tools.get_source_tool_names(
@@ -1210,200 +1388,178 @@ class DefaultReasoner(Reasoner):
                 risk="write",
             )
 
-        # 2. 再按 trim plan + history window 顺序逐轮尝试。
-        attempts = self._build_attempt_plans(total_history)
-        for attempt, plan in enumerate(attempts):
-            retry_attempts.append(
-                {
-                    "name": plan["name"],
-                    "history_window": plan["history_window"],
-                    "disabled_sections": sorted(plan["disabled_sections"]),
-                }
+        # 2. 单 plan 执行完整 payload；安全错误不再切换窗口，直接返回用户可读错误。
+        retry_attempts.append(
+            {
+                "name": "full_context",
+                "history_window": total_history,
+                "disabled_sections": [],
+            }
+        )
+        history_for_attempt = list(source_history)
+        history_for_attempt.extend(attempt_replay)
+        turn_injection_prompt = build_turn_injection_prompt(
+            tools=self._tools,
+            tool_search_enabled=self._tool_search_enabled,
+            visible_names=(
+                (preloaded or set()) | disabled_tools
+                if self._tool_search_enabled
+                else None
+            ),
+        )
+        prompt_render = await self.render_prompt(
+            PromptRenderInput(
+                session_key=session.key,
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=msg.content,
+                media=msg.media if msg.media else None,
+                timestamp=msg.timestamp,
+                history=history_for_attempt,
+                skill_names=skill_names,
+                retrieved_memory_block=retrieved_memory_block,
+                disabled_sections=set(),
+                turn_injection_prompt=turn_injection_prompt,
+                extra_hints=extra_hints,
             )
-            history_for_attempt = self._slice_history(
-                source_history,
-                plan["history_window"],
+        )
+        initial_messages = prompt_render.messages
+        if turn_input_source is not None:
+            used_inputs = turn_input_source.used_inputs()
+            if prior_input_count >= len(used_inputs):
+                raise RuntimeError("control attempt 缺少当前用户输入")
+            self._append_turn_inputs(
+                initial_messages,
+                used_inputs[prior_input_count + 1 :],
             )
-            history_for_attempt.extend(attempt_replay)
-            turn_injection_prompt = build_turn_injection_prompt(
-                tools=self._tools,
-                tool_search_enabled=self._tool_search_enabled,
-                visible_names=(
-                    (preloaded or set()) | disabled_tools
-                    if self._tool_search_enabled
-                    else None
-                ),
-            )
-            prompt_render = await self.render_prompt(
-                PromptRenderInput(
-                    session_key=session.key,
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content=msg.content,
-                    media=msg.media if msg.media else None,
-                    timestamp=msg.timestamp,
-                    history=history_for_attempt,
-                    skill_names=skill_names,
-                    retrieved_memory_block=retrieved_memory_block,
-                    disabled_sections=plan["disabled_sections"],
-                    turn_injection_prompt=turn_injection_prompt,
-                    extra_hints=extra_hints,
-                )
-            )
-            initial_messages = prompt_render.messages
-            if turn_input_source is not None:
-                consumed_inputs = turn_input_source.consumed_inputs()
-                if prior_input_count >= len(consumed_inputs):
-                    raise RuntimeError("control attempt 缺少当前用户输入")
-                self._append_turn_inputs(
-                    initial_messages,
-                    consumed_inputs[prior_input_count + 1 :],
-                )
-            llm_user_content, llm_context_frame = extract_model_facing_turn(
-                initial_messages
+        compaction_state = self._build_compaction_state(
+            session=session,
+            projection=projection,
+            initial_messages=initial_messages,
+            history_count=len(source_history),
+            attempt_replay=attempt_replay,
+            prior_tool_groups=len(prior_tool_chain),
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+        )
+        llm_user_content, llm_context_frame = extract_model_facing_turn(
+            initial_messages
+        )
+        try:
+            search_scope = begin_turn_search_scope(
+                turn_id=running_turn_id.get(),
+                session_key=session.key,
+                attempt=0,
             )
             try:
-                search_scope = begin_turn_search_scope(
-                    turn_id=current_turn_id.get(),
-                    session_key=session.key,
-                    attempt=attempt,
+                result = await self.run(
+                    initial_messages,
+                    request_time=msg.timestamp,
+                    preloaded_tools=preloaded,
+                    preloaded_tool_order=preloaded_order,
+                    preflight_injected=True,
+                    on_content_delta=stream_sink,
+                    tool_event_session_key=session.key,
+                    tool_event_channel=msg.channel,
+                    tool_event_chat_id=msg.chat_id,
+                    disabled_tools=disabled_tools,
+                    turn_input_source=turn_input_source,
+                    initial_attempt_replay=attempt_replay,
+                    initial_prior_tool_groups=len(prior_tool_chain),
+                    compaction_state=compaction_state,
                 )
-                try:
-                    result = await self.run(
-                        initial_messages,
-                        request_time=msg.timestamp,
-                        preloaded_tools=preloaded,
-                        preloaded_tool_order=preloaded_order,
-                        preflight_injected=True,
-                        on_content_delta=stream_sink,
-                        tool_event_session_key=session.key,
-                        tool_event_channel=msg.channel,
-                        tool_event_chat_id=msg.chat_id,
-                        disabled_tools=disabled_tools,
-                        turn_input_source=turn_input_source,
-                        initial_attempt_replay=attempt_replay,
-                        initial_prior_tool_groups=len(prior_tool_chain),
-                    )
-                finally:
-                    end_turn_search_scope(search_scope)
-                tools_used = list(result.metadata.get("tools_used") or [])
-                tools_unlocked = list(result.metadata.get("tools_unlocked") or [])
-                tool_chain = list(result.metadata.get("tool_chain") or [])
-                if prior_tool_chain:
-                    tool_chain = [*prior_tool_chain, *tool_chain]
-                    tools_used = [
-                        *[
-                            str(call["name"])
-                            for group in prior_tool_chain
-                            for call in cast(list[dict[str, object]], group["calls"])
-                        ],
-                        *tools_used,
-                    ]
-                media = list(result.metadata.get("media") or [])
-                if attempt > 0:
-                    retry_trace["selected_plan"] = plan["name"]
-                    retry_trace["trimmed_sections"] = sorted(plan["disabled_sections"])
-                    logger.warning(
-                        "重试成功 plan=%s window=%d disabled=%s，仅缩小本次 prompt 投影",
-                        plan["name"],
-                        plan["history_window"],
-                        sorted(plan["disabled_sections"]),
-                    )
+            finally:
+                end_turn_search_scope(search_scope)
+            tools_used = result.tools_used
+            tools_unlocked = result.tools_unlocked
+            tool_chain = result.tool_chain
+            if prior_tool_chain:
+                tool_chain = [*prior_tool_chain, *tool_chain]
+                tools_used = [
+                    *[
+                        str(call["name"])
+                        for group in prior_tool_chain
+                        for call in cast(list[dict[str, object]], group["calls"])
+                    ],
+                    *tools_used,
+                ]
+            media = result.media
 
-                if self._tool_search_enabled and (tools_used or tools_unlocked):
-                    self._discovery.update(
-                        session.key,
-                        [*tools_unlocked, *tools_used],
-                        self._tools.get_always_on_names(),
-                        self._non_preloadable_names(),
-                    )
-                if attempt == 0:
-                    retry_trace["selected_plan"] = plan["name"]
-                    retry_trace["trimmed_sections"] = sorted(plan["disabled_sections"])
-                if prior_input_count == 0 and isinstance(llm_user_content, (str, list)):
-                    retry_trace["llm_user_content"] = llm_user_content
-                if (
-                    prior_input_count == 0
-                    and isinstance(llm_context_frame, str)
-                    and llm_context_frame.strip()
-                ):
-                    retry_trace["llm_context_frame"] = llm_context_frame
-                retry_trace["react_stats"] = dict(
-                    result.metadata.get("react_stats") or {}
+            if self._tool_search_enabled and (tools_used or tools_unlocked):
+                self._discovery.update(
+                    session.key,
+                    [*tools_unlocked, *tools_used],
+                    self._tools.get_always_on_names(),
+                    self._non_preloadable_names(),
                 )
-                raw_model_state = result.metadata.get("model_state")
-                raw_react_compaction = result.metadata.get("react_compaction")
-                if raw_react_compaction is not None and not isinstance(
-                    raw_react_compaction,
-                    dict,
-                ):
-                    raise RuntimeError("reasoner 返回了无效 react_compaction")
-                raw_mobile_attention = result.metadata.get("mobile_attention")
-                if raw_mobile_attention not in (None, "confirmation"):
-                    raise RuntimeError("reasoner 返回了无效 mobile_attention")
-                return TurnRunResult(
-                    reply=result.reply,
-                    tools_used=tools_used,
-                    tool_chain=tool_chain,
-                    media=[str(item) for item in media if str(item).strip()],
-                    thinking=result.thinking,
-                    streamed=result.streamed,
-                    context_retry=retry_trace,
-                    model_state=(
-                        cast(dict[str, object], raw_model_state)
-                        if isinstance(raw_model_state, dict)
-                        else None
-                    ),
-                    react_compaction=(
-                        cast(dict[str, object], raw_react_compaction)
-                        if isinstance(raw_react_compaction, dict)
-                        else None
-                    ),
-                    mobile_attention=cast(
-                        Literal["confirmation"] | None,
-                        raw_mobile_attention,
-                    ),
-                )
-            except ContentSafetyError:
-                if attempt < len(attempts) - 1:
-                    next_plan = attempts[attempt + 1]
-                    logger.warning(
-                        "安全拦截 (attempt=%d)，切到 plan=%s window=%d disabled=%s",
-                        attempt + 1,
-                        next_plan["name"],
-                        next_plan["history_window"],
-                        sorted(next_plan["disabled_sections"]),
-                    )
-                else:
-                    logger.warning("安全拦截：所有窗口均失败，当前消息本身可能违规")
-                    return TurnRunResult(
-                        reply="你的消息触发了安全审查，无法处理。",
-                        context_retry=retry_trace,
-                    )
-            except ContextLengthError:
-                if attempt < len(attempts) - 1:
-                    next_plan = attempts[attempt + 1]
-                    logger.warning(
-                        "上下文超长 (attempt=%d)，切到 plan=%s window=%d disabled=%s",
-                        attempt + 1,
-                        next_plan["name"],
-                        next_plan["history_window"],
-                        sorted(next_plan["disabled_sections"]),
-                    )
-                else:
-                    logger.warning("上下文超长：所有窗口均失败，清空历史后仍超长")
-                    return TurnRunResult(
-                        reply="上下文过长无法处理，请尝试新建对话。",
-                        context_retry=retry_trace,
-                    )
-            except asyncio.TimeoutError:
-                logger.warning("LLM 流响应超时 (attempt=%d)，远端连接中断", attempt + 1)
-                return TurnRunResult(
-                    reply="模型流响应中断，请刷新对话重试。",
-                    context_retry=retry_trace,
-                )
-        return TurnRunResult(reply="（安全重试异常）", context_retry=retry_trace)
-
+            retry_trace["selected_plan"] = "full_context"
+            retry_trace["trimmed_sections"] = []
+            if prior_input_count == 0 and isinstance(llm_user_content, (str, list)):
+                retry_trace["llm_user_content"] = llm_user_content
+            if (
+                prior_input_count == 0
+                and isinstance(llm_context_frame, str)
+                and llm_context_frame.strip()
+            ):
+                retry_trace["llm_context_frame"] = llm_context_frame
+            retry_trace["react_stats"] = dict(result.react_stats)
+            raw_model_state = result.model_state
+            raw_mobile_attention = result.mobile_attention
+            if raw_mobile_attention not in (None, "confirmation"):
+                raise RuntimeError("reasoner 返回了无效 mobile_attention")
+            return TurnRunResult(
+                reply=result.reply,
+                tools_used=tools_used,
+                tool_chain=tool_chain,
+                media=[str(item) for item in media if str(item).strip()],
+                thinking=result.thinking,
+                streamed=result.streamed,
+                context_retry=retry_trace,
+                model_state=(
+                    cast(dict[str, object], raw_model_state)
+                    if isinstance(raw_model_state, dict)
+                    else None
+                ),
+                mobile_attention=cast(
+                    Literal["confirmation"] | None,
+                    raw_mobile_attention,
+                ),
+            )
+        except ContentSafetyError:
+            logger.warning("安全拦截：当前消息本身可能违规")
+            await self._observe_output_completed(
+                session_key=session.key,
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+            )
+            return TurnRunResult(
+                reply="你的消息触发了安全审查，无法处理。",
+                context_retry=retry_trace,
+            )
+        except ContextLengthError:
+            if self._llm.provider.context_window <= 0:
+                raise
+            logger.warning("上下文超长：当前完整 payload 超过模型输入边界")
+            await self._observe_output_completed(
+                session_key=session.key,
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+            )
+            return TurnRunResult(
+                reply="上下文过长无法处理，请尝试新建对话。",
+                context_retry=retry_trace,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("LLM 流响应超时，远端连接中断")
+            await self._observe_output_completed(
+                session_key=session.key,
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+            )
+            return TurnRunResult(
+                reply="模型流响应中断，请刷新对话重试。",
+                context_retry=retry_trace,
+            )
     async def run(
         self,
         initial_messages: list[dict],
@@ -1417,9 +1573,10 @@ class DefaultReasoner(Reasoner):
         tool_event_channel: str = "",
         tool_event_chat_id: str = "",
         disabled_tools: set[str] | None = None,
-        turn_input_source: TurnInputSource | None = None,
+        turn_input_source: InputLock | None = None,
         initial_attempt_replay: list[dict[str, Any]] | None = None,
         initial_prior_tool_groups: int = 0,
+        compaction_state: _TurnCompactionState | None = None,
     ) -> ReasonerResult:
         # 1. 初始化消息上下文、本轮工具轨迹。
         messages = list(initial_messages)
@@ -1439,23 +1596,14 @@ class DefaultReasoner(Reasoner):
         react_usages: list[ModelUsage] = []
         react_finish_reasons: list[str | None] = []
         disabled = set(disabled_tools or set())
-        compaction_base, completed_replay_batches, current_query = (
-            _query_compaction_seed(messages, initial_attempt_replay or [])
-        )
-        if len(completed_replay_batches) != initial_prior_tool_groups:
-            raise RuntimeError(
-                "control attempt replay 与 prior tool chain 数量不一致: "
-                f"replay={len(completed_replay_batches)} "
-                f"tool_chain={initial_prior_tool_groups}"
+        if compaction_state is None:
+            raise RuntimeError("session compaction gate required")
+        compactor = compaction_state.compactor
+        if on_content_delta is not None:
+            on_content_delta = self._wrap_turn_first_delta(
+                compaction_state,
+                on_content_delta,
             )
-        compactor = QueryCompactor(
-            provider=self._llm.provider,
-            model=self._llm_config.model,
-            base_messages=compaction_base,
-            scope_id=current_turn_id.get() or tool_event_session_key,
-            completed_batches=completed_replay_batches,
-            current_query=current_query,
-        )
         pending_start_override: int | None = compactor.pending_start
         before_step_phase, after_step_phase = self._runtime_step_phases()
         if self._tool_search_enabled:
@@ -1482,17 +1630,18 @@ class DefaultReasoner(Reasoner):
                 self._llm_config.max_iterations > 0
                 and iteration >= self._llm_config.max_iterations
             ):
-                summary = await self._summarize_incomplete_progress(
+                summary, summary_usages = await self._summarize_incomplete_progress(
                     messages,
                     reason="max_iterations",
                     iteration=iteration,
                     tools_used=tools_used,
+                    compaction_state=compaction_state,
                 )
+                react_usages.extend(summary_usages)
                 result = self._build_result(
                     reply=summary,
                     tools_used=tools_used,
                     tool_chain=tool_chain,
-                    react_compaction=compactor.persistence_payload(),
                     media=outbound_media,
                     visible_names=visible_names,
                     thinking=None,
@@ -1506,7 +1655,12 @@ class DefaultReasoner(Reasoner):
                     finish_reasons=react_finish_reasons,
                     mobile_attention=mobile_attention,
                 )
-                await self._seal_turn_input_source(turn_input_source)
+                await self._lock_turn_input_source(turn_input_source)
+                await self._observe_output_completed(
+                    session_key=tool_event_session_key,
+                    channel=tool_event_channel,
+                    chat_id=tool_event_chat_id,
+                )
                 return result
             batch_start = (
                 pending_start_override
@@ -1526,17 +1680,18 @@ class DefaultReasoner(Reasoner):
                 )
             )
             if step_ctx.early_stop:
-                summary = await self._summarize_incomplete_progress(
+                summary, summary_usages = await self._summarize_incomplete_progress(
                     messages,
                     reason="early_stop",
                     iteration=iteration + 1,
                     tools_used=tools_used,
+                    compaction_state=compaction_state,
                 )
+                react_usages.extend(summary_usages)
                 result = self._build_result(
                     reply=step_ctx.early_stop_reply or summary,
                     tools_used=tools_used,
                     tool_chain=tool_chain,
-                    react_compaction=compactor.persistence_payload(),
                     media=outbound_media,
                     visible_names=visible_names,
                     thinking=None,
@@ -1550,7 +1705,12 @@ class DefaultReasoner(Reasoner):
                     finish_reasons=react_finish_reasons,
                     mobile_attention=mobile_attention,
                 )
-                await self._seal_turn_input_source(turn_input_source)
+                await self._lock_turn_input_source(turn_input_source)
+                await self._observe_output_completed(
+                    session_key=tool_event_session_key,
+                    channel=tool_event_channel,
+                    chat_id=tool_event_chat_id,
+                )
                 return result
             # 4. 构造本轮工具 schema，并按完整 provider input 判断压缩水位。
             schema_names: list[str] | set[str] | None = (
@@ -1561,13 +1721,19 @@ class DefaultReasoner(Reasoner):
             elif schema_names is not None:
                 schema_names = [name for name in schema_names if name not in disabled]
             tool_schemas = self._tools.get_schemas(names=schema_names)
-            prepared = await compactor.prepare(
+            call_result = await self._call_provider(
+                compaction_state,
                 messages,
-                pending_start=batch_start,
                 tools=tool_schemas,
+                max_tokens=self._llm_config.max_tokens,
+                on_content_delta=on_content_delta,
+                cache_namespace=tool_event_session_key,
             )
-            if prepared.compacted:
-                react_usages.append(prepared.summary_usage or ModelUsage())
+            response = call_result.response
+            prepared = call_result.prepared
+            react_usages.extend(call_result.compaction_usages)
+            if prepared is None:
+                raise RuntimeError("session compaction gate 未返回 prepared context")
             batch_start = prepared.pending_start
             react_input_samples.append(prepared.estimated_tokens)
             logger.info(
@@ -1581,45 +1747,6 @@ class DefaultReasoner(Reasoner):
                 prepared.estimated_tokens,
                 prepared.estimate_quality,
                 prepared.compacted,
-            )
-            request_message_count = len(messages)
-            try:
-                response = await self._llm.provider.chat(
-                    messages=messages,
-                    tools=tool_schemas,
-                    model=self._llm_config.model,
-                    max_tokens=self._llm_config.max_tokens,
-                    tool_choice="auto",
-                    on_content_delta=on_content_delta,
-                    cache_namespace=tool_event_session_key,
-                )
-            except ContextLengthError:
-                if not compactor.has_compactable_prefix:
-                    raise
-                forced = await compactor.prepare(
-                    messages,
-                    pending_start=batch_start,
-                    tools=tool_schemas,
-                    trigger="context_overflow",
-                    force=True,
-                )
-                react_usages.append(forced.summary_usage or ModelUsage())
-                batch_start = forced.pending_start
-                react_input_samples[-1] = forced.estimated_tokens
-                request_message_count = len(messages)
-                response = await self._llm.provider.chat(
-                    messages=messages,
-                    tools=tool_schemas,
-                    model=self._llm_config.model,
-                    max_tokens=self._llm_config.max_tokens,
-                    tool_choice="auto",
-                    on_content_delta=on_content_delta,
-                    cache_namespace=tool_event_session_key,
-                )
-            compactor.record_response(
-                message_count=request_message_count,
-                tools=tool_schemas,
-                usage=response.usage,
             )
             react_usages.append(response.usage or ModelUsage())
             react_finish_reasons.append(response.finish_reason)
@@ -1653,54 +1780,23 @@ class DefaultReasoner(Reasoner):
                         ),
                     }
                 )
-                retry_prepared = await compactor.prepare(
+                retry_result = await self._call_provider(
+                    compaction_state,
                     messages,
-                    pending_start=batch_start,
                     tools=tool_schemas,
+                    max_tokens=self._llm_config.max_tokens,
+                    disable_thinking=True,
+                    on_content_delta=on_content_delta,
+                    cache_namespace=tool_event_session_key,
                 )
-                if retry_prepared.compacted:
-                    react_usages.append(retry_prepared.summary_usage or ModelUsage())
+                retry_response = retry_result.response
+                react_usages.extend(retry_result.compaction_usages)
+                retry_prepared = retry_result.prepared
+                if retry_prepared is None:
+                    raise RuntimeError(
+                        "session compaction gate 未返回 retry prepared context"
+                    )
                 batch_start = retry_prepared.pending_start
-                request_message_count = len(messages)
-                try:
-                    retry_response = await self._llm.provider.chat(
-                        messages=messages,
-                        tools=tool_schemas,
-                        model=self._llm_config.model,
-                        max_tokens=self._llm_config.max_tokens,
-                        tool_choice="auto",
-                        disable_thinking=True,
-                        on_content_delta=on_content_delta,
-                        cache_namespace=tool_event_session_key,
-                    )
-                except ContextLengthError:
-                    if not compactor.has_compactable_prefix:
-                        raise
-                    forced = await compactor.prepare(
-                        messages,
-                        pending_start=batch_start,
-                        tools=tool_schemas,
-                        trigger="context_overflow",
-                        force=True,
-                    )
-                    react_usages.append(forced.summary_usage or ModelUsage())
-                    batch_start = forced.pending_start
-                    request_message_count = len(messages)
-                    retry_response = await self._llm.provider.chat(
-                        messages=messages,
-                        tools=tool_schemas,
-                        model=self._llm_config.model,
-                        max_tokens=self._llm_config.max_tokens,
-                        tool_choice="auto",
-                        disable_thinking=True,
-                        on_content_delta=on_content_delta,
-                        cache_namespace=tool_event_session_key,
-                    )
-                compactor.record_response(
-                    message_count=request_message_count,
-                    tools=tool_schemas,
-                    usage=retry_response.usage,
-                )
                 react_usages.append(retry_response.usage or ModelUsage())
                 react_finish_reasons.append(retry_response.finish_reason)
                 if retry_response.cache_prompt_tokens is not None:
@@ -1865,17 +1961,24 @@ class DefaultReasoner(Reasoner):
                             tool_chain.append(
                                 {"text": response.content, "calls": iter_calls}
                             )
-                            summary = await self._summarize_incomplete_progress(
+                            compactor.record_completed_batch(
                                 messages,
-                                reason="tool_call_loop",
-                                iteration=iteration + 1,
-                                tools_used=tools_used,
+                                batch_start=batch_start,
                             )
+                            summary, summary_usages = (
+                                await self._summarize_incomplete_progress(
+                                    messages,
+                                    reason="tool_call_loop",
+                                    iteration=iteration + 1,
+                                    tools_used=tools_used,
+                                    compaction_state=compaction_state,
+                                )
+                            )
+                            react_usages.extend(summary_usages)
                             result = self._build_result(
                                 reply=summary,
                                 tools_used=tools_used,
                                 tool_chain=tool_chain,
-                                react_compaction=compactor.persistence_payload(),
                                 media=outbound_media,
                                 visible_names=visible_names,
                                 thinking=None,
@@ -1889,7 +1992,12 @@ class DefaultReasoner(Reasoner):
                                 finish_reasons=react_finish_reasons,
                                 mobile_attention=mobile_attention,
                             )
-                            await self._seal_turn_input_source(turn_input_source)
+                            await self._lock_turn_input_source(turn_input_source)
+                            await self._observe_output_completed(
+                                session_key=tool_event_session_key,
+                                channel=tool_event_channel,
+                                chat_id=tool_event_chat_id,
+                            )
                             return result
                         logger.warning(
                             "[工具未解锁] LLM 尝试调用 '%s'，但该工具 schema 不可见，引导模型先 tool_search",
@@ -2017,6 +2125,7 @@ class DefaultReasoner(Reasoner):
                         final_arguments=exec_result.final_arguments,
                         status=exec_result.status,
                         result_preview=normalized.preview(),
+                        runtime_provenance=normalized.runtime_provenance,
                     )
                     logger.info(
                         "[工具结果←] %s  结果预览=%s  result_len=%d",
@@ -2121,17 +2230,24 @@ class DefaultReasoner(Reasoner):
                         tool_chain.append(
                             {"text": response.content, "calls": iter_calls}
                         )
-                        summary = await self._summarize_incomplete_progress(
+                        compactor.record_completed_batch(
                             messages,
-                            reason="tool_call_loop",
-                            iteration=iteration + 1,
-                            tools_used=tools_used,
+                            batch_start=batch_start,
                         )
+                        summary, summary_usages = (
+                            await self._summarize_incomplete_progress(
+                                messages,
+                                reason="tool_call_loop",
+                                iteration=iteration + 1,
+                                tools_used=tools_used,
+                                compaction_state=compaction_state,
+                            )
+                        )
+                        react_usages.extend(summary_usages)
                         result = self._build_result(
                             reply=summary,
                             tools_used=tools_used,
                             tool_chain=tool_chain,
-                            react_compaction=compactor.persistence_payload(),
                             media=outbound_media,
                             visible_names=visible_names,
                             thinking=None,
@@ -2145,7 +2261,12 @@ class DefaultReasoner(Reasoner):
                             finish_reasons=react_finish_reasons,
                             mobile_attention=mobile_attention,
                         )
-                        await self._seal_turn_input_source(turn_input_source)
+                        await self._lock_turn_input_source(turn_input_source)
+                        await self._observe_output_completed(
+                            session_key=tool_event_session_key,
+                            channel=tool_event_channel,
+                            chat_id=tool_event_chat_id,
+                        )
                         return result
 
                 # 7. 本轮工具执行完后，记录 tool_chain。
@@ -2187,17 +2308,18 @@ class DefaultReasoner(Reasoner):
                         reason,
                         pressure_tokens,
                     )
-                    summary = await self._summarize_incomplete_progress(
+                    summary, summary_usages = await self._summarize_incomplete_progress(
                         messages,
                         reason=reason,
                         iteration=iteration + 1,
                         tools_used=tools_used,
+                        compaction_state=compaction_state,
                     )
+                    react_usages.extend(summary_usages)
                     result = self._build_result(
                         reply=summary,
                         tools_used=tools_used,
                         tool_chain=tool_chain,
-                        react_compaction=compactor.persistence_payload(),
                         media=outbound_media,
                         visible_names=visible_names,
                         thinking=None,
@@ -2211,7 +2333,12 @@ class DefaultReasoner(Reasoner):
                         finish_reasons=react_finish_reasons,
                         mobile_attention=mobile_attention,
                     )
-                    await self._seal_turn_input_source(turn_input_source)
+                    await self._lock_turn_input_source(turn_input_source)
+                    await self._observe_output_completed(
+                        session_key=tool_event_session_key,
+                        channel=tool_event_channel,
+                        chat_id=tool_event_chat_id,
+                    )
                     return result
                 continue
 
@@ -2226,7 +2353,6 @@ class DefaultReasoner(Reasoner):
                 reply=response.content or "模型未返回可用回复，请重试。",
                 tools_used=tools_used,
                 tool_chain=tool_chain,
-                react_compaction=compactor.persistence_payload(),
                 media=outbound_media,
                 visible_names=visible_names,
                 thinking=response.thinking,
@@ -2245,7 +2371,14 @@ class DefaultReasoner(Reasoner):
                     else None
                 ),
             )
-            await self._seal_turn_input_source(turn_input_source)
+            await self._lock_turn_input_source(turn_input_source)
+            # 输出完成信号：最终回复的最后一个 delta 已交付、input source 已锁，
+            # 在 AfterStep 收尾之前立即发出，慢插件不得推迟 composer 解锁。
+            await self._observe_output_completed(
+                session_key=tool_event_session_key,
+                channel=tool_event_channel,
+                chat_id=tool_event_chat_id,
+            )
             messages.append({"role": "assistant", "content": response.content})
             # 8b. AfterStep 模块链（最终回复分支）：通知观察者本轮推理结束。
             _ = await after_step_phase.run(
@@ -2266,11 +2399,11 @@ class DefaultReasoner(Reasoner):
             return result
 
     @staticmethod
-    async def _seal_turn_input_source(source: TurnInputSource | None) -> None:
+    async def _lock_turn_input_source(source: InputLock | None) -> None:
         """在提交最终候选前封口 active attempt。"""
 
         if source is not None:
-            await source.seal()
+            await source.lock()
 
     def _append_turn_inputs(
         self,
@@ -2317,7 +2450,7 @@ class DefaultReasoner(Reasoner):
                 call_id=call_id,
                 tool_name=tool_name,
                 arguments=dict(arguments),
-                turn_id=current_turn_id.get(),
+                turn_id=running_turn_id.get(),
             )
         )
 
@@ -2334,6 +2467,7 @@ class DefaultReasoner(Reasoner):
         final_arguments: dict[str, Any],
         status: str,
         result_preview: str,
+        runtime_provenance: dict[str, str] | None = None,
     ) -> None:
         if self._event_bus is None or not session_key:
             return
@@ -2349,9 +2483,424 @@ class DefaultReasoner(Reasoner):
                 final_arguments=dict(final_arguments),
                 status=status,
                 result_preview=result_preview,
-                turn_id=current_turn_id.get(),
+                runtime_provenance=dict(runtime_provenance or {}),
+                turn_id=running_turn_id.get(),
             )
         )
+
+    async def _observe_output_completed(
+        self,
+        *,
+        session_key: str,
+        channel: str,
+        chat_id: str,
+    ) -> None:
+        """在最后可见输出交付后、AfterStep 收尾前发出展示层 output.completed。"""
+
+        if self._event_bus is None or not session_key:
+            return
+        await self._event_bus.observe(
+            TurnOutputCompleted(
+                session_key=session_key,
+                channel=channel,
+                chat_id=chat_id,
+                turn_id=running_turn_id.get(),
+                client_message_id=current_client_message_id.get(),
+            )
+        )
+
+    async def _prepare_provider_gate(
+        self,
+        state: _TurnCompactionState,
+        messages: list[dict],
+        *,
+        tools: list[dict],
+        max_output_tokens: int | None = None,
+        trigger: Literal["soft_limit", "context_overflow"] = "soft_limit",
+        force: bool = False,
+    ) -> PreparedQueryContext:
+        # 真实路径里程碑：初始 gate 在 provider start 之前的耗时（含首字前的
+        # 压缩停顿）单独记录为 compaction.prepare.*，与 provider TTFT 分离。
+        identity = _provider_call_identity.get()
+        call_ordinal = identity.call_ordinal if identity is not None else 0
+        gate_started = time.monotonic()
+        self._milestone_compaction_prepare(
+            "tl:compaction.prepare.start",
+            call_ordinal=call_ordinal,
+            trigger=trigger,
+            force=force,
+        )
+        try:
+            state.compactor.set_pending(messages)
+            prepared = await state.compactor.prepare(
+                messages,
+                pending_start=state.compactor.pending_start,
+                tools=tools,
+                trigger=trigger,
+                force=force,
+                max_output_tokens=max_output_tokens,
+            )
+            checkpoint = prepared.checkpoint
+            if prepared.compacted and checkpoint is not None and checkpoint.committable:
+                row = await state.runtime.commit_checkpoint(
+                    state.session,
+                    checkpoint,
+                    head=state.head,
+                    scope_channel=state.scope_channel,
+                    scope_chat_id=state.scope_chat_id,
+                )
+                state.head = CompactionHead(
+                    session_key=state.head.session_key,
+                    parent_generation=row.generation,
+                    next_generation=row.generation + 1,
+                )
+                state.compactor.acknowledge_committed_checkpoint(row.generation)
+        except asyncio.CancelledError:
+            self._milestone_compaction_prepare(
+                "tl:compaction.prepare.cancelled",
+                call_ordinal=call_ordinal,
+                trigger=trigger,
+                force=force,
+                outcome="cancelled",
+                duration_ms=(time.monotonic() - gate_started) * 1_000,
+            )
+            raise
+        except Exception:
+            self._milestone_compaction_prepare(
+                "tl:compaction.prepare.error",
+                call_ordinal=call_ordinal,
+                trigger=trigger,
+                force=force,
+                outcome="error",
+                duration_ms=(time.monotonic() - gate_started) * 1_000,
+            )
+            raise
+        self._milestone_compaction_prepare(
+            "tl:compaction.prepare.done",
+            call_ordinal=call_ordinal,
+            trigger=trigger,
+            force=force,
+            outcome="done",
+            duration_ms=(time.monotonic() - gate_started) * 1_000,
+            compacted=prepared.compacted,
+        )
+        return prepared
+
+    def _milestone_compaction_prepare(
+        self,
+        event: str,
+        *,
+        call_ordinal: int,
+        trigger: str,
+        force: bool,
+        outcome: str = "",
+        duration_ms: float | None = None,
+        compacted: bool | None = None,
+    ) -> None:
+        counts = (
+            f"call_ordinal={call_ordinal} "
+            f"provider_call_id={current_provider_call_id.get() or '-'} "
+            f"trigger={trigger} force={str(force).lower()}"
+        )
+        if compacted is not None:
+            counts += f" compacted={str(compacted).lower()}"
+        turn_milestone(
+            logger,
+            event,
+            session_id=current_session_key.get() or "",
+            turn_id=running_turn_id.get(),
+            client_message_id=current_client_message_id.get(),
+            duration_ms=duration_ms,
+            outcome=outcome,
+            counts=counts,
+        )
+
+    def _milestone_provider_attempt(
+        self,
+        event: str,
+        identity: _ProviderAttemptIdentity,
+        *,
+        outcome: str = "",
+        duration_ms: float | None = None,
+        kind: str = "",
+    ) -> None:
+        counts = (
+            f"call_ordinal={identity.call_ordinal} "
+            f"provider_attempt={identity.provider_attempt} "
+            f"provider_call_id={current_provider_call_id.get() or '-'}"
+        )
+        if kind:
+            counts += f" kind={kind}"
+        turn_milestone(
+            logger,
+            event,
+            session_id=current_session_key.get() or "",
+            turn_id=running_turn_id.get(),
+            client_message_id=current_client_message_id.get(),
+            duration_ms=duration_ms,
+            outcome=outcome,
+            counts=counts,
+        )
+
+    def _wrap_turn_first_delta(
+        self,
+        state: _TurnCompactionState,
+        inner: Callable[[dict[str, str]], Awaitable[None]],
+    ) -> Callable[[dict[str, str]], Awaitable[None]]:
+        """记录真正首非空 thinking/answer 回调的 TTFT（从当前 provider attempt start 起算）。
+
+        每个 turn 各类型只打一次，多个 tool round 不重复；delta 原样透传，不延迟、不合并。
+        采样发生在下游回调之前，下游消费慢不会污染首字时长。
+        """
+
+        def emit(event: str, *, kind: str = "") -> None:
+            identity = _provider_call_identity.get()
+            call_id = current_provider_call_id.get()
+            counts = " ".join(
+                [
+                    *(
+                        [
+                            f"call_ordinal={identity.call_ordinal}",
+                            f"provider_attempt={identity.provider_attempt}",
+                        ]
+                        if identity is not None
+                        else []
+                    ),
+                    *([f"provider_call_id={call_id}"] if call_id else []),
+                    *([f"kind={kind}"] if kind else []),
+                ]
+            )
+            turn_milestone(
+                logger,
+                event,
+                session_id=current_session_key.get() or "",
+                turn_id=running_turn_id.get(),
+                client_message_id=current_client_message_id.get(),
+                duration_ms=(
+                    (time.monotonic() - state.call_started_at) * 1_000
+                    if state.call_started_at > 0
+                    else None
+                ),
+                counts=counts,
+            )
+
+        async def wrapped(delta: dict[str, str]) -> None:
+            thinking = delta.get("thinking_delta")
+            if isinstance(thinking, str) and thinking:
+                if not state.first_any_logged:
+                    state.first_any_logged = True
+                    emit("tl:turn.first_any", kind="thinking")
+                if not state.first_thinking_logged:
+                    state.first_thinking_logged = True
+                    emit("tl:turn.first_thinking")
+            answer = delta.get("content_delta")
+            if isinstance(answer, str) and answer:
+                if not state.first_any_logged:
+                    state.first_any_logged = True
+                    emit("tl:turn.first_any", kind="answer")
+                if not state.first_answer_logged:
+                    state.first_answer_logged = True
+                    emit("tl:turn.first_answer")
+            await inner(delta)
+
+        return wrapped
+
+    async def _call_provider(
+        self,
+        state: _TurnCompactionState,
+        messages: list[dict],
+        *,
+        tools: list[dict],
+        max_tokens: int,
+        disable_thinking: bool = False,
+        on_content_delta: Callable[[dict[str, str]], Awaitable[None]] | None = None,
+        cache_namespace: str = "",
+    ) -> _ProviderCallResult:
+        """Gate one full business payload and retry one forced compaction on overflow."""
+
+        # 每个逻辑 provider 调用先分配 1-based call_ordinal，作为本调用所有
+        # 里程碑（compaction gate / attempt / first delta）的统一身份。
+        state.provider_call_ordinal += 1
+        call_ordinal = state.provider_call_ordinal
+        identity_token = _provider_call_identity.set(
+            _ProviderAttemptIdentity(call_ordinal=call_ordinal)
+        )
+        # 中性逻辑调用身份：从 compaction gate 开始到整个 call 终态全程保持，
+        # finally 精确 reset；attempt=2 复用同一 call_id，仅替换 provider_attempt。
+        provider_call_id = uuid.uuid4().hex
+        call_id_token = current_provider_call_id.set(provider_call_id)
+        attempt_token = current_provider_attempt.set(1)
+        operation_token = current_provider_operation.set("business")
+        attempt_two_token: Token[int] | None = None
+        try:
+            prepared = await self._prepare_provider_gate(
+                state,
+                messages,
+                tools=tools,
+                max_output_tokens=max_tokens,
+            )
+            compaction_usages: list[ModelUsage] = []
+            if prepared.compacted and prepared.summary_usage is not None:
+                compaction_usages.append(prepared.summary_usage)
+            request_message_count = len(messages)
+            request = {
+                "messages": messages,
+                "tools": tools,
+                "model": self._llm_config.model,
+                "max_tokens": max_tokens,
+                "tool_choice": "auto",
+                "disable_thinking": disable_thinking,
+                "on_content_delta": on_content_delta,
+                "cache_namespace": cache_namespace,
+            }
+            # 时间链：attempt 1（provider.call.start 在 compaction gate 之后）。
+            identity = _ProviderAttemptIdentity(
+                call_ordinal=call_ordinal,
+                provider_attempt=1,
+            )
+            _ = _provider_call_identity.set(identity)
+            state.call_started_at = time.monotonic()
+            self._milestone_provider_attempt("tl:provider.call.start", identity)
+            try:
+                response = await self._llm.provider.chat(**request)
+            except asyncio.CancelledError:
+                self._milestone_provider_attempt(
+                    "tl:provider.call.cancelled",
+                    identity,
+                    outcome="cancelled",
+                    duration_ms=(time.monotonic() - state.call_started_at) * 1_000,
+                )
+                raise
+            except ContextLengthError:
+                if self._llm.provider.context_window <= 0:
+                    self._milestone_provider_attempt(
+                        "tl:provider.call.error",
+                        identity,
+                        outcome="error",
+                        duration_ms=(time.monotonic() - state.call_started_at) * 1_000,
+                    )
+                    raise
+                self._milestone_provider_attempt(
+                    "tl:provider.call.retry",
+                    identity,
+                    outcome="context_overflow",
+                    duration_ms=(time.monotonic() - state.call_started_at) * 1_000,
+                )
+                forced = await self._prepare_provider_gate(
+                    state,
+                    messages,
+                    tools=tools,
+                    max_output_tokens=max_tokens,
+                    trigger="context_overflow",
+                    force=True,
+                )
+                if forced.summary_usage is not None:
+                    compaction_usages.append(forced.summary_usage)
+                prepared = forced
+                request_message_count = len(messages)
+                # 强制压缩重试是同一个 call，attempt=2。
+                identity = _ProviderAttemptIdentity(
+                    call_ordinal=call_ordinal,
+                    provider_attempt=2,
+                )
+                _ = _provider_call_identity.set(identity)
+                attempt_two_token = current_provider_attempt.set(2)
+                state.call_started_at = time.monotonic()
+                self._milestone_provider_attempt("tl:provider.call.start", identity)
+                try:
+                    response = await self._llm.provider.chat(**request)
+                except asyncio.CancelledError:
+                    self._milestone_provider_attempt(
+                        "tl:provider.call.cancelled",
+                        identity,
+                        outcome="cancelled",
+                        duration_ms=(time.monotonic() - state.call_started_at) * 1_000,
+                    )
+                    raise
+                except Exception:
+                    self._milestone_provider_attempt(
+                        "tl:provider.call.error",
+                        identity,
+                        outcome="error",
+                        duration_ms=(time.monotonic() - state.call_started_at) * 1_000,
+                    )
+                    raise
+            except Exception:
+                self._milestone_provider_attempt(
+                    "tl:provider.call.error",
+                    identity,
+                    outcome="error",
+                    duration_ms=(time.monotonic() - state.call_started_at) * 1_000,
+                )
+                raise
+            # tool-first fallback：chat 刚返回判定 tool_calls 时立刻记录 duration。
+            if response.tool_calls and not state.first_any_logged:
+                state.first_any_logged = True
+                self._milestone_provider_attempt(
+                    "tl:turn.first_any",
+                    identity,
+                    duration_ms=(time.monotonic() - state.call_started_at) * 1_000,
+                    kind="tool",
+                )
+            self._milestone_provider_attempt(
+                "tl:provider.call.done",
+                identity,
+                outcome="done",
+                duration_ms=(time.monotonic() - state.call_started_at) * 1_000,
+            )
+            state.compactor.record_response(
+                message_count=request_message_count,
+                tools=tools,
+                usage=response.usage,
+            )
+            return _ProviderCallResult(
+                response=response,
+                prepared=prepared,
+                compaction_usages=tuple(compaction_usages),
+            )
+        finally:
+            if attempt_two_token is not None:
+                current_provider_attempt.reset(attempt_two_token)
+            current_provider_operation.reset(operation_token)
+            current_provider_attempt.reset(attempt_token)
+            current_provider_call_id.reset(call_id_token)
+            _provider_call_identity.reset(identity_token)
+
+    async def _call_compaction_summary(
+        self,
+        *,
+        provider,
+        messages: list[dict],
+        tools: list[dict],
+        model: str,
+        max_tokens: int,
+        disable_thinking: bool = True,
+    ) -> LLMResponse:
+        """Call a compaction summary provider without re-entering the business gate."""
+
+        estimated = provider.estimate_context_tokens(messages, tools)
+        hard_limit = hard_input_limit(provider, max_tokens)
+        if estimated >= hard_limit:
+            raise ContextCompactionError(
+                "context_compaction_summary_input_exceeds_hard_limit"
+            )
+        # 摘要调用在最窄作用域标记 compaction_summary + attempt=0（摘要是压缩
+        # 阶段的非业务调用，不是 provider retry，attempt=1/2 只属于业务流）；
+        # finally 逆序精确 reset，异常/取消不泄漏。provider_call_id 仍属所属
+        # 逻辑 call，摘要前后分别保持 attempt 1/2 的 caller 值不变。
+        operation_token = current_provider_operation.set("compaction_summary")
+        attempt_token = current_provider_attempt.set(0)
+        try:
+            return await provider.chat(
+                messages=messages,
+                tools=tools,
+                model=model,
+                max_tokens=max_tokens,
+                disable_thinking=disable_thinking,
+            )
+        finally:
+            current_provider_attempt.reset(attempt_token)
+            current_provider_operation.reset(operation_token)
 
     async def _summarize_incomplete_progress(
         self,
@@ -2360,7 +2909,8 @@ class DefaultReasoner(Reasoner):
         reason: str,
         iteration: int,
         tools_used: list[str],
-    ) -> str:
+        compaction_state: _TurnCompactionState | None = None,
+    ) -> tuple[str, tuple[ModelUsage, ...]]:
         # 1. 先构造收尾总结 prompt。
         summary_prompt = (
             f"[收尾原因] {reason}\n"
@@ -2370,26 +2920,38 @@ class DefaultReasoner(Reasoner):
         )
 
         # 2. 先尝试让模型给一段中文收尾总结。
+        provider_usages: tuple[ModelUsage, ...] = ()
         try:
-            response = await self._llm.provider.chat(
-                messages=messages
-                + [
-                    support.build_context_hint_message(
-                        "summary_request",
-                        summary_prompt,
-                    )
-                ],
-                tools=[],
-                model=self._llm_config.model,
-                max_tokens=(
-                    min(_SUMMARY_MAX_TOKENS, self._llm_config.max_tokens)
-                    if self._llm_config.max_tokens > 0
-                    else _SUMMARY_MAX_TOKENS
-                ),
+            summary_messages = messages + [
+                support.build_context_hint_message(
+                    "summary_request",
+                    summary_prompt,
+                )
+            ]
+            summary_max_tokens = (
+                min(_SUMMARY_MAX_TOKENS, self._llm_config.max_tokens)
+                if self._llm_config.max_tokens > 0
+                else _SUMMARY_MAX_TOKENS
             )
+            if compaction_state is None:
+                raise RuntimeError("session compaction gate required")
+            response_result = await self._call_provider(
+                compaction_state,
+                summary_messages,
+                tools=[],
+                max_tokens=summary_max_tokens,
+                disable_thinking=True,
+            )
+            response = response_result.response
+            usages = [*response_result.compaction_usages]
+            if response.usage is not None:
+                usages.append(response.usage)
+            provider_usages = tuple(usages)
             text = (response.content or "").strip()
             if text:
-                return text
+                return text, provider_usages
+        except ContextCompactionError:
+            raise
         except Exception as exc:
             logger.warning("生成预算收尾总结失败: %s", exc)
 
@@ -2398,7 +2960,8 @@ class DefaultReasoner(Reasoner):
         done = f"已尝试 {iteration} 轮，调用工具 {len(tools_used)} 次（{tool_text}）。"
         return (
             f"这次任务还没完全收束。{done}"
-            "我先停在当前进度，后续会继续基于已有工具结果补齐缺失信息并给你最终结论。"
+            "我先停在当前进度，后续会继续基于已有工具结果补齐缺失信息并给你最终结论。",
+            provider_usages,
         )
 
     def _build_result(
@@ -2407,7 +2970,6 @@ class DefaultReasoner(Reasoner):
         reply: str,
         tools_used: list[str],
         tool_chain: list[dict[str, Any]],
-        react_compaction: dict[str, object] | None,
         media: list[str],
         visible_names: set[str] | None,
         thinking: str | None,
@@ -2422,20 +2984,7 @@ class DefaultReasoner(Reasoner):
         finish_reasons: list[str | None] | None = None,
         mobile_attention: Literal["confirmation"] | None = None,
     ) -> ReasonerResult:
-        # 1. 先把 tool_chain 扁平化成 invocations。
-        invocations: list[LLMToolCall] = []
-        for group in tool_chain:
-            for call in group.get("calls") or []:
-                args = call.get("arguments")
-                invocations.append(
-                    LLMToolCall(
-                        id=str(call.get("call_id", "") or ""),
-                        name=str(call.get("name", "") or ""),
-                        arguments=args if isinstance(args, dict) else {},
-                    )
-                )
-
-        # 2. 再把运行时元数据统一塞进 metadata。
+        # 1. 汇总运行时元数据。
         react_stats: dict[str, object] = {
             "iteration_count": len(react_input_samples),
             "turn_input_sum_tokens": sum(react_input_samples),
@@ -2461,6 +3010,7 @@ class DefaultReasoner(Reasoner):
         usage = aggregate_usage(model_usages or [])
         react_stats["model_usage"] = {
             "input_tokens": usage.input_tokens,
+            "cache_write_input_tokens": usage.cache_write_input_tokens,
             "cached_input_tokens": usage.cached_input_tokens,
             "output_tokens": usage.output_tokens,
             "reasoning_output_tokens": usage.reasoning_output_tokens,
@@ -2469,89 +3019,21 @@ class DefaultReasoner(Reasoner):
             "coverage": usage.coverage.value,
         }
         react_stats["finish_reasons"] = list(finish_reasons or [])
-        metadata = {
-            "tools_used": list(tools_used),
-            "tools_unlocked": list(tools_unlocked or []),
-            "tool_chain": list(tool_chain),
-            "react_compaction": (
-                dict(react_compaction) if react_compaction is not None else None
-            ),
-            "media": list(media),
-            "visible_names": set(visible_names) if visible_names is not None else None,
-            "react_stats": react_stats,
-            "model_state": model_state,
-            "mobile_attention": mobile_attention,
-        }
 
-        # 3. 最后返回标准 ReasonerResult。
+        # 2. 最后返回标准 ReasonerResult。
         return ReasonerResult(
             reply=reply,
-            invocations=invocations,
             thinking=thinking,
             streamed=streamed,
-            metadata=metadata,
+            tools_used=list(tools_used),
+            tools_unlocked=list(tools_unlocked or []),
+            tool_chain=list(tool_chain),
+            media=list(media),
+            visible_names=set(visible_names) if visible_names is not None else None,
+            react_stats=react_stats,
+            model_state=model_state,
+            mobile_attention=mobile_attention,
         )
-
-    @staticmethod
-    def _slice_history(source_history: list[dict], window: int) -> list[dict]:
-        total_history = len(source_history)
-        if window <= 0:
-            return []
-        if window >= total_history:
-            return source_history
-
-        # 1. 先按 provider 消息预算取得候选后缀。
-        candidate = source_history[-window:]
-        if candidate[0].get("role") != "tool":
-            return candidate
-
-        # 2. 若切在工具结果中间，则丢弃残缺工具链并前移到合法回合。
-        for index, message in enumerate(candidate):
-            if message.get("role") == "user":
-                return candidate[index:]
-            content = message.get("content")
-            if (
-                message.get("role") == "assistant"
-                and isinstance(content, str)
-                and content.startswith("[主动推送]")
-            ):
-                return candidate[index:]
-        return []
-
-    @staticmethod
-    def _build_attempt_plans(total_history: int) -> list[dict]:
-        attempts: list[dict] = []
-        seen: set[tuple[tuple[str, ...], int]] = set()
-        full_window = int(total_history * _SAFETY_RETRY_RATIOS[0])
-        for trim_plan in DEFAULT_CONTEXT_TRIM_PLANS:
-            disabled = set(trim_plan.drop_sections)
-            key = (tuple(sorted(disabled)), full_window)
-            if key in seen:
-                continue
-            seen.add(key)
-            attempts.append(
-                {
-                    "name": trim_plan.name,
-                    "disabled_sections": disabled,
-                    "history_window": full_window,
-                }
-            )
-
-        last_trim = set(DEFAULT_CONTEXT_TRIM_PLANS[-1].drop_sections)
-        for ratio in _SAFETY_RETRY_RATIOS[1:]:
-            window = int(total_history * ratio)
-            key = (tuple(sorted(last_trim)), window)
-            if key in seen:
-                continue
-            seen.add(key)
-            attempts.append(
-                {
-                    "name": f"{DEFAULT_CONTEXT_TRIM_PLANS[-1].name}_history",
-                    "disabled_sections": set(last_trim),
-                    "history_window": window,
-                }
-            )
-        return attempts
 
     @staticmethod
     def format_request_time_anchor(ts: datetime | None) -> str:
@@ -2566,88 +3048,6 @@ class DefaultReasoner(Reasoner):
 
 
 # ── 模块级辅助函数 ──────────────────────────────────────────────
-
-
-def _query_compaction_seed(
-    messages: list[dict[str, Any]],
-    attempt_replay: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], list[list[dict[str, Any]]], str | None]:
-    """把中断重放拆成可压缩的闭合工具组，并锚定完整 logical query。"""
-
-    # 1. 从最终 prompt 中精确定位 runtime 注入的连续 replay 区间。
-    if not attempt_replay:
-        return list(messages), [], None
-    replay_size = len(attempt_replay)
-    candidates = [
-        index
-        for index in range(len(messages) - replay_size + 1)
-        if messages[index : index + replay_size] == attempt_replay
-    ]
-    if not candidates:
-        raise RuntimeError("control attempt replay 未出现在最终模型 prompt 中")
-    replay_start = candidates[-1]
-    replay_end = replay_start + replay_size
-
-    # 2. 每个 assistant tool-call 与其完整 tool result 闭合为一个原子批次。
-    batches: list[list[dict[str, Any]]] = []
-    batch_start = 0
-    cursor = 0
-    while cursor < replay_size:
-        message = attempt_replay[cursor]
-        raw_calls = message.get("tool_calls")
-        if message.get("role") != "assistant" or not isinstance(raw_calls, list):
-            cursor += 1
-            continue
-        call_ids = {
-            str(call.get("id"))
-            for call in raw_calls
-            if isinstance(call, dict) and isinstance(call.get("id"), str)
-        }
-        if not call_ids or len(call_ids) != len(raw_calls):
-            raise RuntimeError("control attempt replay tool call identity 无效")
-        result_ids: set[str] = set()
-        batch_end = cursor + 1
-        while batch_end < replay_size:
-            result = attempt_replay[batch_end]
-            if result.get("role") != "tool":
-                break
-            result_id = result.get("tool_call_id")
-            if not isinstance(result_id, str):
-                raise RuntimeError("control attempt replay tool result identity 无效")
-            result_ids.add(result_id)
-            batch_end += 1
-        if result_ids != call_ids:
-            raise RuntimeError("control attempt replay 包含未闭合的工具调用")
-        batches.append(list(attempt_replay[batch_start:batch_end]))
-        batch_start = batch_end
-        cursor = batch_end
-
-    # 3. 摘要显式携带本 interaction 的全部 U；末尾未闭合片段保持原文热可见。
-    interaction_inputs = [
-        message.get("content")
-        for message in [*attempt_replay, *messages[replay_end:]]
-        if message.get("role") == "user"
-        and not (
-            isinstance(message.get("content"), str)
-            and is_context_frame(cast(str, message["content"]))
-        )
-    ]
-    current_query = json.dumps(
-        {"logical_interaction_inputs": interaction_inputs},
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
-    return list(messages[:replay_start]), batches, current_query
-
-
-def get_history_since_consolidated(
-    session: "SessionLike",
-    memory_window: int,
-) -> list[dict]:
-    return session.get_history(
-        max_messages=memory_window,
-        start_index=session.last_consolidated,
-    )
 
 
 def extract_model_facing_turn(

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -11,7 +10,6 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent.identity import roxy_env
 from agent.plugins.mobile_ui import (
     MobileUiPluginUnavailable,
     MobileUiProvider,
@@ -21,6 +19,8 @@ from agent.plugins.mobile_ui import (
     MobileUiRpcInvalidRequest,
     MobileUiStaleRevision,
 )
+from agent.model_runtime.registry import ModelRegistry
+from agent.model_runtime.session_selection import read_session_model_selection
 from infra.channels.base import AttachmentStore
 from infra.channels.web_chat_channel import (
     MAX_UPLOAD_BYTES,
@@ -68,6 +68,7 @@ def create_chat_app(
     mobile_pairing_admin: MobilePairingAdmin | None = None,
     runtime_inspection: RuntimeInspectionService | None = None,
     plugin_ui_provider: MobileUiProvider | None = None,
+    model_registry: ModelRegistry | None = None,
 ) -> FastAPI:
     channel.bind_attachment_store(AttachmentStore(workspace / "uploads"))
     app = FastAPI(title="Roxy Chat API")
@@ -89,6 +90,10 @@ def create_chat_app(
             return FileResponse(index_file)
         return {"status": "ok", "channel": channel.name}
 
+    @app.get("/api/chat/health")
+    def chat_health() -> dict[str, str]:
+        return {"status": "ready"}
+
     @app.get("/api/chat/sessions")
     def list_sessions(page: int = Query(1), page_size: int = Query(50)) -> dict[str, Any]:
         ctx = channel._require_ctx()
@@ -105,8 +110,31 @@ def create_chat_app(
         return {"items": visible, "total": len(visible)}
 
     @app.get("/api/chat/navigation")
-    def chat_navigation() -> dict[str, int]:
-        return {"dashboard_port": _public_dashboard_port()}
+    def chat_navigation() -> dict[str, str]:
+        return {"dashboard_path": "/"}
+
+    @app.get("/api/chat/models")
+    async def chat_models(session_key: str = Query(default="")) -> dict[str, object]:
+        if model_registry is None:
+            raise HTTPException(status_code=503, detail="模型注册表不可用")
+        session_override = ""
+        session_effort = ""
+        if session_key:
+            session = channel._require_ctx().session_manager.get_or_create(session_key)
+            selection = read_session_model_selection(session.metadata)
+            session_override = selection.model_ref
+            session_effort = selection.reasoning_effort
+        current = await model_registry.refresh()
+        return {
+            "generationId": current.generation_id,
+            "defaultRuntime": current.role_runtime_ids["default"],
+            "sessionOverride": session_override,
+            "sessionSelection": {
+                "modelRef": session_override,
+                "reasoningEffort": session_effort,
+            },
+            "runtimes": model_registry.list_runtimes(),
+        }
 
     @app.get("/api/chat/plugin-ui/catalog")
     def plugin_ui_catalog() -> dict[str, object]:
@@ -217,20 +245,22 @@ def create_chat_app(
     @app.get("/api/chat/sessions/{session_key:path}/messages")
     def list_messages(
         session_key: str,
-        page: int = Query(1),
-        page_size: int = Query(50),
-        sort_by: str = Query("seq"),
-        sort_order: str = Query("asc"),
+        page_size: int = Query(50, ge=1, le=200),
+        before_seq: int | None = Query(default=None, ge=0),
     ) -> dict[str, Any]:
         ctx = channel._require_ctx()
-        items, total = ctx.session_manager._store.list_messages_for_dashboard(
+        items, total, has_more = ctx.session_manager._store.list_chat_history_page(
             session_key=session_key,
-            page=page,
             page_size=page_size,
-            sort_by=sort_by,
-            sort_order=sort_order,
+            before_seq=before_seq,
         )
-        return {"items": items, "total": total}
+        next_before_seq = items[0]["seq"] if items and has_more else None
+        return {
+            "items": items,
+            "total": total,
+            "has_more": has_more,
+            "before_seq": next_before_seq,
+        }
 
     @app.websocket("/ws")
     async def chat_ws(websocket: WebSocket) -> None:
@@ -308,8 +338,8 @@ def build_chat_server(
     mobile_pairing_admin: MobilePairingAdmin | None = None,
     runtime_inspection: RuntimeInspectionService | None = None,
     plugin_ui_provider: MobileUiProvider | None = None,
-    host: str = "127.0.0.1",
-    port: int = 6322,
+    model_registry: ModelRegistry | None = None,
+    uds: str,
 ) -> uvicorn.Server:
     config = uvicorn.Config(
         create_chat_app(
@@ -318,9 +348,9 @@ def build_chat_server(
             mobile_pairing_admin=mobile_pairing_admin,
             runtime_inspection=runtime_inspection,
             plugin_ui_provider=plugin_ui_provider,
+            model_registry=model_registry,
         ),
-        host=host,
-        port=port,
+        uds=uds,
         log_level="warning",
         access_log=False,
     )
@@ -384,18 +414,3 @@ def _can_read_media(channel: WebChatChannel, path: Path) -> bool:
     if callable(media_path_exists):
         return bool(media_path_exists(path))
     return False
-
-
-def _public_dashboard_port() -> int:
-    raw_port = roxy_env("DASHBOARD_PUBLIC_PORT", "2236")
-    try:
-        port = int(raw_port)
-    except ValueError as error:
-        raise RuntimeError(
-            "ROXY_DASHBOARD_PUBLIC_PORT 必须是 1 到 65535 的整数"
-        ) from error
-    if not 1 <= port <= 65535:
-        raise RuntimeError(
-            "ROXY_DASHBOARD_PUBLIC_PORT 必须是 1 到 65535 的整数"
-        )
-    return port

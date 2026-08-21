@@ -25,7 +25,7 @@ class ProviderProfile:
     def supports_modalities(
         self, model: str, input_modalities: tuple[str, ...]
     ) -> bool:
-        """按已验证的模型家族判断输入模态是否属于 provider 能力。"""
+        """按已验证的模型名单判断 provider 是否支持请求模态。"""
         if input_modalities == self.input_modalities:
             return True
         normalized = model.strip().lower()
@@ -77,7 +77,7 @@ def validate_profile_runtime(
     if protocol == "unknown":
         raise ValueError(f"provider {profile.provider_id} 的模型 ID 不能为空")
 
-    # 2. 图片输入只对已经通过真实 Chat Completions 请求验证的家族开放。
+    # 2. 图片输入只对已经通过真实 Chat Completions 请求验证的型号开放。
     if not profile.supports_modalities(model, input_modalities):
         raise ValueError(
             f"provider {profile.provider_id} 的模型 {model} 不支持 "

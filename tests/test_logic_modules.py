@@ -375,7 +375,6 @@ def test_session_persistence_allocates_sequences_inside_transaction(
             key,
             created_at="2026-07-13T00:00:00+00:00",
             updated_at="2026-07-13T00:00:01+00:00",
-            last_consolidated=0,
             metadata={},
             messages=[
                 {
@@ -419,7 +418,6 @@ def test_session_store_reuses_existing_fts_without_rebuild(
         "telegram:fts",
         created_at="2026-07-13T00:00:00+00:00",
         updated_at="2026-07-13T00:00:01+00:00",
-        last_consolidated=0,
         metadata={},
         messages=[
             {
@@ -456,7 +454,6 @@ def test_session_store_rebuilds_fts_when_trigger_is_missing(tmp_path: Path) -> N
         "telegram:fts-trigger",
         created_at="2026-07-13T00:00:00+00:00",
         updated_at="2026-07-13T00:00:01+00:00",
-        last_consolidated=0,
         metadata={},
         messages=[
             {
@@ -543,7 +540,6 @@ def test_session_store_rejects_invalid_message_json(
         "telegram:json",
         created_at="2026-07-13T00:00:00+00:00",
         updated_at="2026-07-13T00:00:01+00:00",
-        last_consolidated=0,
         metadata={},
         messages=[
             {
@@ -576,7 +572,6 @@ def test_session_store_media_lookup_rejects_invalid_extra(
             "telegram:media",
             created_at="2026-07-13T00:00:00+00:00",
             updated_at="2026-07-13T00:00:01+00:00",
-            last_consolidated=0,
             metadata={},
             messages=[
                 {
@@ -615,7 +610,6 @@ def test_session_store_rejects_invalid_message_columns(
             "telegram:columns",
             created_at="2026-07-13T00:00:00+00:00",
             updated_at="2026-07-13T00:00:01+00:00",
-            last_consolidated=0,
             metadata={},
             messages=[
                 {
@@ -660,7 +654,7 @@ def test_session_get_history_skips_cached_llm_frame_by_default():
     )
     session.add_message("assistant", "world")
 
-    history = session.get_history(start_index=session.last_consolidated)
+    history = session.get_history(max_messages=1)
 
     assert history == [
         {"role": "user", "content": user_content},
@@ -711,23 +705,12 @@ def test_session_get_history_allows_proactive_assistant_boundary():
     session.add_message("user", "刚才那个")
     session.last_consolidated = 2
 
-    history = session.get_history(start_index=session.last_consolidated)
+    history = session.get_history(max_messages=2)
 
     assert history == [
         {"role": "assistant", "content": "[主动推送] 主动消息"},
         {"role": "user", "content": "刚才那个"},
     ]
-
-
-def test_session_get_history_rewinds_consolidated_index_to_user_boundary():
-    session = Session("cli:1")
-    session.add_message("user", "hello")
-    session.add_message("assistant", "world")
-    session.last_consolidated = 1
-
-    history = session.get_history(start_index=session.last_consolidated)
-
-    assert history[0] == {"role": "user", "content": "hello"}
 
 
 def test_session_get_history_never_splits_explicit_multi_input_turn():
@@ -756,7 +739,6 @@ def test_session_get_history_never_splits_explicit_multi_input_turn():
         {"role": "assistant", "content": "final"},
     ]
     assert session.get_history(max_messages=1) == expected
-    assert session.get_history(start_index=3) == expected
 
 
 def test_session_get_history_counts_logical_turn_and_proactive_as_units():
@@ -795,9 +777,8 @@ def test_session_get_history_keeps_full_consolidated_tail():
     for i in range(5):
         session.add_message("user", f"u{i}")
 
-    history = session.get_history(max_messages=2, start_index=0)
+    history = session.get_history(max_messages=500)
 
-    assert session.consolidation_requested is False
     assert history == [
         {"role": "user", "content": "u0"},
         {"role": "user", "content": "u1"},
@@ -807,24 +788,16 @@ def test_session_get_history_keeps_full_consolidated_tail():
     ]
 
 
-def test_session_get_history_assistant_only_returns_empty():
-    session = Session("cli:1")
-    session.add_message("assistant", "a1")
-    session.add_message("assistant", "a2")
-
-    assert session.get_history(start_index=0) == []
-
-
 def test_session_get_history_skips_legacy_context_frame_by_default():
     session = Session("cli:1")
     session.add_message(
         "user",
         "hello",
-        llm_context_frame="[SYSTEM_CONTEXT_FRAME]\n\n## recent_context\n旧内容",
+        llm_context_frame="[SYSTEM_CONTEXT_FRAME]\n\n## context\n旧内容",
         llm_user_content="hello",
     )
 
-    history = session.get_history(start_index=0)
+    history = session.get_history(max_messages=500)
 
     assert history == [{"role": "user", "content": "hello"}]
 
@@ -888,7 +861,7 @@ def test_session_get_history_keeps_short_tool_results_after_consolidation_tail()
             }
         ]
 
-    history = session.get_history(start_index=session.last_consolidated)
+    history = session.get_history(max_messages=500)
     tool_contents = [m["content"] for m in history if m.get("role") == "tool"]
 
     assert tool_contents == ["result-0", "result-1", "result-2"]
@@ -960,6 +933,7 @@ async def test_proactive_loop_wrapper_methods_cover_paths(tmp_path: Path):
     loop._state_store_owned = False
     loop._state_closed = False
     loop._runtime_snapshot_store = None
+    loop._provider = object()
     loop._stopped = asyncio.Event()
     loop._wake = asyncio.Event()
     loop._reload_lock = asyncio.Lock()

@@ -4,8 +4,8 @@ set -euo pipefail
 CONFIG="${ROXY_DEBUG_CONFIG:-/sandbox/config.toml}"
 WORKSPACE="${ROXY_DEBUG_WORKSPACE:-/sandbox/workspace}"
 SOCKET="/sandbox/roxy.sock"
-DASHBOARD_HOST="${ROXY_DASHBOARD_HOST:-0.0.0.0}"
-DASHBOARD_PORT="${ROXY_DASHBOARD_PORT:-2236}"
+WEB_HOST="${ROXY_WEB_HOST:-0.0.0.0}"
+WEB_PORT="${ROXY_WEB_PORT:-2236}"
 HOST_UID="${ROXY_HOST_UID:-1000}"
 HOST_GID="${ROXY_HOST_GID:-1000}"
 
@@ -111,8 +111,8 @@ case "$cmd" in
     dashboard)
         exec_as_host python main.py dashboard \
             --workspace "$WORKSPACE" \
-            --host "$DASHBOARD_HOST" \
-            --port "$DASHBOARD_PORT" \
+            --host "$WEB_HOST" \
+            --port "$WEB_PORT" \
             "$@"
         ;;
     gate-root-shell-cleanup)

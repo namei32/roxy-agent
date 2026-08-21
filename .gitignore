@@ -61,6 +61,8 @@ plugins/**/.data/
 !/docs/decisions/**
 !/docs/design/
 !/docs/design/**
+!/docs/refactor/
+!/docs/refactor/**
 !/docs/templates/
 !/docs/templates/**
 !/docs/spark/
@@ -75,10 +77,11 @@ benchmark/data/
 qa_error_log_*.txt
 lme_error_log_*.txt
 /config.json.bak
+/config.toml.settings-*.bak
 
 # Local AI assistant docs
 /CLAUDE.md
-!/AGENTS.md
+/AGENTS.md
 /memory_annotation_from_*.json
 .squad/
 /akashic-plugin
@@ -90,3 +93,6 @@ lme_error_log_*.txt
 *.migration-lock
 *.migration-backups/
 /docs/spark/
+
+# Codex 运行期自动备份目录（不进版本库，避免干扰 change-gate 审计）
+.codex-backup-*/

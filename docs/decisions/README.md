@@ -6,7 +6,7 @@
 
 | ID | 状态 | 主题 | 关联条款 |
 |---|---|---|---|
-| [0001](0001-project-workbook-is-shared-reality.md) | accepted | 项目工作手册是协作共享现实 | WBK-001～WBK-006、COM-001～COM-004 |
+| [0001](0001-project-workbook-is-shared-reality.md) | superseded | 项目工作手册是协作共享现实 | WBK-001～WBK-006、COM-001～COM-004 |
 | [0002](0002-context-reduction-is-a-nondestructive-projection.md) | accepted | 上下文缩减是非破坏性投影 | CTX-001～CTX-005、SES-003 |
 | [0003](0003-core-capability-ownership-is-semantic.md) | accepted | 核心能力归属由权威语义决定 | MOB-001、GOV-001～GOV-005 |
 | [0004](0004-cross-repository-evidence-is-an-immutable-combination.md) | accepted | 跨仓库证据绑定不可变组合 | GOV-005、MOB-002～MOB-004、TST-006～TST-008 |
@@ -17,7 +17,7 @@
 | [0009](0009-akasha-mobile-recall-preserves-semantic-lanes.md) | accepted | Akasha 移动卡片完整保留有界召回 lane | MOB-006、PLG-011、TST-006～TST-008 |
 | [0010](0010-provider-default-output-and-benchmark-diagnostics.md) | accepted | Provider 默认输出边界与 Benchmark 诊断边界 | RUN-006、TST-009 |
 | [0011](0011-benchmark-concurrency-six.md) | accepted | Benchmark 隔离实例并发上限提高到六 | TST-009、WSP-004、SH-001 |
-| [0012](0012-query-local-compaction-is-a-persisted-projection.md) | accepted | Query 内压缩是可持久重放的非破坏性投影 | CTX-001～CTX-007、SES-001、SES-005、CAP-001 |
+| [0012](0012-query-local-compaction-is-a-persisted-projection.md) | superseded | Query 内压缩是可持久重放的非破坏性投影 | CTX-001～CTX-007、SES-001、SES-005、CAP-001 |
 | [0013](0013-linux-supervisor-uses-one-boot-guardian.md) | accepted | Linux Supervisor 每个 boot 只使用一个 Guardian | RUN-001～RUN-004、WSP-001～WSP-004 |
 | [0014](0014-shell-uses-unified-execution.md) | accepted | Shell 采用统一可续接执行句柄 | SH-001、RUN-002、RUN-003、ERR-001 |
 | [0015](0015-cleanup-does-not-own-turn-or-restart-finality.md) | accepted | Cleanup 不拥有 turn 与重启终态 | SH-002、RUN-003、RUN-004、OUT-001、ERR-001 |
@@ -29,13 +29,23 @@
 | [0021](0021-yoyo-workspace-ledger-defines-migration-origin.md) | accepted | Yoyo workspace 账本定义迁移原点 | MIG-001、MIG-002、WSP-003、BAK-001 |
 | [0022](0022-mobile-webui-uses-server-selected-generations.md) | accepted | 移动 WebUI 使用服务端选择的不可变 generation | WEBUI-001～WEBUI-006、MOB-001～MOB-004、TST-006～TST-008 |
 | [0023](0023-akashic-tokens-own-material-3-semantics.md) | accepted | Akashic Token 拥有 Material 3 设计语义 | WEBUI-001～WEBUI-007 |
-| [0024](0024-plugin-self-validation-uses-stable-and-latest.md) | accepted | 插件自验证使用 stable/latest 与 session 级并发 | RUN-007、OUT-004、PLG-013、CTRL-003、TST-001～TST-006 |
+| [0024](0024-plugin-self-validation-uses-stable-and-latest.md) | superseded | 插件自验证使用 stable/latest 与 session 级并发 | RUN-007、OUT-004、PLG-013、CTRL-003、TST-001～TST-006 |
 | [0025](0025-codex-style-same-turn-input.md) | accepted | 中断后的新 Attempt 续接同一 Logical Interaction | SES-007～SES-008、MEM-010～MEM-011、RUN-008、OUT-005 |
-| [0026](0026-scoped-interview-images-may-auto-export-to-notes.md) | accepted | 面经图片只在持久窄域授权内自动导出到 Notes | CAP-002～CAP-003、PLG-001～PLG-010、SES-005～SES-006 |
-| [0027](0027-mac-notes-bridge-writes-only-through-live-commit.md) | accepted | Mac Notes Bridge 只在当前在线提交 | CAP-002～CAP-004、PLG-001～PLG-005、SEC-010 |
-| [0028](0028-roxy-runtime-identity-migration.md) | accepted | Roxy 是唯一的新增运行时身份，旧 Akashic 仅作兼容 | WSP-003～WSP-005、MIG-001～MIG-002、WEBUI-007、SEC-010 |
-| [0029](0029-roxy-plugins-is-canonical-plugin-organization.md) | accepted | roxy-plugins 是插件源码的 canonical GitHub 组织 | GOV-005、PLG-009、WSP-004～WSP-005、TST-006～TST-007 |
-| [0030](0030-wsl-pulls-ci-promoted-immutable-releases.md) | accepted | WSL 只拉取 CI 晋升的不可变 release | RUN-004、RUN-009、CAP-002～CAP-003、PLG-013、ERR-001 |
+| [0026](0026-plugin-rollout-is-owned-by-the-parent-turn.md) | accepted | 插件发布由父 Turn 在终点统一授权 | PLG-010、PLG-012、PLG-013、RUN-007、CTRL-003、ERR-001、TST-001～TST-006 |
+| [0030](0030-session-context-compaction-ledger.md) | accepted / implemented | Session context compaction ledger 拥有模型窗口投影 | CTX-001～CTX-007、SES-001～SES-005、MEM-002、MEM-004、MEM-008、MEM-011、MIG-001、WSP-003、TST-001～TST-006 |
+| [0027](0027-runtime-models-use-generation-leases.md) | accepted | 运行时模型切换使用 execution generation lease | RUN-009～RUN-012、ONB-001、CTX-001、PLG-003 |
+| [0028](0028-model-credentials-live-with-workspace-connections.md) | accepted | 模型凭据随 workspace connection 保存 | RUN-009～RUN-012、ONB-001、WSP-001、BAK-001 |
+| [0029](0029-main-gateway-reconciles-mobile-webui-stable.md) | accepted | main Gateway 对账移动 WebUI Stable | WEBUI-004～WEBUI-006、GOV-005、TST-006～TST-008 |
+| [0031](0031-stable-matching-head-allows-gateway-restart.md) | accepted / implemented | Stable 与本地 HEAD 一致时允许 Gateway 重启 | WEBUI-004～WEBUI-006、GOV-005、TST-006～TST-008 |
+| [0032](0032-host-bridge-preserves-host-equivalent-execution.md) | accepted | Host Bridge 保留宿主等价执行能力 | RUN-013～RUN-014、WSP-005、SH-001～SH-003 |
+| [0033](0033-local-agent-instructions-are-not-project-documents.md) | accepted | 本地 Agent 指令不属于版本化项目文档 | WBK-001～WBK-006、COM-001～COM-004 |
+| [0034](0034-turn-is-the-logical-work-unit.md) | accepted | Turn 是逻辑工作单元 | CTX-003、SES-007、SES-008、MEM-011、OUT-001、OUT-004、SCH-003 |
+| [0035](0035-mobile-protocol-delivery-is-phased.md) | accepted | 移动协议交付按变更性质分阶段 | MOB-008、MOB-006、TST-007、GOV-002 |
+| [0036](0036-scoped-interview-images-may-auto-export-to-notes.md) | accepted | 面经图片只在持久窄域授权内自动导出到 Notes | CAP-002～CAP-003、PLG-001～PLG-010、SES-005～SES-006 |
+| [0037](0037-mac-notes-bridge-writes-only-through-live-commit.md) | accepted | Mac Notes Bridge 只在当前在线提交 | CAP-002～CAP-004、PLG-001～PLG-005、SEC-010 |
+| [1001](1001-roxy-runtime-identity-migration.md) | accepted | Roxy 是唯一的新增运行时身份，旧 Akashic 仅作兼容 | WSP-003～WSP-004、WSP-006、MIG-001～MIG-002、WEBUI-007、SEC-010 |
+| [1002](1002-roxy-plugins-is-canonical-plugin-organization.md) | accepted | roxy-plugins 是插件源码的 canonical GitHub 组织 | GOV-005、PLG-009、WSP-004～WSP-005、TST-006～TST-007 |
+| [1003](1003-wsl-pulls-ci-promoted-immutable-releases.md) | accepted | WSL 只拉取 CI 晋升的不可变 release | RUN-004、RUN-016、CAP-002～CAP-003、PLG-013、ERR-001 |
 
 ## 新增规则
 
@@ -43,3 +53,4 @@
 2. 写明状态、日期、背景、决定、理由、影响、验收和关联条款。
 3. 旧决定被推翻时保留原文件，新记录声明 `supersedes`，旧记录补 `superseded by`。
 4. 没有形成选择的讨论不进入这里；未完成动作写入 `NOW.md`。
+5. `0001`～`0999` 保留上游 Akashic 决策编号；Roxy fork 专属决策使用 `1000` 系列，避免后续上游同步发生编号冲突。

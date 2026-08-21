@@ -7,25 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal, Protocol, cast
 
-from agent.lifecycle.types import PromptRenderInput, PromptRenderResult
-
 logger = logging.getLogger("agent.tool_discovery")
-
-
-@dataclass
-class MemoryConfig:
-    window: int = 40
-
-
-@dataclass
-class LLMServices:
-    provider: object
-    light_provider: object
-
-
-@dataclass
-class MemoryServices:
-    engine: object
 
 
 @dataclass
@@ -157,16 +139,12 @@ class ToolDiscoveryState:
 
 class SessionLike(Protocol):
     key: str
+    created_at: datetime
     messages: list[dict[str, object]]
     metadata: dict[str, object]
     last_consolidated: int
 
-    def get_history(
-        self,
-        max_messages: int = 500,
-        *,
-        start_index: int | None = None,
-    ) -> list[dict[str, object]]: ...
+    def get_history(self, max_messages: int = 500) -> list[dict[str, object]]: ...
     def add_message(
         self,
         role: str,
@@ -188,29 +166,4 @@ class TurnRunResult:
     streamed: bool = False
     context_retry: dict[str, object] = field(default_factory=dict[str, object])
     model_state: dict[str, object] | None = None
-    react_compaction: dict[str, object] | None = None
     mobile_attention: Literal["confirmation"] | None = None
-
-
-class AgentLoopRunner(Protocol):
-    async def __call__(
-        self,
-        initial_messages: list[dict[str, object]],
-        request_time: datetime | None = None,
-        preloaded_tools: set[str] | None = None,
-    ) -> tuple[
-        str,
-        list[str],
-        list[dict[str, object]],
-        set[str] | None,
-        str | None,
-    ]:
-        ...
-
-
-class PromptRenderRunner(Protocol):
-    async def __call__(
-        self,
-        input: PromptRenderInput,
-    ) -> PromptRenderResult:
-        ...

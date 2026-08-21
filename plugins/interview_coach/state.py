@@ -332,9 +332,11 @@ def _parse_batch(value: object, *, batch_id: str) -> InterviewBatch:
         question_count=_required_int(raw, "question_count"),
         roxy_related_count=_required_int(
             raw,
-            "roxy_related_count"
-            if "roxy_related_count" in raw
-            else "akashic_related_count",
+            (
+                "roxy_related_count"
+                if "roxy_related_count" in raw
+                else "akashic_related_count"
+            ),
         ),
         general_count=_required_int(raw, "general_count"),
         created_at=_required_string(raw, "created_at"),

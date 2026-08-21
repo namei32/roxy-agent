@@ -15,7 +15,6 @@ from agent.model_runtime.errors import (
     RetryableTransportError,
     TransportError,
 )
-from agent.model_runtime.context_policy import recommended_context_settings
 from agent.model_runtime.types import ModelCapabilities
 
 
@@ -103,14 +102,10 @@ class CodexModelCatalog:
             for item in efforts
             if isinstance(item, dict) and item.get("effort")
         )
-        percent = int(raw.get("effective_context_window_percent", 90)) / 100
         capabilities = ModelCapabilities(
             context_window=context_window,
-            max_output_tokens=recommended_context_settings(
-                max_context_window, percent
-            ).output_reserve,
+            max_output_tokens=0,
             max_context_window=max_context_window,
-            effective_context_percent=percent,
             supported_reasoning_efforts=effort_names,
             default_reasoning_effort=raw.get("default_reasoning_level"),
             input_modalities=parsed_modalities,

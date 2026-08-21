@@ -15,7 +15,6 @@ from types import FrameType
 from typing import IO
 from uuid import uuid4
 
-from agent.identity import roxy_env
 from agent.background.boot_guardian import (
     _cleanup_boot_processes,
     _cleanup_boot_processes_best_effort,
@@ -24,7 +23,13 @@ from agent.background.boot_guardian import (
     _pid_exists,
     _reap_adopted_children,
 )
-from utils.pidfd import open_pidfd, send_pidfd_signal
+from agent.identity import roxy_env, unset_roxy_env_in
+from utils.process_guard import (
+    ProcessRef,
+    open_process_ref,
+    process_wait_timeout,
+    signal_process_ref,
+)
 
 RESTART_EXIT_CODE = 75
 SUPERVISOR_FAILURE_EXIT_CODE = 70
@@ -99,6 +104,7 @@ class _LifecycleState:
     last_elapsed_ms: int = -1
     protocol_error: str = ""
     buffer: bytearray = field(default_factory=bytearray)
+    settings_results: list[tuple[bool, str]] = field(default_factory=list)
 
     def feed(self, payload: bytes, *, eof: bool = False) -> None:
         """解析完整 NDJSON frame，并保留末尾尚未完成的字节。"""
@@ -137,6 +143,8 @@ class _LifecycleState:
             self._accept_ready(frame)
         elif frame_type == "commit":
             self._accept_commit(frame)
+        elif frame_type == "settings_reloaded":
+            self._accept_settings_reloaded(frame)
         else:
             self.protocol_error = f"未知 lifecycle frame: {frame_type!r}"
 
@@ -177,9 +185,22 @@ class _LifecycleState:
             return
         self.commit_valid = True
 
+    def _accept_settings_reloaded(self, frame: dict[str, object]) -> None:
+        success = frame.get("success")
+        detail = frame.get("detail", "")
+        if (
+            not self.ready
+            or not isinstance(success, bool)
+            or not isinstance(detail, str)
+            or len(detail.encode("utf-8")) > 2048
+        ):
+            self.protocol_error = "settings reload frame 无效"
+            return
+        self.settings_results.append((success, detail))
+
 
 class _SettingsRestartBridge:
-    """用 wake pipe 在设置线程与 Supervisor 之间交接一次重启。"""
+    """用 wake pipe 在设置线程与 Supervisor 之间交接一次热重载。"""
 
     def __init__(self, timeout_s: float) -> None:
         self.timeout_s = timeout_s
@@ -207,9 +228,9 @@ class _SettingsRestartBridge:
                 timeout=self.timeout_s,
             )
             if not completed:
-                raise RuntimeError("Gateway 重启等待超时")
+                raise RuntimeError("Gateway 模型配置重载等待超时")
             if not self._completed.pop(generation):
-                raise RuntimeError("Gateway 使用候选配置启动失败")
+                raise RuntimeError("Gateway 拒绝候选模型配置")
 
     def take_request(self) -> int:
         with self._condition:
@@ -241,10 +262,10 @@ def run_supervisor(
     workspace: Path,
     readiness_timeout_s: float = 15.0,
 ) -> int:
-    """管理 Linux boot 代际，并且只接受当前 boot 的私有重启提交。"""
+    """管理 boot 代际，并且只接受当前 boot 的私有重启提交。"""
 
-    if not sys.platform.startswith("linux"):
-        raise RuntimeError("Supervisor 仅支持 Linux")
+    if not _supervisor_platform_supported():
+        raise RuntimeError("Supervisor 仅支持 Linux 和 macOS")
     if readiness_timeout_s <= 0:
         raise ValueError("readiness_timeout_s 必须大于 0")
     # 1. 建立 workspace owner、设置线程和停止信号边界。
@@ -312,16 +333,12 @@ def run_supervisor(
             os.set_blocking(lifecycle_read_fd, False)
             guardian_env = os.environ.copy()
             for name in (
-                "ROXY_SUPERVISED",
-                "ROXY_BOOT_ID",
-                "ROXY_LIFECYCLE_FD",
-                "ROXY_RESTART_NONCE",
-                "AKASHIC_SUPERVISED",
-                "AKASHIC_BOOT_ID",
-                "AKASHIC_LIFECYCLE_FD",
-                "AKASHIC_RESTART_NONCE",
+                "SUPERVISED",
+                "BOOT_ID",
+                "LIFECYCLE_FD",
+                "RESTART_NONCE",
             ):
-                guardian_env.pop(name, None)
+                unset_roxy_env_in(guardian_env, name)
             try:
                 guardian = subprocess.Popen(
                     [
@@ -449,7 +466,7 @@ def _wait_child(
     settings_bridge: _SettingsRestartBridge | None = None,
     report_settings_generation: int = 0,
 ) -> _ChildResult:
-    """等待 pidfd 与生命周期事件，直到 Guardian 退出或启动失败。"""
+    """等待进程与生命周期事件，直到 Guardian 退出或启动失败。"""
 
     # 1. 建立本代协议状态和三个可等待的内核事件。
     _ = workspace
@@ -458,13 +475,14 @@ def _wait_child(
     state = _LifecycleState(boot_id, nonce)
     deadline = time.monotonic() + readiness_timeout_s
     settings_generation = 0
-    gateway_pidfd: int | None = None
-    child_pidfd = open_pidfd(child.pid)
+    gateway_ref: ProcessRef | None = None
+    child_ref = open_process_ref(child.pid)
     lifecycle_open = True
     try:
         # 2. ready 前受总体 deadline 约束，ready 后只等待事件或进程退出。
         with selectors.DefaultSelector() as selector:
-            selector.register(child_pidfd, selectors.EVENT_READ, "guardian")
+            if child_ref.wait_fd is not None:
+                selector.register(child_ref.wait_fd, selectors.EVENT_READ, "guardian")
             selector.register(read_fd, selectors.EVENT_READ, "lifecycle")
             while child.poll() is None:
                 timeout = None
@@ -477,7 +495,7 @@ def _wait_child(
                         )
                         _stop_guardian(child)
                         break
-                events = selector.select(timeout)
+                events = selector.select(process_wait_timeout(child_ref, timeout))
                 for key, _mask in events:
                     if key.data == "guardian":
                         _ = child.wait()
@@ -485,6 +503,18 @@ def _wait_child(
                         chunk = os.read(read_fd, 65536)
                         if chunk:
                             state.feed(chunk)
+                            if state.settings_results:
+                                if not settings_generation:
+                                    state.protocol_error = "收到无对应请求的 settings reload 回执"
+                                elif len(state.settings_results) != 1:
+                                    state.protocol_error = "收到重复 settings reload 回执"
+                                else:
+                                    success, _detail = state.settings_results.pop()
+                                    settings_bridge.complete(
+                                        settings_generation,
+                                        success,
+                                    )
+                                    settings_generation = 0
                         else:
                             state.feed(b"", eof=True)
                             selector.unregister(read_fd)
@@ -492,13 +522,21 @@ def _wait_child(
                     elif key.data == "settings":
                         settings_generation = settings_bridge.take_request()
                         if settings_generation:
-                            assert gateway_pidfd is not None
-                            send_pidfd_signal(gateway_pidfd, signal.SIGUSR2)
+                            assert gateway_ref is not None
+                            if not gateway_ref.stable and not _pid_has_boot_identity(
+                                gateway_ref.pid,
+                                boot_id,
+                            ):
+                                state.protocol_error = (
+                                    "Gateway PID 已退出或身份变化，拒绝发送设置重载信号"
+                                )
+                                break
+                            signal_process_ref(gateway_ref, signal.SIGUSR1)
 
                 if state.protocol_error:
                     _stop_guardian(child)
                     break
-                if state.ready and gateway_pidfd is None:
+                if state.ready and gateway_ref is None:
                     assert state.gateway_pid is not None
                     if not _pid_has_boot_identity(state.gateway_pid, boot_id):
                         state.protocol_error = (
@@ -507,7 +545,7 @@ def _wait_child(
                         state.commit_valid = False
                         _stop_guardian(child)
                         break
-                    gateway_pidfd = open_pidfd(state.gateway_pid)
+                    gateway_ref = open_process_ref(state.gateway_pid)
                     if report_settings_generation:
                         settings_bridge.complete(report_settings_generation, True)
                         report_settings_generation = 0
@@ -538,12 +576,17 @@ def _wait_child(
     finally:
         if lease_fd is not None:
             os.close(lease_fd)
-        if gateway_pidfd is not None:
-            os.close(gateway_pidfd)
-        os.close(child_pidfd)
+        if gateway_ref is not None:
+            gateway_ref.close()
+        child_ref.close()
         os.close(read_fd)
         if owned_bridge:
             settings_bridge.close()
+
+
+def _supervisor_platform_supported(platform: str | None = None) -> bool:
+    current = platform or sys.platform
+    return current.startswith("linux") or current == "darwin"
 
 
 def _read_lifecycle_to_eof(fd: int, state: _LifecycleState) -> None:
@@ -610,24 +653,33 @@ def _start_settings_server(
     workspace: Path,
     bridge: _SettingsRestartBridge,
 ):
-    """启动仅监听 loopback 的设置服务，并等待确定的启动事件。"""
+    """启动唯一的 loopback Web Shell，并等待确定的启动事件。"""
 
     import asyncio
 
-    from bootstrap.settings_api import create_settings_server
+    from bootstrap.web_shell import create_web_shell_server
 
-    host = roxy_env("SETTINGS_HOST", "127.0.0.1")
-    if host != "127.0.0.1":
-        raise RuntimeError("ROXY_SETTINGS_HOST 只允许 127.0.0.1")
-    server = create_settings_server(
+    host = roxy_env("WEB_HOST", "127.0.0.1")
+    allow_non_loopback = roxy_env("WEB_ALLOW_NON_LOOPBACK") == "1"
+    if host != "127.0.0.1" and not allow_non_loopback:
+        raise RuntimeError("ROXY_WEB_HOST 只允许 127.0.0.1")
+    raw_port = roxy_env("WEB_PORT", "2236")
+    try:
+        port = int(raw_port)
+    except ValueError as error:
+        raise RuntimeError("ROXY_WEB_PORT 必须是 1 到 65535 的整数") from error
+    if not 1 <= port <= 65_535:
+        raise RuntimeError("ROXY_WEB_PORT 必须是 1 到 65535 的整数")
+    server = create_web_shell_server(
         config_path,
         workspace,
         host=host,
+        port=port,
         on_applied=bridge.request_and_wait,
     )
     thread = threading.Thread(
         target=lambda: asyncio.run(server.serve()),
-        name="settings-server",
+        name="web-shell-server",
         daemon=True,
     )
     thread.start()
@@ -635,5 +687,6 @@ def _start_settings_server(
     if not server.started:
         server.should_exit = True
         thread.join(timeout=1)
-        raise RuntimeError("设置服务无法监听 127.0.0.1:6321")
+        raise RuntimeError(f"Web Shell 无法监听 {host}:{port}")
+    print(f"Roxy Web 已就绪: http://{host}:{port}", flush=True)
     return server, thread

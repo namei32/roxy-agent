@@ -1,479 +1,185 @@
-import { useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
-import { Check, ChevronRight, KeyRound, LoaderCircle, Palette, RefreshCw, Settings2 } from "lucide-react";
-import { Input } from "@/components/ui/input";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import "./settings.css";
+  Check,
+  ChevronRight,
+  KeyRound,
+  LoaderCircle,
+  Palette,
+  Search,
+  ShieldCheck,
+  X,
+} from "lucide-react";
+import { useCallback, useMemo, useRef, useState } from "react";
+import codexIcon from "./assets/provider-icons/codex.svg";
+import deepseekIcon from "./assets/provider-icons/deepseek.svg";
+import opencodeIcon from "./assets/provider-icons/opencode.svg";
 import { cycleTheme, useTheme } from "../../theme/src/theme-runtime";
-import { MaterialButton, MaterialFilterChip } from "../../theme/src/material-react";
+import { MemorySettings } from "./memory-settings";
+import { SettingsConnectionDialog } from "./settings-connection-dialog";
+import {
+  groupConnections,
+  type ConnectionGroup,
+  type ConnectionTemplate,
+  type ModelRole,
+} from "./settings-data";
+import { useSettingsController } from "./use-settings-controller";
+import "./settings.css";
 
 const isEmbeddedShell = new URLSearchParams(window.location.search).get("embedded") === "1";
 
-type ProviderKind = "api" | "opencode-go" | "codex";
-
-interface RuntimeSummary {
-  id: string;
-  provider: string;
-  model: string;
-  baseUrl: string;
-  contextWindow: number;
-  maxOutputTokens: number;
-  inputModalities: string[];
-  reasoningEffort: string;
-  credential: { configured: boolean; source: string };
+interface ConnectionSelection {
+  template: ConnectionTemplate & { icon: string };
+  existing?: ConnectionGroup;
 }
 
-interface SettingsState {
-  mode: "needs_setup" | "needs_repair" | "ready";
-  workspace: string;
-  error?: string;
-  activeRuntime: string | null;
-  runtimes: RuntimeSummary[];
-  codexConfigured: boolean;
-  localOpenCodeConfigured: boolean;
-}
-
-interface ModelOption {
-  id: string;
-  contextWindow?: number;
-  maxOutputTokens?: number;
-  inputModalities?: string[];
-  supportedReasoningEfforts?: string[];
-  defaultReasoningEffort?: string;
-}
-
-interface CodexLoginState {
-  loginId: string;
-  status: "waiting" | "completed" | "failed";
-  userCode: string;
-  verificationUri: string;
-  interval: number;
-  error: string;
-}
-
-const providers: Array<{ id: ProviderKind; name: string; note: string }> = [
-  { id: "api", name: "API Key", note: "任意 OpenAI Chat Completions 端点" },
-  { id: "opencode-go", name: "OpenCode Go", note: "使用订阅内可用的 Chat 模型" },
-  { id: "codex", name: "Codex Auth", note: "复用本机 ChatGPT Codex 登录" },
+const PROVIDER_TEMPLATES: Array<ConnectionTemplate & { icon: string }> = [
+  { kind: "codex" as const, provider: "codex", name: "Codex", detail: "ChatGPT 订阅登录", baseUrl: "", icon: codexIcon },
+  { kind: "opencode-go" as const, provider: "opencode-go", name: "OpenCode Go", detail: "本机登录或 API Key", baseUrl: "https://opencode.ai/zen/go/v1", icon: opencodeIcon },
+  { kind: "api" as const, provider: "deepseek", name: "DeepSeek", detail: "官方 API", baseUrl: "https://api.deepseek.com/v1", icon: deepseekIcon },
+  { kind: "api" as const, provider: "", name: "自定义 API", detail: "连接任意兼容服务", baseUrl: "", icon: "" },
 ];
 
-async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      "X-Roxy-CSRF": "1",
-      ...init?.headers,
-    },
-  });
-  const text = await response.text();
-  let payload: { detail?: string; message?: string };
-  try {
-    payload = text ? JSON.parse(text) as { detail?: string; message?: string } : {};
-  } catch {
-    if (!response.ok) throw new Error(`设置服务请求失败 (${response.status})`);
-    throw new Error("设置服务返回了无效响应");
-  }
-  if (!response.ok) throw new Error(payload.detail || payload.message || `请求失败 (${response.status})`);
-  return payload as T;
+const ROLE_LABELS: Record<ModelRole, { title: string; detail: string }> = {
+  default: { title: "默认模型", detail: "普通模型调用与系统默认" },
+  agent: { title: "Agent 模型", detail: "被动对话与计划任务 ReAct" },
+  fast: { title: "轻量模型", detail: "压缩、标签与后台提取" },
+  vision: { title: "视觉模型", detail: "包含图片的输入" },
+};
+
+function providerIcon(provider: string): string {
+  return PROVIDER_TEMPLATES.find((item) => item.provider === provider)?.icon || "";
 }
 
-function runtimeKind(runtime: RuntimeSummary): ProviderKind {
-  if (runtime.provider === "opencode-go") return "opencode-go";
-  if (runtime.provider === "codex") return "codex";
-  return "api";
+function ConnectionMark({ provider, name }: { provider: string; name: string }) {
+  const icon = providerIcon(provider);
+  return <span className="settings-connection-mark" aria-hidden="true">{icon ? <img src={icon} alt="" /> : provider ? name.slice(0, 1).toUpperCase() : <KeyRound size={20} />}</span>;
 }
 
 export function SettingsApp() {
   const theme = useTheme();
-  const [state, setState] = useState<SettingsState | null>(null);
-  const [kind, setKind] = useState<ProviderKind>("api");
-  const [provider, setProvider] = useState("openai");
-  const [baseUrl, setBaseUrl] = useState("https://api.openai.com/v1");
-  const [apiKey, setApiKey] = useState("");
-  const [model, setModel] = useState("");
-  const [contextWindow, setContextWindow] = useState("128000");
-  const [maxOutputTokens, setMaxOutputTokens] = useState("0");
-  const [reasoningEffort, setReasoningEffort] = useState("");
-  const [inputModalities, setInputModalities] = useState<string[]>(["text"]);
-  const [models, setModels] = useState<ModelOption[]>([]);
-  const [loadingModels, setLoadingModels] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState("");
-  const [codexLogin, setCodexLogin] = useState<CodexLoginState | null>(null);
-  const [codexLoginLoading, setCodexLoginLoading] = useState(false);
+  const { state, error, setError, notice, setNotice, refresh, updateRole } = useSettingsController();
+  const [query, setQuery] = useState("");
+  const [selection, setSelection] = useState<ConnectionSelection | null>(null);
+  const dialogReturnFocusRef = useRef<HTMLElement | null>(null);
+  const connections = useMemo(() => groupConnections(state?.runtimes || [], query), [query, state?.runtimes]);
+  const hasConnections = Boolean(state?.runtimes.length);
 
-  useEffect(() => {
-    requestJson<SettingsState>("/api/settings/state")
-      .then((next) => {
-        setState(next);
-        const active = next.runtimes.find((item) => item.id === next.activeRuntime);
-        if (active) selectRuntime(active);
-      })
-      .catch((reason: Error) => setError(reason.message));
+  const openConnection = useCallback((next: ConnectionSelection) => {
+    dialogReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setSelection(next);
   }, []);
 
-  useEffect(() => {
-    if (!codexLogin || codexLogin.status !== "waiting") return;
-    const timer = window.setInterval(async () => {
-      const next = await requestJson<CodexLoginState>(`/api/settings/codex-login/${codexLogin.loginId}`);
-      setCodexLogin(next);
-      if (next.status === "completed") {
-        setState(await requestJson<SettingsState>("/api/settings/state"));
-      }
-    }, Math.max(3, codexLogin.interval) * 1000);
-    return () => window.clearInterval(timer);
-  }, [codexLogin]);
-
-  const selectedRuntime = useMemo(
-    () => state?.runtimes.find((item) => runtimeKind(item) === kind),
-    [kind, state],
-  );
-
-  const selectedModel = models.find((item) => item.id === model);
-  const effortOptions = selectedModel?.supportedReasoningEfforts ?? [];
-
-  function selectRuntime(runtime: RuntimeSummary) {
-    setKind(runtimeKind(runtime));
-    setProvider(runtime.provider);
-    setBaseUrl(runtime.baseUrl);
-    setModel(runtime.model);
-    setContextWindow(String(runtime.contextWindow || 128000));
-    setMaxOutputTokens(String(runtime.maxOutputTokens ?? 0));
-    setReasoningEffort(runtime.reasoningEffort || "");
-    setInputModalities(runtime.inputModalities.length ? runtime.inputModalities : ["text"]);
-    setApiKey("");
-    setModels([]);
-  }
-
-  function chooseProvider(next: ProviderKind) {
-    setKind(next);
-    setApiKey("");
-    setModels([]);
-    setSaved(false);
-    setError("");
-    const existing = state?.runtimes.find((item) => runtimeKind(item) === next);
-    if (existing) {
-      selectRuntime(existing);
-      return;
+  const handleConnectionSaved = useCallback(async (firstConnection: boolean, sourceName: string) => {
+    await refresh();
+    setNotice(firstConnection ? `${sourceName} 已保存，接下来配置记忆` : `${sourceName} 已保存，密钥不会显示在页面中`);
+    setSelection(null);
+    if (isEmbeddedShell && !firstConnection) {
+      window.parent.postMessage({ type: "roxy.settings.applied" }, window.location.origin);
     }
-    if (next === "opencode-go") {
-      setProvider("opencode-go");
-      setBaseUrl("https://opencode.ai/zen/go/v1");
-      setModel("");
-      setContextWindow("128000");
-      setMaxOutputTokens("0");
-      setReasoningEffort("");
-      setInputModalities(["text"]);
-    } else if (next === "codex") {
-      setProvider("codex");
-      setBaseUrl("");
-      setModel("");
-      setContextWindow("128000");
-      setMaxOutputTokens("0");
-      setReasoningEffort("");
-      setInputModalities(["text"]);
-    } else {
-      setProvider("openai");
-      setBaseUrl("https://api.openai.com/v1");
-      setModel("");
-      setMaxOutputTokens("0");
-      setReasoningEffort("");
-      setInputModalities(["text"]);
-    }
-  }
+  }, [refresh, setNotice]);
 
-  async function loadModels() {
-    setLoadingModels(true);
-    setError("");
-    try {
-      const result = await requestJson<{ models: ModelOption[] }>("/api/settings/models", {
-        method: "POST",
-        body: JSON.stringify({
-          provider,
-          api_key: apiKey,
-          base_url: baseUrl,
-          use_local_opencode: kind === "opencode-go" && Boolean(state?.localOpenCodeConfigured),
-        }),
-      });
-      setModels(result.models);
-      if (!model && result.models[0]) applyModel(result.models[0]);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setLoadingModels(false);
-    }
-  }
+  const handleLoginCompleted = useCallback(async () => {
+    await refresh();
+    setNotice("Codex 登录已完成，可以发现模型了");
+  }, [refresh, setNotice]);
 
-  function applyModel(option: ModelOption) {
-    setModel(option.id);
-    if (option.contextWindow) setContextWindow(String(option.contextWindow));
-    if (!reasoningEffort && option.defaultReasoningEffort) {
-      setReasoningEffort(option.defaultReasoningEffort);
-    }
-    setInputModalities(option.inputModalities?.length ? option.inputModalities : ["text"]);
-  }
-
-  async function save() {
-    setSaving(true);
-    setSaved(false);
-    setError("");
-    try {
-      await requestJson("/api/settings/apply", {
-        method: "POST",
-        body: JSON.stringify({
-          provider,
-          model,
-          api_key: apiKey,
-          credential_id: kind === "codex" ? "codex_default" : "",
-          use_local_opencode: kind === "opencode-go" && !apiKey && Boolean(state?.localOpenCodeConfigured),
-          base_url: baseUrl,
-          context_window: Number(contextWindow),
-          max_output_tokens: Number(maxOutputTokens),
-          reasoning_effort: reasoningEffort,
-          input_modalities: inputModalities,
-        }),
-      });
-      setApiKey("");
-      setSaved(true);
-      setState(await requestJson<SettingsState>("/api/settings/state"));
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function beginCodexLogin() {
-    if (codexLoginLoading) return;
-    setCodexLoginLoading(true);
-    setError("");
-    try {
-      const login = await requestJson<CodexLoginState>("/api/settings/codex-login", {
-        method: "POST",
-        body: "{}",
-      });
-      setCodexLogin(login);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setCodexLoginLoading(false);
-    }
-  }
-
-  if (!state && !error) {
-    return <div className="settings-loading"><LoaderCircle className="animate-spin" /> 正在读取设置</div>;
-  }
-
-  if (state?.mode === "needs_repair") {
-    return (
-      <main className="settings-page">
-        <section className="settings-repair">
-          <Settings2 aria-hidden="true" />
-          <h1>配置需要手动处理</h1>
-          <p>{state.error || "当前 config.toml 不是受支持的新格式。"}</p>
-          <p className="settings-muted">本版本不会自动迁移旧配置，也不会覆盖原文件。</p>
-        </section>
-      </main>
-    );
-  }
-
-  const keyConfigured = selectedRuntime?.credential.configured || false;
-  const authReady = kind === "codex"
-    ? Boolean(state?.codexConfigured)
-    : kind === "opencode-go"
-      ? Boolean(apiKey || keyConfigured || state?.localOpenCodeConfigured)
-      : Boolean(apiKey || keyConfigured);
-  const canSave = Boolean(model && provider && contextWindow && maxOutputTokens && authReady);
+  if (!state && !error) return <div className="settings-loading"><LoaderCircle className="is-spinning" />正在读取模型连接</div>;
+  if (state?.mode === "needs_repair") return <main className="settings-page"><section className="settings-repair"><ShieldCheck /><h1>配置需要手动处理</h1><p>{state.error}</p></section></main>;
+  if (state?.runtimes.length && !state.memory.configured) return <main className="settings-page">
+    <div className="settings-shell settings-shell--onboarding">
+      <MemorySettings
+        memory={state.memory}
+        modelRevision={state.modelRevision}
+        onboarding
+        onRefresh={async () => (await refresh())?.memory ?? state.memory}
+        onError={setError}
+        onNotice={setNotice}
+        onComplete={(message) => {
+          setNotice(message);
+          if (isEmbeddedShell) window.parent.postMessage({ type: "roxy.settings.applied" }, window.location.origin);
+          window.setTimeout(() => {
+            if (isEmbeddedShell) window.parent.location.href = "/";
+            else window.location.href = "/";
+          }, 350);
+        }}
+      />
+      {error && <p className="settings-inline-error" role="alert">{error}</p>}
+    </div>
+    <SettingsNotice message={notice} onClose={() => setNotice("")} />
+  </main>;
 
   return (
     <main className="settings-page">
-      <div className="settings-shell">
+      <div className={`settings-shell ${hasConnections ? "" : "settings-shell--first-run"}`}>
         <header className="settings-header">
-          <div>
-            <h1>{state?.mode === "needs_setup" ? "连接你的模型" : "模型与认证"}</h1>
-            <p>选择一个 Provider，验证后安全切换。已保存的密钥不会显示在页面中。</p>
-          </div>
+          <div><h1>{hasConnections ? "模型连接" : "连接你的第一个模型"}</h1><p>{hasConnections ? "每套账号或 API Key 都是独立连接；保存后自动识别模型能力。" : "选择登录方式或 API 服务。连接成功后，再决定是否启用记忆。"}</p></div>
           <div className="settings-header-actions">
-            {!isEmbeddedShell && <button className="settings-theme-button" type="button" onClick={cycleTheme}>
-              <Palette aria-hidden="true" /> {theme.label}
-            </button>}
-            {state?.mode === "ready" && !isEmbeddedShell && (
-              <a className="settings-chat-link" href={`http://${window.location.hostname}:6322`}>
-                打开聊天 <ChevronRight />
-              </a>
-            )}
+            {!isEmbeddedShell && <button type="button" className="settings-quiet-button" onClick={cycleTheme}><Palette size={17} />{theme.label}</button>}
           </div>
         </header>
 
-        <div className="settings-layout">
-          <nav className="provider-list" aria-label="Provider">
-            {providers.map((item) => {
-              const runtime = state?.runtimes.find((entry) => runtimeKind(entry) === item.id);
-              const active = runtime?.id === state?.activeRuntime;
-              return (
-                <button
-                  className={`provider-option ${kind === item.id ? "is-selected" : ""}`}
-                  key={item.id}
-                  onClick={() => chooseProvider(item.id)}
-                  type="button"
-                >
-                  <span className="provider-title">{item.name}</span>
-                  <span className="provider-note">{item.note}</span>
-                  {active && <span className="provider-active"><Check /> 当前使用</span>}
-                </button>
-              );
-            })}
-          </nav>
+        {hasConnections && <label className="settings-search"><Search size={18} aria-hidden="true" /><span className="sr-only">搜索模型连接</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索连接或模型" /></label>}
 
-          <section
-            className="settings-panel"
-            key={kind}
-          >
-            <div className="panel-heading">
-              <div className="panel-icon"><KeyRound /></div>
-              <div>
-                <h2>{providers.find((item) => item.id === kind)?.name}</h2>
-                <p>{keyConfigured ? "已保存认证；留空即可继续使用" : "完成认证并选择模型"}</p>
-              </div>
-            </div>
+        {hasConnections && <section className="settings-section">
+          <header><div><h2>已连接</h2><p>同一供应商可以添加多个账号，模型选择时按连接名称区分。</p></div><span>{connections.length} 个</span></header>
+          <div className="settings-gallery">
+            {connections.map((group) => <button type="button" className="settings-connection-card" key={group.sourceId} onClick={() => openConnection({ template: PROVIDER_TEMPLATES[0], existing: group })}>
+              <ConnectionMark provider={group.provider} name={group.sourceName} />
+              <span className="settings-card-copy"><strong>{group.sourceName}</strong><small>{group.provider} · {group.runtimes.map((item) => item.model).join("、")}</small></span>
+              <span className="settings-card-meta"><i><span />已连接</i><small>{group.runtimes.length} 个模型</small></span>
+              <ChevronRight size={18} aria-hidden="true" />
+            </button>)}
+          </div>
+        </section>}
 
-            {kind === "api" && (
-              <div className="field-grid two-columns">
-                <Field label="Provider ID"><Input value={provider} onChange={(event) => setProvider(event.target.value)} /></Field>
-                <Field label="Base URL"><Input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} /></Field>
-              </div>
-            )}
+        <section className={`settings-section settings-section--templates ${hasConnections ? "" : "is-first-run"}`}>
+          <header><div><h2>{hasConnections ? "添加其他连接" : "选择连接方式"}</h2><p>{hasConnections ? "可以继续添加另一个账号或服务。" : "Codex 与 OpenCode 登录后自动同步模型；API 服务会先检测模型目录。"}</p></div></header>
+          <div className="settings-gallery">
+            {PROVIDER_TEMPLATES.map((template) => <button type="button" className="settings-connection-card" key={template.provider} onClick={() => openConnection({ template })}>
+              <ConnectionMark provider={template.provider} name={template.name} /><span className="settings-card-copy"><strong>{template.name}</strong><small>{template.detail}</small></span><ChevronRight className="settings-template-action" size={18} aria-hidden="true" />
+            </button>)}
+          </div>
+        </section>
 
-            {kind !== "codex" && (
-              <Field label={kind === "opencode-go" ? "OpenCode Go Key" : "API Key"} hint={
-                kind === "opencode-go" && state?.localOpenCodeConfigured
-                  ? "已检测到本机 OpenCode Go 登录，可直接使用"
-                  : keyConfigured ? "已配置；只在需要替换时输入" : undefined
-              }>
-                <Input
-                  autoComplete="new-password"
-                  type="password"
-                  value={apiKey}
-                  onChange={(event) => setApiKey(event.target.value)}
-                  placeholder={authReady ? "••••••••（已配置）" : "输入密钥"}
-                />
-              </Field>
-            )}
+        {state?.runtimes.length ? <section className="settings-section settings-roles">
+          <header><div><h2>系统模型</h2><p>修改后不重启进程；正在运行的完整 turn 保持旧快照，下一个执行读取最新绑定。</p></div></header>
+          <div className="settings-role-grid">
+            {(Object.keys(ROLE_LABELS) as ModelRole[]).map((role) => <label key={role}><span><strong>{ROLE_LABELS[role].title}</strong><small>{ROLE_LABELS[role].detail}</small></span><select value={state.roleBindings[role]?.modelId || state.activeRuntime || ""} onChange={(event) => updateRole(role, event.target.value)}>{state.runtimes.map((runtime) => <option key={runtime.id} value={runtime.id}>{runtime.model}：{runtime.sourceName}</option>)}</select></label>)}
+          </div>
+        </section> : null}
 
-            {kind === "codex" && (
-              <div className={`auth-status ${state?.codexConfigured ? "is-ready" : ""}`}>
-                {state?.codexConfigured ? (
-                  <span>本机 Codex 登录可用</span>
-                ) : codexLogin ? (
-                  <div className="codex-device-login">
-                    <span>{codexLogin.status === "waiting" ? "在 OpenAI 页面输入代码" : codexLogin.error}</span>
-                    <strong>{codexLogin.userCode}</strong>
-                    <a href={codexLogin.verificationUri} target="_blank" rel="noreferrer">打开授权页面</a>
-                  </div>
-                ) : (
-                  <>
-                    <span>尚未找到 Codex 登录</span>
-                    <MaterialButton
-                      variant="outlined"
-                      onClick={beginCodexLogin}
-                      disabled={codexLoginLoading}
-                      loading={codexLoginLoading}
-                    >
-                      登录 Codex
-                    </MaterialButton>
-                  </>
-                )}
-              </div>
-            )}
-
-            <div className="model-row">
-              <Field label="模型">
-                {models.length ? (
-                  <Select value={model} onValueChange={(value) => applyModel(models.find((item) => item.id === value)!)}>
-                    <SelectTrigger><SelectValue placeholder="选择模型" /></SelectTrigger>
-                    <SelectContent>{models.map((item) => <SelectItem key={item.id} value={item.id}>{item.id}</SelectItem>)}</SelectContent>
-                  </Select>
-                ) : (
-                  <Input value={model} onChange={(event) => setModel(event.target.value)} placeholder="模型 ID" />
-                )}
-              </Field>
-              {kind !== "api" && (
-                <MaterialButton variant="tonal" onClick={loadModels} disabled={loadingModels || !authReady} loading={loadingModels}>
-                  {!loadingModels && <RefreshCw />}
-                  探测模型与档位
-                </MaterialButton>
-              )}
-            </div>
-
-            <Field label="思考强度" hint={effortOptions.length ? "候选来自所选模型的实时目录，也可以输入自定义值" : "填写模型支持的推理强度，留空使用 Provider 默认"}>
-              <div className="effort-control">
-                <Input
-                  aria-label="自定义思考强度"
-                  value={reasoningEffort}
-                  onChange={(event) => setReasoningEffort(event.target.value)}
-                  placeholder="留空使用 Provider 默认；也可输入自定义值"
-                />
-                {effortOptions.length > 0 && (
-                  <div className="effort-options" aria-label="探测到的思考强度" role="group">
-                    <MaterialFilterChip
-                      selected={!reasoningEffort}
-                      onClick={() => setReasoningEffort("")}
-                    >
-                      Provider 默认
-                    </MaterialFilterChip>
-                    {effortOptions.map((item) => (
-                      <MaterialFilterChip
-                        selected={reasoningEffort === item}
-                        key={item}
-                        onClick={() => setReasoningEffort(item)}
-                      >
-                        {item}
-                      </MaterialFilterChip>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </Field>
-
-            <div className="field-grid two-columns">
-              <Field label="上下文窗口"><Input inputMode="numeric" value={contextWindow} onChange={(event) => setContextWindow(event.target.value)} /></Field>
-              <Field label="最大输出（0 由 Provider 决定）"><Input inputMode="numeric" value={maxOutputTokens} onChange={(event) => setMaxOutputTokens(event.target.value)} /></Field>
-            </div>
-
-            {inputModalities.includes("image") && (
-              <div className="settings-success"><Check /> 当前模型目录已验证图片输入。</div>
-            )}
-
-            {error && <div className="settings-error" role="alert">{error}</div>}
-            {saved && <div className="settings-success"><Check /> 已应用配置，Gateway 正在使用新的 Provider。</div>}
-
-            <footer className="panel-footer">
-              <span>保存前会发送一条最小真实请求验证模型。</span>
-              <MaterialButton onClick={save} disabled={!canSave || saving} loading={saving}>
-                {state?.mode === "needs_setup" ? "验证并启动" : "验证并切换"}
-              </MaterialButton>
-            </footer>
-          </section>
-        </div>
+        {state?.runtimes.length ? <MemorySettings
+          memory={state.memory}
+          modelRevision={state.modelRevision}
+          onRefresh={async () => (await refresh())?.memory ?? state.memory}
+          onError={setError}
+          onNotice={setNotice}
+          onComplete={async (message) => { setNotice(message); await refresh(); }}
+        /> : null}
+        {error && !selection && <p className="settings-inline-error" role="alert">{error}</p>}
       </div>
+
+      {selection && state ? <SettingsConnectionDialog
+        key={`${selection.template.provider}:${selection.existing?.sourceId ?? "new"}`}
+        template={selection.template}
+        existing={selection.existing}
+        settings={state}
+        returnFocusRef={dialogReturnFocusRef}
+        onOpenChange={(open) => { if (!open) setSelection(null); }}
+        onSaved={handleConnectionSaved}
+        onLoginCompleted={handleLoginCompleted}
+      /> : null}
+
+      <SettingsNotice message={notice} onClose={() => setNotice("")} />
     </main>
   );
 }
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  return (
-    <label className="settings-field">
-      <span>{label}</span>
-      {children}
-      {hint && <small>{hint}</small>}
-    </label>
-  );
+function SettingsNotice({ message, onClose }: { message: string; onClose: () => void }) {
+  return <div className="settings-toast-region" aria-live="polite" aria-atomic="true">
+    {message ? <div className="settings-toast" role="status">
+      <Check aria-hidden="true" size={18} />
+      <span><strong>{message}</strong></span>
+      <button type="button" onClick={onClose} aria-label="关闭通知"><X aria-hidden="true" size={16} /></button>
+    </div> : null}
+  </div>;
 }

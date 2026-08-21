@@ -115,6 +115,23 @@ def _services(
     return storage, service, keyset
 
 
+def test_default_pairing_offer_lasts_eight_minutes(tmp_path: Path) -> None:
+    storage, _service, keyset = _services(tmp_path)
+    now = datetime(2026, 8, 11, 2, 30, tzinfo=timezone.utc)
+    service = PairingService(
+        storage,
+        keyset,
+        lan_endpoints=("wss://roxy.local:6323/ws",),
+        tunnel_endpoints=("wss://mobile.huashen258.cc/ws",),
+        clock=lambda: now,
+    )
+
+    offer = service.create_offer()
+
+    assert offer.expires_at == now + timedelta(minutes=8)
+    storage.close()
+
+
 def test_pairing_requires_signed_claim_and_desktop_confirmation(tmp_path: Path) -> None:
     storage, service, _ = _services(tmp_path)
     device_key = ec.generate_private_key(ec.SECP256R1())
@@ -138,7 +155,7 @@ def test_pairing_requires_signed_claim_and_desktop_confirmation(tmp_path: Path) 
 
 
 def test_claim_accepts_an_unexpired_legacy_pairing_session(tmp_path: Path) -> None:
-    """升级不会使两分钟窗口内、由旧 runtime 创建的 QR 立即失效。"""
+    """升级不使有效期内由旧 runtime 创建的 QR 立即失效。"""
 
     storage, service, keyset = _services(tmp_path)
     pairing_id = uuid4().hex

@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agent.control.context import current_turn_id
+from agent.control.context import running_turn_id
 from agent.core.passive_turn import _persistence_from_metadata
 from agent.core.runtime_support import SessionLike, TurnRunResult
 from agent.looping.core import AgentLoop, _supports_stream_events
@@ -22,6 +22,10 @@ from agent.retrieval.protocol import (
     RetrievalRequest,
     RetrievalResult,
 )
+from agent.model_runtime.context_compaction import (
+    CommittedContextUnit,
+    ContextPayloadSegments,
+)
 from agent.tools.base import Tool
 from agent.tools.registry import ToolRegistry
 from agent.tools.web_fetch import WebFetchTool
@@ -32,6 +36,8 @@ from bus.events_lifecycle import TurnCommitted
 from core.error_context import current_session_key
 from core.memory.engine import MemoryQueryResult
 from bootstrap.wiring import wire_turn_lifecycle
+from session.compaction_runtime import CompactionProjection
+from session.store import CompactionHead
 from tests.provider_fakes import ProviderContextBudgetStub
 
 
@@ -82,9 +88,6 @@ class _FakeMemoryEngine:
     def read_self(self) -> str:
         return ""
 
-    def read_recent_context(self) -> str:
-        return ""
-
     def get_memory_context(self) -> str:
         return ""
 
@@ -94,12 +97,43 @@ class _FakeMemoryEngine:
     async def query(self, request) -> MemoryQueryResult:
         return MemoryQueryResult(text_block="", records=[], raw={})
 
-    async def refresh_recent_turns(self, request) -> None:
+
+class _MandatoryCompactionRuntime:
+    async def projection(self, session, *, prefix, current_anchor, pending):
+        messages = getattr(session, "messages", [])
+        history = [dict(message) for message in messages] if isinstance(messages, list) else []
+        units: tuple[CommittedContextUnit, ...] = ()
+        if history:
+            ids = tuple(f"pipeline-message-{index}" for index in range(len(history)))
+            units = (
+                CommittedContextUnit(
+                    source_from_seq=0,
+                    consolidated_through_seq=len(history) - 1,
+                    source_message_ids=ids,
+                    messages=tuple(history),
+                    message_refs=tuple((message_id, index) for index, message_id in enumerate(ids)),
+                ),
+            )
+        return CompactionProjection(
+            segments=ContextPayloadSegments(
+                prefix=tuple(prefix),
+                committed_units=units,
+                current_anchor=tuple(current_anchor),
+                pending=tuple(pending),
+            ),
+            active=None,
+            head=CompactionHead(
+                session_key=str(getattr(session, "key", "pipeline-session")),
+                parent_generation=0,
+                next_generation=1,
+            ),
+        )
+
+    async def recover_pending(self, session):
         return None
 
-    async def consolidate(self, request) -> None:
-        return None
-
+    async def commit_checkpoint(self, *args, **kwargs):
+        raise AssertionError("test compaction gate unexpectedly attempted a commit")
 
 def test_stream_events_support_realtime_private_channels():
     assert _supports_stream_events("telegram", "123")
@@ -189,7 +223,6 @@ async def test_process_direct_stateless_turn_has_no_history_or_persistence():
         "omit_user_turn": True,
         "omit_assistant_turn": True,
         "skip_session_history": True,
-        "skip_memory_context_guard": True,
         "skip_post_memory": True,
         "skip_memory_retrieval": True,
         "suppress_stream_events": True,
@@ -356,7 +389,7 @@ async def test_process_uses_busy_session_key_for_processing_state(tmp_path: Path
     loop = _make_loop(tmp_path)
     state = MagicMock()
     loop._processing_state = state  # type: ignore[attr-defined]
-    loop._core_runner.process = AsyncMock(  # type: ignore[attr-defined]
+    loop._react = AsyncMock(  # type: ignore[method-assign]
         return_value=OutboundMessage(
             channel="telegram",
             chat_id="123",
@@ -380,7 +413,7 @@ async def test_process_uses_busy_session_key_for_processing_state(tmp_path: Path
     assert outbound.content == "ok"
     state.enter.assert_called_once_with("telegram:123")
     state.exit.assert_called_once_with("telegram:123")
-    loop._core_runner.process.assert_awaited_once_with(  # type: ignore[attr-defined]
+    loop._react.assert_awaited_once_with(  # type: ignore[attr-defined]
         msg,
         "scheduler:job",
         dispatch_outbound=False,
@@ -390,7 +423,7 @@ async def test_process_uses_busy_session_key_for_processing_state(tmp_path: Path
 @pytest.mark.asyncio
 async def test_process_restores_session_context(tmp_path: Path):
     loop = _make_loop(tmp_path)
-    loop._core_runner.process = AsyncMock(  # type: ignore[attr-defined]
+    loop._react = AsyncMock(  # type: ignore[method-assign]
         return_value=OutboundMessage(
             channel="telegram",
             chat_id="123",
@@ -416,7 +449,7 @@ async def test_process_restores_session_context_after_core_failure(tmp_path: Pat
     loop = _make_loop(tmp_path)
     state = MagicMock()
     loop._processing_state = state  # type: ignore[attr-defined]
-    loop._core_runner.process = AsyncMock(  # type: ignore[attr-defined]
+    loop._react = AsyncMock(  # type: ignore[method-assign]
         side_effect=RuntimeError("core failed")
     )
     msg = InboundMessage(
@@ -443,7 +476,7 @@ async def test_process_does_not_run_removed_web_fetch_spill_cleanup(
 ):
     loop = _make_loop(tmp_path)
     loop.tools.register(WebFetchTool(requester=cast(Any, object())))
-    loop._core_runner.process = AsyncMock(  # type: ignore[attr-defined]
+    loop._react = AsyncMock(  # type: ignore[method-assign]
         side_effect=RuntimeError("provider failed")
     )
     msg = InboundMessage(
@@ -467,7 +500,7 @@ def _make_loop(
     _ = reset_veda(tmp_path)
     tools = ToolRegistry()
     tools.register(_NoopTool())
-    return AgentLoop(
+    loop = AgentLoop(
         AgentLoopDeps(
             bus=MessageBus(),
             provider=cast(Any, _Provider()),
@@ -480,6 +513,8 @@ def _make_loop(
         ),
         AgentLoopConfig(),
     )
+    loop._reasoner._compaction_runtime = _MandatoryCompactionRuntime()
+    return loop
 
 
 def test_agent_loop_uses_custom_retrieval_pipeline(tmp_path: Path):
@@ -501,11 +536,11 @@ def test_agent_loop_uses_custom_retrieval_pipeline(tmp_path: Path):
     loop._reasoner.run_turn = AsyncMock(return_value=TurnRunResult(reply="ok"))
 
     msg = InboundMessage(channel="cli", sender="u", chat_id="1", content="hello")
-    turn_token = current_turn_id.set("turn:test-retrieval")
+    turn_token = running_turn_id.set("turn:test-retrieval")
     try:
-        asyncio.run(loop._core_runner.process(msg, msg.session_key))
+        asyncio.run(loop._react(msg, msg.session_key))
     finally:
-        current_turn_id.reset(turn_token)
+        running_turn_id.reset(turn_token)
 
     assert custom_retrieval.requests
     assert custom_retrieval.requests[0].message == "hello"
@@ -562,7 +597,7 @@ def test_agent_loop_fanouts_turn_committed_from_passive_turn(tmp_path: Path):
     msg = InboundMessage(channel="cli", sender="u", chat_id="1", content="hello")
 
     async def _process_and_drain() -> None:
-        await loop._core_runner.process(msg, msg.session_key)
+        await loop._react(msg, msg.session_key)
         await loop._event_bus.drain()
         await loop._event_bus.aclose()
 
@@ -623,7 +658,7 @@ async def test_resumed_interrupt_state_completes_normally(tmp_path: Path):
         await asyncio.sleep(0.05)
         return MagicMock(content="ok")
 
-    loop._core_runner.process = AsyncMock(side_effect=_slow_process)  # type: ignore[attr-defined]
+    loop._react = AsyncMock(side_effect=_slow_process)  # type: ignore[method-assign]
 
     msg = InboundMessage(
         channel="telegram",
@@ -635,7 +670,7 @@ async def test_resumed_interrupt_state_completes_normally(tmp_path: Path):
 
     assert outbound.content == "ok"
     assert session_key not in loop._interrupt_states  # type: ignore[attr-defined]
-    processed_msg = loop._core_runner.process.await_args.args[0]  # type: ignore[attr-defined]
+    processed_msg = loop._react.await_args.args[0]  # type: ignore[attr-defined]
     assert processed_msg.content == "补充 B"
     assert "【上一轮任务" not in processed_msg.content
     assert session.messages[0]["content"] == "原始消息 A"
@@ -663,6 +698,7 @@ async def test_agent_loop_afterstep_fires_with_turn_lifecycle_wiring(tmp_path: P
     msg = InboundMessage(channel="cli", sender="u", chat_id="123", content="你好")
     session = SimpleNamespace(
         key=session_key,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
         messages=[],
         metadata={},
         last_consolidated=0,

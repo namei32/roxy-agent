@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -14,6 +15,7 @@ from agent.tools.base import ToolExecutionContext, tool_execution_context_scope
 from plugins.interview_coach.config import InterviewCoachConfig
 from plugins.interview_coach.evidence import ProjectEvidenceService
 from plugins.interview_coach.plugin import InterviewCoachPlugin
+from plugins.interview_coach.state import InterviewStateStore
 
 
 def _git_project(tmp_path: Path) -> Path:
@@ -22,7 +24,7 @@ def _git_project(tmp_path: Path) -> Path:
         return root
     root.mkdir()
     (root / "README.md").write_text(
-        "# Akashic\n\nMemoryEngine owns retrieval.\n",
+        "# Roxy\n\nMemoryEngine owns retrieval.\n",
         encoding="utf-8",
     )
     (root / "config.toml").write_text("secret = 'hidden'\n", encoding="utf-8")
@@ -169,6 +171,77 @@ def test_prompt_only_admits_authorized_telegram_image(
     assert plugin.prompt_hint(_prompt(media=[str(image)], chat_id="43")) is None
     assert plugin.prompt_hint(_prompt(media=[str(image)], channel="cli")) is None
     assert plugin.prompt_hint(_prompt(media=None)) is None
+
+
+@pytest.mark.asyncio
+async def test_legacy_prepare_argument_remains_a_compatible_alias(
+    tmp_path: Path,
+) -> None:
+    plugin = _plugin(tmp_path)
+    image = _png(tmp_path / "workspace" / "uploads" / "legacy.png")
+
+    with tool_execution_context_scope(_tool_context()):
+        prepared = json.loads(
+            await plugin.prepare_batch(
+                object(),
+                media_paths=[str(image)],
+                title="面经复盘｜兼容参数｜2026-08-20",
+                topic_summary="旧工具调用参数兼容",
+                follow_up_questions=["Roxy 如何延续旧状态？"],
+                interview_confidence=0.96,
+                interview_signals=["图片包含技术面试问题"],
+                question_count=1,
+                general_count=0,
+                akashic_related_count=1,
+            )
+        )
+
+    assert prepared["status"] == "prepared"
+
+
+def test_state_reads_legacy_related_count_without_rewriting_it(tmp_path: Path) -> None:
+    session_key = "telegram:42"
+    session_hash = hashlib.sha256(session_key.encode("utf-8")).hexdigest()
+    batch_id = "legacy-batch"
+    kv_store = PluginKVStore(tmp_path / "legacy-kv.json")
+    kv_store.set(
+        "interview_coach_state",
+        {
+            "version": 1,
+            "batches": {
+                batch_id: {
+                    "batch_id": batch_id,
+                    "session_hash": session_hash,
+                    "document_key": "interview:legacy-batch",
+                    "title": "旧面经",
+                    "topic_summary": "旧状态兼容",
+                    "follow_up_questions": ["旧问题"],
+                    "current_question_index": 0,
+                    "workflow_status": "active",
+                    "note_status": "committed",
+                    "pending_operation": "",
+                    "question_count": 1,
+                    "akashic_related_count": 1,
+                    "general_count": 0,
+                    "created_at": "2026-08-07T00:00:00+00:00",
+                    "updated_at": "2026-08-07T00:00:00+00:00",
+                }
+            },
+            "active_by_session": {session_hash: batch_id},
+            "pending_by_session": {},
+        },
+    )
+
+    batch = InterviewStateStore(kv_store).current_for_session(session_key)
+
+    assert batch is not None
+    assert batch.roxy_related_count == 1
+    assert batch.akashic_related_count == 1
+    persisted = json.loads((tmp_path / "legacy-kv.json").read_text(encoding="utf-8"))
+    assert (
+        "roxy_related_count"
+        not in persisted["interview_coach_state"]["batches"][batch_id]
+    )
 
 
 @pytest.mark.asyncio
@@ -466,7 +539,7 @@ async def test_project_evidence_is_revision_bound_and_excludes_config(
         await service.read("config.toml", 1, 1)
 
     (tmp_path / "project" / "README.md").write_text(
-        "# Akashic\n\nMemoryEngine owns hybrid retrieval.\n",
+        "# Roxy\n\nMemoryEngine owns hybrid retrieval.\n",
         encoding="utf-8",
     )
     changed = json.loads(await service.read("README.md", 1, 3))

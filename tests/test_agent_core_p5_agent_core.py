@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
@@ -11,8 +11,9 @@ from agent.context import ContextBuilder
 from agent.core.passive_turn import ContextStore, Reasoner, _NoopOutboundPort
 from agent.core.runtime_support import SessionLike, TurnRunResult
 from agent.core.passive_support import predict_current_user_source_ref
-from agent.core.passive_turn import AgentCore, AgentCoreDeps
+from agent.core.passive_turn import PassiveTurnDeps, PassiveTurnPipeline
 from agent.core.types import ContextBundle
+from agent.model_runtime.context_compaction import CommittedContextUnit
 from agent.looping.ports import SessionServices
 from agent.tools.registry import ToolRegistry
 from agent.turns.outbound import OutboundDispatch, OutboundPort
@@ -31,18 +32,16 @@ from session.manager import SessionManager
 class _DummySession:
     def __init__(self, key: str) -> None:
         self.key = key
+        self._created_at = datetime(2026, 1, 1, tzinfo=UTC)
         self.messages: list[dict] = []
         self.metadata: dict[str, object] = {}
         self.last_consolidated = 0
 
-    def get_history(
-        self,
-        max_messages: int = 500,
-        *,
-        start_index: int | None = None,
-    ) -> list[dict]:
-        if start_index is not None:
-            return self.messages[start_index:][-max_messages:]
+    @property
+    def created_at(self) -> datetime:
+        return self._created_at
+
+    def get_history(self, max_messages: int = 500) -> list[dict]:
         return self.messages[-max_messages:]
 
     def add_message(
@@ -58,6 +57,31 @@ class _DummySession:
         self.messages.append(message)
         return message
 
+    def history_units(self) -> tuple[CommittedContextUnit, ...]:
+        """Render the fake's persisted rows as complete immutable history units."""
+
+        units: list[CommittedContextUnit] = []
+        for index, message in enumerate(self.messages):
+            message_id = message.get("id")
+            if not isinstance(message_id, str) or not message_id:
+                message_id = f"{self.key}:{index}"
+            raw_seq = message.get("seq")
+            seq = (
+                raw_seq
+                if isinstance(raw_seq, int) and not isinstance(raw_seq, bool)
+                else index
+            )
+            units.append(
+                CommittedContextUnit(
+                    source_from_seq=seq,
+                    consolidated_through_seq=seq,
+                    source_message_ids=(message_id,),
+                    messages=(dict(message),),
+                    message_refs=((message_id, seq),),
+                )
+            )
+        return tuple(units)
+
 
 @pytest.mark.asyncio
 async def test_noop_outbound_port_returns_failed_receipt() -> None:
@@ -72,7 +96,7 @@ async def test_noop_outbound_port_returns_failed_receipt() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_core_process_runs_prepare_prompt_run_commit_in_order():
+async def test_passive_turn_runs_prepare_prompt_run_commit_in_order():
     order: list[str] = []
     session = _DummySession("telegram:123")
     context_store = SimpleNamespace(
@@ -109,8 +133,8 @@ async def test_agent_core_process_runs_prepare_prompt_run_commit_in_order():
             )
         ),
     )
-    agent_core = AgentCore(
-        AgentCoreDeps(
+    pipeline = PassiveTurnPipeline(
+        PassiveTurnDeps(
             session=cast(
                 SessionServices,
                 SimpleNamespace(
@@ -136,7 +160,7 @@ async def test_agent_core_process_runs_prepare_prompt_run_commit_in_order():
         timestamp=datetime(2026, 4, 4, 22, 0, 0),
     )
 
-    out = await agent_core.process(msg, "telegram:123")
+    out = await pipeline.run(msg, "telegram:123")
 
     assert out.content == "final <meme:shy>\n§cited:[mem_1]§"
     assert out.metadata["mobile_attention"] == "confirmation"
@@ -164,13 +188,13 @@ async def test_agent_core_process_runs_prepare_prompt_run_commit_in_order():
 
 
 @pytest.mark.asyncio
-async def test_agent_core_process_coerces_empty_reply_before_commit():
+async def test_passive_turn_coerces_empty_reply_before_commit():
     session = _DummySession("cli:1")
     context_store = SimpleNamespace(
         prepare=AsyncMock(return_value=ContextBundle()),
     )
-    agent_core = AgentCore(
-        AgentCoreDeps(
+    pipeline = PassiveTurnPipeline(
+        PassiveTurnDeps(
             session=cast(
                 SessionServices,
                 SimpleNamespace(
@@ -211,14 +235,14 @@ async def test_agent_core_process_coerces_empty_reply_before_commit():
         metadata={"mobile_attention": "confirmation"},
     )
 
-    out = await agent_core.process(msg, "cli:1")
+    out = await pipeline.run(msg, "cli:1")
 
     assert "no response to give" in out.content
     assert "mobile_attention" not in out.metadata
 
 
 @pytest.mark.asyncio
-async def test_agent_core_before_reasoning_can_patch_context():
+async def test_passive_turn_before_reasoning_can_patch_context():
     session = _DummySession("telegram:123")
     context_store = SimpleNamespace(
         prepare=AsyncMock(
@@ -249,8 +273,8 @@ async def test_agent_core_before_reasoning_can_patch_context():
             retrieved_memory_block="new memory",
         ),
     )
-    agent_core = AgentCore(
-        AgentCoreDeps(
+    pipeline = PassiveTurnPipeline(
+        PassiveTurnDeps(
             session=cast(
                 SessionServices,
                 SimpleNamespace(
@@ -271,7 +295,7 @@ async def test_agent_core_before_reasoning_can_patch_context():
     )
     msg = InboundMessage(channel="telegram", sender="hua", chat_id="123", content="hi")
 
-    await agent_core.process(msg, "telegram:123")
+    await pipeline.run(msg, "telegram:123")
 
     render_request = context.render.call_args.args[0]
     assert render_request.skill_names == ["new"]
@@ -313,8 +337,8 @@ async def test_before_turn_abort_skips_reasoner_and_commit_and_dispatches():
 
     event_bus.on(BeforeTurnCtx, abort_handler)
 
-    agent_core = AgentCore(
-        AgentCoreDeps(
+    pipeline = PassiveTurnPipeline(
+        PassiveTurnDeps(
             session=cast(
                 SessionServices,
                 SimpleNamespace(
@@ -333,7 +357,7 @@ async def test_before_turn_abort_skips_reasoner_and_commit_and_dispatches():
     )
     msg = InboundMessage(channel="telegram", sender="hua", chat_id="123", content="hi")
 
-    out = await agent_core.process(msg, "telegram:123", dispatch_outbound=True)
+    out = await pipeline.run(msg, "telegram:123", dispatch_outbound=True)
 
     assert out.content == "blocked by policy"
     assert out.turn_disposition is TurnDisposition.SHORT_CIRCUITED
@@ -366,8 +390,8 @@ async def test_before_reasoning_abort_skips_reasoner_and_commit_and_dispatches()
 
     event_bus.on(BeforeReasoningCtx, abort_handler)
 
-    agent_core = AgentCore(
-        AgentCoreDeps(
+    pipeline = PassiveTurnPipeline(
+        PassiveTurnDeps(
             session=cast(
                 SessionServices,
                 SimpleNamespace(
@@ -386,7 +410,7 @@ async def test_before_reasoning_abort_skips_reasoner_and_commit_and_dispatches()
     )
     msg = InboundMessage(channel="telegram", sender="hua", chat_id="123", content="hi")
 
-    out = await agent_core.process(msg, "telegram:123", dispatch_outbound=True)
+    out = await pipeline.run(msg, "telegram:123", dispatch_outbound=True)
 
     assert out.content == "rate limited"
     assert out.turn_disposition is TurnDisposition.SHORT_CIRCUITED
@@ -417,8 +441,8 @@ async def test_abort_does_not_dispatch_when_dispatch_outbound_false():
 
     event_bus.on(BeforeTurnCtx, abort_handler)
 
-    agent_core = AgentCore(
-        AgentCoreDeps(
+    pipeline = PassiveTurnPipeline(
+        PassiveTurnDeps(
             session=cast(
                 SessionServices,
                 SimpleNamespace(
@@ -437,7 +461,7 @@ async def test_abort_does_not_dispatch_when_dispatch_outbound_false():
     )
     msg = InboundMessage(channel="telegram", sender="hua", chat_id="123", content="hi")
 
-    out = await agent_core.process(msg, "telegram:123", dispatch_outbound=False)
+    out = await pipeline.run(msg, "telegram:123", dispatch_outbound=False)
 
     assert out.content == "quiet abort"
     reasoner.run_turn.assert_not_called()
@@ -459,8 +483,8 @@ async def test_reasoner_exception_turn_returns_control_outbound():
     )
     dispatch_port = AsyncMock(return_value=True)
 
-    agent_core = AgentCore(
-        AgentCoreDeps(
+    pipeline = PassiveTurnPipeline(
+        PassiveTurnDeps(
             session=cast(
                 SessionServices,
                 SimpleNamespace(
@@ -481,7 +505,7 @@ async def test_reasoner_exception_turn_returns_control_outbound():
     )
     msg = InboundMessage(channel="telegram", sender="hua", chat_id="123", content="hi")
 
-    out = await agent_core.process(msg, "telegram:123", dispatch_outbound=True)
+    out = await pipeline.run(msg, "telegram:123", dispatch_outbound=True)
 
     assert out.content == "处理消息时出错，请稍后再试。"
     dispatch_port.dispatch.assert_awaited_once()
@@ -489,7 +513,7 @@ async def test_reasoner_exception_turn_returns_control_outbound():
     assert dispatched.content == "处理消息时出错，请稍后再试。"
 
     with pytest.raises(RuntimeError, match="budget guard"):
-        _ = await agent_core.process(msg, "telegram:123", dispatch_outbound=False)
+        _ = await pipeline.run(msg, "telegram:123", dispatch_outbound=False)
 
 
 @pytest.mark.asyncio
@@ -517,8 +541,8 @@ async def test_after_turn_dispatch_exception_is_not_wrapped_by_control_outbound(
         dispatch=AsyncMock(side_effect=RuntimeError("dispatch failed"))
     )
 
-    agent_core = AgentCore(
-        AgentCoreDeps(
+    pipeline = PassiveTurnPipeline(
+        PassiveTurnDeps(
             session=cast(
                 SessionServices,
                 SimpleNamespace(
@@ -540,7 +564,7 @@ async def test_after_turn_dispatch_exception_is_not_wrapped_by_control_outbound(
     msg = InboundMessage(channel="telegram", sender="hua", chat_id="123", content="hi")
 
     with pytest.raises(RuntimeError, match="dispatch failed"):
-        await agent_core.process(msg, "telegram:123", dispatch_outbound=True)
+        await pipeline.run(msg, "telegram:123", dispatch_outbound=True)
 
     assert len(session.messages) == 2
     assert session.messages[0]["role"] == "user"

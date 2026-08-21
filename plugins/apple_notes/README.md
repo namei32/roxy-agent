@@ -3,7 +3,7 @@
 This API v2 built-in plugin exports authorized Markdown into a dedicated Apple
 Notes folder. Authorization is normally a current explicit request; the sole
 automation exception is the scoped Interview Coach flow described by decision
-0026. It supports preview, create, append, status, idempotent retry, and durable
+0036. It supports preview, create, append, status, idempotent retry, and durable
 local receipts without persisting note bodies.
 
 The plugin can execute directly in a native macOS runtime, or use the

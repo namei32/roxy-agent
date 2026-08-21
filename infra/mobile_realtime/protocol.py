@@ -27,6 +27,7 @@ COMMAND_TYPES = frozenset(
         "session.open",
         "history.get",
         "message.content.prepare",
+        "model.catalog.get",
         "message.send",
         "turn.stop",
         "attachment.begin",
@@ -50,6 +51,11 @@ COMMAND_TYPES = frozenset(
         "ping",
     }
 )
+# 展示层 output.completed 信号的设备能力门槛：只有声明该能力的客户端才
+# 接收 turn.output.completed，旧客户端继续只收权威 terminal，避免未知事件
+# 触发 protocol 拒绝导致的重连循环。
+TURN_OUTPUT_COMPLETED_CAPABILITY = "turn-output-completed-v1"
+
 EVENT_TYPES = frozenset(
     {
         "session.list",
@@ -61,7 +67,7 @@ EVENT_TYPES = frozenset(
         "react.tool.started",
         "react.tool.completed",
         "answer.delta",
-        "turn.snapshot",
+        "turn.output.completed",
         "message.final",
         "turn.interrupted",
         "message.proactive",
@@ -185,6 +191,8 @@ class MessageSendPayload(ProtocolModel):
         pattern=_RFC3339_INSTANT_PATTERN_TEXT,
     )
     reply_to: MessageReplyReference | None = None
+    model_runtime_id: str | None = Field(default=None, max_length=128)
+    model_reasoning_effort: str | None = Field(default=None, max_length=32)
 
     @field_validator("client_created_at")
     @classmethod
@@ -204,6 +212,12 @@ class MessageSendPayload(ProtocolModel):
         _validate_frame_id(self.client_message_id, "client_message_id")
         if len(set(self.media_refs)) != len(self.media_refs):
             raise ValueError("media_refs 不能重复")
+        if self.model_runtime_id is not None:
+            self.model_runtime_id = self.model_runtime_id.strip()
+        if self.model_reasoning_effort is not None:
+            self.model_reasoning_effort = self.model_reasoning_effort.strip()
+        if self.model_reasoning_effort and not self.model_runtime_id:
+            raise ValueError("model_reasoning_effort 要求 model_runtime_id")
         return self
 
 
@@ -224,24 +238,11 @@ class AttachmentDownloadPayload(ProtocolModel):
     offset: int = Field(ge=0)
 
 
-class TurnSnapshotPayload(ProtocolModel):
-    turn_id: NonEmptyId
-    status: Literal["queued", "running", "completed", "interrupted", "failed"]
-    blocks: list[JsonObject]
-    content_so_far: str
-    last_source_event_id: FrameId | None
-
-    @model_validator(mode="after")
-    def validate_last_source_event_id(self) -> TurnSnapshotPayload:
-        if self.last_source_event_id is not None:
-            _validate_frame_id(self.last_source_event_id, "last_source_event_id")
-        return self
-
-
 class DeltaPayload(ProtocolModel):
     delta: str = Field(min_length=1, max_length=65_536)
     block_id: NonEmptyId | None = None
     ordinal: int | None = Field(default=None, ge=0)
+    control_turn_id: NonEmptyId | None = None
 
     @model_validator(mode="after")
     def validate_process_block(self) -> DeltaPayload:
@@ -359,6 +360,7 @@ class GenericCommand(CommandEnvelope):
         "session.open",
         "history.get",
         "message.content.prepare",
+        "model.catalog.get",
         "command.list",
         "runtime.document.list",
         "runtime.document.get",
@@ -440,25 +442,6 @@ class AnswerDeltaEvent(EventEnvelope):
     payload: DeltaPayload
 
 
-class TurnSnapshotEvent(ProtocolModel):
-    v: Literal[1]
-    kind: Literal["event"]
-    type: Literal["turn.snapshot"]
-    id: FrameId
-    connection_epoch: ConnectionEpoch
-    event_seq: EventSequence
-    session_id: NonEmptyId | None = None
-    turn_id: NonEmptyId
-    payload: TurnSnapshotPayload
-
-    @model_validator(mode="after")
-    def validate_event(self) -> TurnSnapshotEvent:
-        _validate_frame_id(self.id, "id")
-        if self.turn_id != self.payload.turn_id:
-            raise ValueError("turn.snapshot envelope 与 payload 的 turn_id 必须一致")
-        return self
-
-
 class GenericEvent(EventEnvelope):
     type: Literal[
         "session.list",
@@ -469,6 +452,7 @@ class GenericEvent(EventEnvelope):
         "react.tool.started",
         "react.tool.completed",
         "message.final",
+        "turn.output.completed",
         "turn.interrupted",
         "message.proactive",
         "attachment.progress",
@@ -480,7 +464,7 @@ class GenericEvent(EventEnvelope):
 
 
 EventFrame: TypeAlias = Annotated[
-    ThinkingDeltaEvent | AnswerDeltaEvent | TurnSnapshotEvent | GenericEvent,
+    ThinkingDeltaEvent | AnswerDeltaEvent | GenericEvent,
     Field(discriminator="type"),
 ]
 

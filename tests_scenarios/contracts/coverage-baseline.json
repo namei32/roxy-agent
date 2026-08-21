@@ -1,7 +1,7 @@
 {
   "acceptedGaps": [],
-  "base": "d627fa600781855770a5ede752f268982b68ebf9",
-  "catalogDigest": "6046b5fdebd2302fb6a27380817dcd273c92a7e5f2da712e4a7d875cef670dda",
+  "base": "683b4791b0c25e3e899d65fe7c028514240414b3",
+  "catalogDigest": "60234093702a1e7a1ef1185c2301d3da80e2ebc05f3043ef2af395fe769216f5",
   "purpose": "approved_contract_mapping",
   "coveredP0": {
     "companion_control": [
@@ -33,6 +33,10 @@
     ],
     "context_projection": [
       "context_history_nondestructive"
+    ],
+    "host_execution": [
+      "host_bridge_boot_fencing_contract",
+      "shell_privileged_cleanup_contract"
     ],
     "deployment": [
       "wsl_deployment_contract"

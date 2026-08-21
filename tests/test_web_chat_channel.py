@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -11,6 +12,7 @@ from starlette.websockets import WebSocketState
 
 from bootstrap.chat_api import create_chat_app
 from bus.events import OutboundMessage
+from bus.events_lifecycle import StreamDeltaReady, TurnOutputCompleted, TurnStarted
 from infra.channels.base import AttachmentStore
 from infra.channels.web_chat_channel import UploadTooLargeError, WebChatChannel
 from session.manager import Session
@@ -86,12 +88,12 @@ class _SessionStore:
     def list_sessions_for_dashboard(self, **_: Any) -> tuple[list[dict[str, Any]], int]:
         return [], 0
 
-    def list_messages_for_dashboard(self, **kwargs: Any) -> tuple[list[dict[str, Any]], int]:
+    def list_chat_history_page(self, **kwargs: Any) -> tuple[list[dict[str, Any]], int, bool]:
         self.calls.append(kwargs)
         return [
-            {"id": "m0", "role": "user", "content": "用户问题"},
-            {"id": "m1", "role": "assistant", "content": "助手回答"},
-        ], 2
+            {"id": "m0", "seq": 8, "role": "user", "content": "用户问题"},
+            {"id": "m1", "seq": 9, "role": "assistant", "content": "助手回答"},
+        ], 12, True
 
 
 class _PluginUiProvider:
@@ -174,6 +176,7 @@ async def test_web_chat_session_and_message_flow(tmp_path: Path) -> None:
                 "session_id": session_id,
                 "text": "你好",
                 "media": [],
+                "model_runtime_id": "runtime-b",
             })
 
     assert created["type"] == "session.created"
@@ -182,6 +185,62 @@ async def test_web_chat_session_and_message_flow(tmp_path: Path) -> None:
     assert len(bus.inbound) == 1
     assert bus.inbound[0].content == "你好"
     assert bus.inbound[0].session_key == session_id
+    assert bus.inbound[0].metadata["model_runtime_id"] == "runtime-b"
+
+
+def test_chat_model_catalog_reports_session_override(tmp_path: Path) -> None:
+    channel = WebChatChannel()
+    sessions = _SessionManager()
+    session = sessions.get_or_create("web:abc")
+    session.metadata["model_runtime_override"] = "runtime-b"
+    channel._ctx = cast(Any, SimpleNamespace(session_manager=sessions))
+    registry = SimpleNamespace(
+        current=SimpleNamespace(
+            generation_id=7,
+            role_runtime_ids={"default": "runtime-a"},
+        ),
+        list_runtimes=lambda: [
+            {
+                "id": "runtime-a",
+                "provider": "openai",
+                "model": "model-a",
+                "roles": ["default"],
+            },
+            {
+                "id": "runtime-b",
+                "provider": "openrouter",
+                "model": "model-b",
+                "roles": [],
+            },
+        ],
+    )
+
+    async def refresh():
+        return registry.current
+
+    registry.refresh = refresh
+    app = create_chat_app(
+        workspace=tmp_path,
+        channel=channel,
+        model_registry=cast(Any, registry),
+    )
+
+    response = TestClient(app).get(
+        "/api/chat/models",
+        params={"session_key": "web:abc"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "generationId": 7,
+            "defaultRuntime": "runtime-a",
+            "sessionOverride": "runtime-b",
+            "sessionSelection": {
+                "modelRef": "runtime-b",
+                "reasoningEffort": "",
+            },
+            "runtimes": registry.list_runtimes(),
+        }
 
 
 def test_web_plugin_ui_exposes_shared_slots_but_rejects_dashboard_query(
@@ -362,17 +421,15 @@ async def test_web_chat_message_send_rejects_invalid_reply_target(tmp_path: Path
     assert bus.inbound == []
 
 
-def test_chat_navigation_uses_explicit_public_dashboard_port(
+def test_chat_navigation_uses_same_origin_dashboard_path(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("ROXY_DASHBOARD_PUBLIC_PORT", "19321")
     app = create_chat_app(workspace=tmp_path, channel=WebChatChannel())
 
     with TestClient(app) as client:
         response = client.get("/api/chat/navigation")
 
-    assert response.json() == {"dashboard_port": 19321}
+    assert response.json() == {"dashboard_path": "/"}
 
 
 def test_chat_runtime_routes_share_read_only_inspection_projection(
@@ -603,7 +660,7 @@ def test_chat_media_reads_registered_outbound_file(tmp_path: Path) -> None:
     assert response.content == b"image"
 
 
-def test_chat_messages_default_to_turn_order(tmp_path: Path) -> None:
+def test_chat_messages_default_to_latest_turn_order(tmp_path: Path) -> None:
     channel = WebChatChannel()
     session_manager = _SessionManager()
     channel._ctx = cast(Any, SimpleNamespace(session_manager=session_manager))
@@ -614,8 +671,13 @@ def test_chat_messages_default_to_turn_order(tmp_path: Path) -> None:
 
     payload = response.json()
     assert [item["role"] for item in payload["items"]] == ["user", "assistant"]
-    assert session_manager._store.calls[0]["sort_by"] == "seq"
-    assert session_manager._store.calls[0]["sort_order"] == "asc"
+    assert payload["has_more"] is True
+    assert payload["before_seq"] == 8
+    assert session_manager._store.calls[0] == {
+        "session_key": "web:abc",
+        "page_size": 50,
+        "before_seq": None,
+    }
 
 
 @pytest.mark.asyncio
@@ -672,3 +734,137 @@ async def test_web_final_preserves_full_outbound_projection(tmp_path: Path) -> N
         }
     ]
     assert channel.has_media(image)
+
+
+@pytest.mark.asyncio
+async def test_web_turn_lifecycle_projects_server_owned_turn_id() -> None:
+    channel = WebChatChannel()
+    socket = _WebSocket()
+    channel._connections["web:abc"] = {cast(Any, socket)}
+
+    await channel._on_turn_started(TurnStarted(
+        session_key="web:abc",
+        channel="web",
+        chat_id="abc",
+        content="question",
+        timestamp=datetime.now(UTC),
+        turn_id="attempt-1",
+        control_turn_id="turn:server-owner",
+        client_message_id="client-1",
+    ))
+    await channel._on_stream_delta(StreamDeltaReady(
+        session_key="web:abc",
+        channel="web",
+        chat_id="abc",
+        turn_id="attempt-1",
+        content_delta="answer",
+    ))
+    await channel._on_output_completed(TurnOutputCompleted(
+        session_key="web:abc",
+        channel="web",
+        chat_id="abc",
+        turn_id="attempt-1",
+        client_message_id="client-1",
+    ))
+    await channel._on_response(OutboundMessage(
+        channel="web",
+        chat_id="abc",
+        content="answer",
+        control_turn_id="turn:server-owner",
+    ))
+
+    assert [frame["type"] for frame in socket.frames] == [
+        "turn.started",
+        "answer.delta",
+        "turn.output.completed",
+        "message.final",
+    ]
+    assert {frame["turn_id"] for frame in socket.frames} == {
+        "turn:server-owner"
+    }
+    assert "web:abc" not in channel._active_turn_ids
+
+
+@pytest.mark.asyncio
+async def test_web_turn_started_rejects_missing_server_turn_id() -> None:
+    channel = WebChatChannel()
+
+    with pytest.raises(RuntimeError, match="缺少 Server 权威 turn_id"):
+        await channel._on_turn_started(TurnStarted(
+            session_key="web:abc",
+            channel="web",
+            chat_id="abc",
+            content="question",
+            timestamp=datetime.now(UTC),
+        ))
+
+
+@pytest.mark.asyncio
+async def test_web_final_without_socket_caches_terminal_for_refill() -> None:
+    channel = WebChatChannel()
+    channel._active_turn_ids["web:abc"] = "turn-1"
+    await channel._on_response(
+        OutboundMessage(
+            channel="web",
+            chat_id="abc",
+            content="answer",
+            thinking="reasoning",
+            media=[],
+            metadata={},
+            control_turn_id="turn-1",
+        )
+    )
+
+    cached = channel._pending_terminal["web:abc"]
+    assert cached["turn_id"] == "turn-1"
+    assert cached["content"] == "answer"
+
+
+@pytest.mark.asyncio
+async def test_web_attach_refills_cached_terminal() -> None:
+    channel = WebChatChannel()
+    channel._active_turn_ids["web:abc"] = "turn-1"
+    await channel._on_response(
+        OutboundMessage(
+            channel="web",
+            chat_id="abc",
+            content="answer",
+            thinking="reasoning",
+            media=[],
+            metadata={},
+            control_turn_id="turn-1",
+        )
+    )
+    assert "web:abc" in channel._pending_terminal
+
+    socket = _WebSocket()
+    await channel._attach_session(cast(Any, socket), "req-1", {"session_id": "web:abc"})
+
+    assert socket.frames == [{
+        "type": "message.final",
+        "session_id": "web:abc",
+        "turn_id": "turn-1",
+        "content": "answer",
+        "thinking": "reasoning",
+        "media": [],
+        "metadata": {},
+    }]
+    assert "web:abc" not in channel._pending_terminal
+
+
+@pytest.mark.asyncio
+async def test_web_final_without_turn_is_not_cached() -> None:
+    channel = WebChatChannel()
+    with pytest.raises(RuntimeError, match="缺少 Server 权威 active turn"):
+        await channel._on_response(
+            OutboundMessage(
+                channel="web",
+                chat_id="abc",
+                content="（消息发送失败，请稍后重试）",
+                thinking="",
+                media=[],
+                metadata={},
+            )
+        )
+
+    assert "web:abc" not in channel._pending_terminal

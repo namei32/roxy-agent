@@ -2,14 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
-
-from bus.events import InboundMessage
-
-@dataclass
-class ChatMessage:
-    role: str
-    content: str
+from typing import Any, Literal
 
 
 @dataclass
@@ -64,14 +57,10 @@ def to_tool_call_groups(raw_chain: list[dict]) -> list[ToolCallGroup]:
 
 @dataclass
 class ContextBundle:
-    history: list[ChatMessage] = field(default_factory=list)
-    memory_blocks: list[str] = field(default_factory=list)
     skill_mentions: list[str] = field(default_factory=list)
     retrieved_memory_block: str = ""
     retrieval_trace_raw: Any | None = None
-    retrieval_metadata: dict[str, Any] = field(default_factory=dict)
     history_messages: list[Any] = field(default_factory=list)
-    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -113,15 +102,13 @@ class LLMToolCall:
 @dataclass
 class ReasonerResult:
     reply: str
-    invocations: list[LLMToolCall] = field(default_factory=list)
     thinking: str | None = None
     streamed: bool = False
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class TurnRecord:
-    msg: InboundMessage
-    reply: str
-    invocations: list[LLMToolCall] = field(default_factory=list)
-    metadata: dict[str, Any] = field(default_factory=dict)
+    tools_used: list[str] = field(default_factory=list)
+    tools_unlocked: list[str] = field(default_factory=list)
+    tool_chain: list[dict[str, Any]] = field(default_factory=list)
+    media: list[str] = field(default_factory=list)
+    visible_names: set[str] | None = None
+    react_stats: dict[str, Any] = field(default_factory=dict)
+    model_state: dict[str, Any] | None = None
+    mobile_attention: Literal["confirmation"] | None = None

@@ -8,6 +8,7 @@ import { api, asPageResult, interactionDeleteRequirement, pageCount } from "./ap
 import {
   encodePath,
   formatSessionKeyForTable,
+  formatTokens,
   proactiveFlowLabel,
   proactiveResultLabel,
   proactiveSectionLabel,
@@ -24,6 +25,7 @@ import { PluginDetail, PluginMain } from "./PluginDetail";
 import { initializeTheme, startCrossPortThemeSync, useTheme } from "../../theme/src/theme-runtime";
 import { MaterialIconButton } from "../../theme/src/material-react";
 import type {
+  CompactionDetail,
   DashboardColumn,
   MessageRow,
   PageResult,
@@ -41,8 +43,9 @@ import type {
 
 const pluginPreset = document.createElement("link");
 pluginPreset.rel = "stylesheet";
-pluginPreset.href = "/assets/sdk/preset.css";
+pluginPreset.href = "/dashboard/assets/sdk/preset.css";
 document.head.appendChild(pluginPreset);
+document.title = "Roxy Dashboard";
 initializeTheme();
 startCrossPortThemeSync();
 
@@ -156,37 +159,91 @@ function useLatestReader<T>(value: T): () => T {
 }
 
 type ShellView = "chat" | "dashboard" | "runtime" | "models";
+type ShellStatus = "needs_setup" | "starting" | "ready";
+
+interface ShellState {
+  status: ShellStatus;
+  chatReady: boolean;
+}
 
 function initialShellView(): ShellView {
   const value = window.location.hash.slice(1);
-  return value === "chat" || value === "runtime" || value === "models" ? value : "dashboard";
+  return value === "dashboard" || value === "runtime" || value === "models" ? value : "chat";
 }
 
 function App(): React.ReactElement {
   const theme = useTheme();
   const [shellView, setShellView] = useState<ShellView>(initialShellView);
-  const serviceOrigin = `${window.location.protocol}//${window.location.hostname}`;
+  const [shellStatus, setShellStatus] = useState<ShellStatus>("starting");
+  const serviceOrigin = window.location.origin;
   const chatFrameRef = useRef<HTMLIFrameElement>(null);
   const runtimeFrameRef = useRef<HTMLIFrameElement>(null);
   const settingsFrameRef = useRef<HTMLIFrameElement>(null);
 
-  const syncFrameTheme = useCallback((frame: HTMLIFrameElement | null, port: number): void => {
+  const openView = useCallback((next: ShellView): void => {
+    setShellView(next);
+    const base = `${window.location.pathname}${window.location.search}`;
+    window.history.replaceState(null, "", next === "chat" ? base : `${base}#${next}`);
+  }, []);
+
+  const syncFrameTheme = useCallback((frame: HTMLIFrameElement | null): void => {
     frame?.contentWindow?.postMessage(
       { type: "roxy.theme", themeId: theme.id },
-      `${serviceOrigin}:${port}`,
+      serviceOrigin,
     );
   }, [serviceOrigin, theme.id]);
 
   useEffect(() => {
-    syncFrameTheme(chatFrameRef.current, 6322);
-    syncFrameTheme(runtimeFrameRef.current, 6322);
-    syncFrameTheme(settingsFrameRef.current, 6321);
+    syncFrameTheme(chatFrameRef.current);
+    syncFrameTheme(runtimeFrameRef.current);
+    syncFrameTheme(settingsFrameRef.current);
   }, [syncFrameTheme]);
 
-  const openView = (next: ShellView): void => {
-    setShellView(next);
-    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#${next}`);
-  };
+  useEffect(() => {
+    const handleSettingsApplied = (event: MessageEvent<unknown>): void => {
+      const payload = event.data;
+      if (
+        event.origin !== serviceOrigin
+        || event.source !== settingsFrameRef.current?.contentWindow
+        || typeof payload !== "object"
+        || payload === null
+        || !("type" in payload)
+        || (payload.type !== "roxy.settings.applied" && payload.type !== "akashic.settings.applied")
+      ) return;
+      chatFrameRef.current?.contentWindow?.postMessage(
+        { type: "roxy.models.changed" },
+        serviceOrigin,
+      );
+      setShellStatus("starting");
+      openView("chat");
+    };
+    window.addEventListener("message", handleSettingsApplied);
+    return () => window.removeEventListener("message", handleSettingsApplied);
+  }, [openView, serviceOrigin]);
+
+  useEffect(() => {
+    let active = true;
+    const refresh = async (): Promise<void> => {
+      try {
+        const state = await api<ShellState>("/api/shell/state");
+        if (active) setShellStatus(state.chatReady ? "ready" : state.status);
+      } catch (error) {
+        console.error("[dashboard] shell readiness failed", error);
+        if (active) setShellStatus("starting");
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(refresh, 1_500);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  // 必要 effect：setup 未完成时引导到模型页（跨状态导航 + history 副作用），不可改为渲染期计算
+  useEffect(() => {
+    if (shellStatus === "needs_setup" && shellView !== "models") openView("models");
+  }, [openView, shellStatus, shellView]);
 
   return (
     <div className="unified-shell">
@@ -195,7 +252,7 @@ function App(): React.ReactElement {
           <img src={notificationIcon} alt="" />
         </div>
         <nav className="primary-rail-nav" aria-label="主要功能">
-          <PrimaryRailButton label="聊天" active={shellView === "chat"} onClick={() => openView("chat")}>
+          <PrimaryRailButton label="聊天" active={shellView === "chat"} onClick={() => openView(shellStatus === "needs_setup" ? "models" : "chat")}>
             <Bot aria-hidden="true" />
           </PrimaryRailButton>
           <PrimaryRailButton label="工作台" active={shellView === "dashboard"} onClick={() => openView("dashboard")}>
@@ -213,18 +270,30 @@ function App(): React.ReactElement {
 
       <div className="shell-view-stack">
         <section className={`shell-view dashboard-shell-view ${shellView === "dashboard" ? "is-active" : ""}`} aria-hidden={shellView !== "dashboard"}>
-          <DashboardWorkspace />
+          {shellStatus === "ready" ? <DashboardWorkspace /> : <RuntimeUnavailable status={shellStatus} />}
         </section>
         <section className={`shell-view ${shellView === "chat" ? "is-active" : ""}`} aria-hidden={shellView !== "chat"}>
-          <iframe ref={chatFrameRef} title="Roxy 聊天" src={`${serviceOrigin}:6322/?embedded=1`} onLoad={() => syncFrameTheme(chatFrameRef.current, 6322)} />
+          <iframe ref={chatFrameRef} title="Roxy 聊天" src="/chat?embedded=1" onLoad={() => syncFrameTheme(chatFrameRef.current)} />
         </section>
         <section className={`shell-view ${shellView === "runtime" ? "is-active" : ""}`} aria-hidden={shellView !== "runtime"}>
-          <iframe ref={runtimeFrameRef} title="知识与运行" src={`${serviceOrigin}:6322/?embedded=1&surface=runtime`} onLoad={() => syncFrameTheme(runtimeFrameRef.current, 6322)} />
+          {shellStatus === "ready"
+            ? <iframe ref={runtimeFrameRef} title="知识与运行" src="/chat?embedded=1&surface=runtime" onLoad={() => syncFrameTheme(runtimeFrameRef.current)} />
+            : <RuntimeUnavailable status={shellStatus} />}
         </section>
         <section className={`shell-view ${shellView === "models" ? "is-active" : ""}`} aria-hidden={shellView !== "models"}>
-          <iframe ref={settingsFrameRef} title="模型配置" src={`${serviceOrigin}:6321/?embedded=1`} onLoad={() => syncFrameTheme(settingsFrameRef.current, 6321)} />
+          <iframe ref={settingsFrameRef} title="模型配置" src="/settings?embedded=1" onLoad={() => syncFrameTheme(settingsFrameRef.current)} />
         </section>
       </div>
+    </div>
+  );
+}
+
+function RuntimeUnavailable({ status }: { status: Exclude<ShellStatus, "ready"> }): React.ReactElement {
+  return (
+    <div className="runtime-unavailable" role="status">
+      <span>{status === "needs_setup" ? "首次使用" : "运行时启动中"}</span>
+      <strong>{status === "needs_setup" ? "连接模型后显示这里" : "正在恢复工作区"}</strong>
+      <p>{status === "needs_setup" ? "前往“模型”完成登录或添加 API Key。" : "聊天入口保持可用，准备完成后会自动恢复。"}</p>
     </div>
   );
 }
@@ -256,6 +325,8 @@ function DashboardWorkspace(): React.ReactElement {
   });
   const [activeSessionKey, setActiveSessionKey] = useState<string | null>(null);
   const [activeSession, setActiveSession] = useState<SessionRow | null>(null);
+  const [compaction, setCompaction] = useState<CompactionDetail | null>(null);
+  const [compactionPending, setCompactionPending] = useState(false);
   const [messages, setMessages] = useState<MessageRow[]>([]);
   const [messageSearch, setMessageSearch] = useState("");
   const [messageRole, setMessageRole] = useState("");
@@ -417,6 +488,22 @@ function DashboardWorkspace(): React.ReactElement {
     setProactiveOverview(await api<ProactiveOverview>("/api/dashboard/proactive/overview"));
   }, []);
 
+  const loadCompaction = useCallback(async () => {
+    if (!activeSessionKey) {
+      setCompaction(null);
+      return;
+    }
+    setCompactionPending(true);
+    try {
+      const payload = await api<CompactionDetail>(
+        `/api/dashboard/sessions/${encodePath(activeSessionKey)}/compaction`,
+      );
+      setCompaction(payload);
+    } finally {
+      setCompactionPending(false);
+    }
+  }, [activeSessionKey]);
+
   const loadProactivePanel = useCallback(async () => {
     proactiveRequestRef.current?.abort();
     const controller = new AbortController();
@@ -466,12 +553,14 @@ function DashboardWorkspace(): React.ReactElement {
     if (viewMode === "proactive") {
       await loadProactiveOverview();
       await loadProactivePanel();
+    } else if (viewMode === "compaction") {
+      await loadCompaction();
     } else if (viewMode.startsWith("plugin:")) {
       await loadPluginPanel(viewMode.slice(7));
     } else {
       await loadMessages();
     }
-  }, [loadMessages, loadPluginPanel, loadProactiveOverview, loadProactivePanel, loadSessions, viewMode]);
+  }, [loadCompaction, loadMessages, loadPluginPanel, loadProactiveOverview, loadProactivePanel, loadSessions, viewMode]);
 
   useEffect(() => {
     const refresh = (): void => {
@@ -586,6 +675,7 @@ function DashboardWorkspace(): React.ReactElement {
     }
   };
 
+  // 必要 effect：按当前视图加载对应面板数据（fetch 有副作用，React 官方认可 effect 做数据获取）
   useEffect(() => {
     if (viewMode === "sessions") void run(loadMessages);
   }, [loadMessages, run, viewMode]);
@@ -593,6 +683,10 @@ function DashboardWorkspace(): React.ReactElement {
   useEffect(() => {
     if (viewMode === "proactive") void run(loadProactivePanel);
   }, [loadProactivePanel, run, viewMode]);
+
+  useEffect(() => {
+    if (viewMode === "compaction") void run(loadCompaction);
+  }, [loadCompaction, run, viewMode]);
 
   useEffect(() => {
     if (viewMode.startsWith("plugin:")) void run(() => loadPluginPanel(viewMode.slice(7)));
@@ -658,7 +752,9 @@ function DashboardWorkspace(): React.ReactElement {
     ? Boolean(currentPluginState?.activeRowKey)
     : viewMode === "proactive"
       ? Boolean(activeProactiveKey)
-      : Boolean(activeMessage || activeSession);
+      : viewMode === "compaction"
+        ? false
+        : Boolean(activeMessage || activeSession);
 
   return (
     <div className="shell">
@@ -687,7 +783,7 @@ function DashboardWorkspace(): React.ReactElement {
         />
 
           <div className="explorer-body">
-            {viewMode === "sessions" && (
+            {(viewMode === "sessions" || viewMode === "compaction") && (
               <>
                 <div className="filters-stack session-filters">
                   <label className="search search-small">
@@ -711,7 +807,7 @@ function DashboardWorkspace(): React.ReactElement {
                     setActiveSession(null);
                     setActiveMessage(null);
                     setMessagePage(1);
-                    selectView("sessions");
+                    selectView(viewMode === "compaction" ? "compaction" : "sessions");
                   }}>
                     <span>全部会话</span><strong>{sessions.length}</strong>
                   </button>
@@ -725,7 +821,7 @@ function DashboardWorkspace(): React.ReactElement {
                         setActiveSession(session);
                         setActiveMessage(null);
                         setMessagePage(1);
-                        selectView("sessions");
+                        selectView(viewMode === "compaction" ? "compaction" : "sessions");
                       }}
                     />
                   ))}
@@ -741,7 +837,7 @@ function DashboardWorkspace(): React.ReactElement {
                       setActiveSession(session);
                       setActiveMessage(null);
                       setMessagePage(1);
-                      selectView("sessions");
+                      selectView(viewMode === "compaction" ? "compaction" : "sessions");
                     }}
                   />
                   <SessionGroup
@@ -756,7 +852,7 @@ function DashboardWorkspace(): React.ReactElement {
                       setActiveSession(session);
                       setActiveMessage(null);
                       setMessagePage(1);
-                      selectView("sessions");
+                      selectView(viewMode === "compaction" ? "compaction" : "sessions");
                     }}
                   />
                 </div>
@@ -833,6 +929,14 @@ function DashboardWorkspace(): React.ReactElement {
         ) : (
           <>
             <section className="messages-pane">
+              {viewMode === "compaction" ? (
+                <CompactionView
+                  compaction={compaction}
+                  pending={compactionPending}
+                  activeSessionKey={activeSessionKey}
+                />
+              ) : (
+              <>
               {batchCount > 0 && (
                 <div className="batch-bar">
                   <span>已选 {batchCount} 条</span>
@@ -935,14 +1039,16 @@ function DashboardWorkspace(): React.ReactElement {
                   setSelectedMessageIds={setSelectedMessageIds}
                 />
               </div>
-              <footer className="table-foot">
-                <div>{tableMeta(viewMode, totalMessages, proactiveTotal, currentPlugin, currentPluginState, proactiveSessionFilter)}</div>
-                <div className="pager">
-                  <MaterialIconButton variant="standard" label="上一页" disabled={currentPage <= 1} onClick={() => changePage(-1)}><ChevronLeft size={18} aria-hidden="true" /></MaterialIconButton>
-                  <span>{currentPage} / {currentPageCount}</span>
-                  <MaterialIconButton variant="standard" label="下一页" disabled={currentPage >= currentPageCount} onClick={() => changePage(1)}><ChevronRight size={18} aria-hidden="true" /></MaterialIconButton>
-                </div>
-              </footer>
+               <footer className="table-foot">
+                 <div>{tableMeta(viewMode, totalMessages, proactiveTotal, currentPlugin, currentPluginState, proactiveSessionFilter)}</div>
+                 <div className="pager">
+                   <MaterialIconButton variant="standard" label="上一页" disabled={currentPage <= 1} onClick={() => changePage(-1)}><ChevronLeft size={18} aria-hidden="true" /></MaterialIconButton>
+                   <span>{currentPage} / {currentPageCount}</span>
+                   <MaterialIconButton variant="standard" label="下一页" disabled={currentPage >= currentPageCount} onClick={() => changePage(1)}><ChevronRight size={18} aria-hidden="true" /></MaterialIconButton>
+                 </div>
+               </footer>
+              </>
+              )}
             </section>
 
             <aside className={`detail-pane${detailOpen ? " is-open" : ""}`} aria-label="详情">
@@ -1110,6 +1216,15 @@ function ModuleSwitcher(props: {
           <span>Sessions</span>
           <span>{props.sessionsCount}</span>
         </button>
+        <button
+          className={`module-switcher-option ${props.viewMode === "compaction" ? "active" : ""}`}
+          type="button"
+          aria-current={props.viewMode === "compaction" ? "page" : undefined}
+          onClick={() => select("compaction")}
+        >
+          <span>Compaction</span>
+          <span aria-hidden="true" />
+        </button>
         {props.plugins.map((plugin) => {
           const mode = `plugin:${plugin.id}` as ViewMode;
           return (
@@ -1207,6 +1322,7 @@ function PluginNavBody(props: {
   const report = useEffectEvent((error: unknown) => props.onError(error));
   const filtersKey = JSON.stringify(props.state.filters);
 
+  // 必要 effect：legacy 插件 DOM render 契约（renderNavBody 直接操作 ref 节点），不可改为渲染期计算
   useEffect(() => {
     if (ref.current && props.plugin.renderNavBody) {
       const dispatch = makeDispatch(props.plugin, getState, setState, activate, undefined, report);
@@ -1232,6 +1348,7 @@ function PluginFilters(props: {
   const report = useEffectEvent((error: unknown) => props.onError(error));
   const filtersKey = JSON.stringify(props.state.filters);
 
+  // 必要 effect：legacy 插件 DOM render 契约（renderFilters 直接操作 ref 节点）
   useEffect(() => {
     if (ref.current && props.plugin.renderFilters) {
       const dispatch = makeDispatch(props.plugin, getState, setState, activate, undefined, report);
@@ -1257,6 +1374,7 @@ function PluginTopbarAction(props: {
   const report = useEffectEvent((error: unknown) => props.onError(error));
   const filtersKey = JSON.stringify(props.state.filters);
 
+  // 必要 effect：legacy 插件 DOM render 契约（renderTopbarAction 直接操作 ref 节点）
   useEffect(() => {
     if (ref.current && props.plugin.renderTopbarAction) {
       const dispatch = makeDispatch(props.plugin, getState, setState, activate, undefined, report);
@@ -1570,3 +1688,90 @@ function proactiveSectionCount(section: string, overview: ProactiveOverview | nu
 }
 
 createRoot(document.getElementById("root") as HTMLElement).render(<App />);
+
+function triggerLabel(trigger: string): string {
+  if (trigger === "context_overflow") return "overflow";
+  return trigger || "unknown";
+}
+
+function CompactionView(props: {
+  compaction: CompactionDetail | null;
+  pending: boolean;
+  activeSessionKey: string | null;
+}): React.ReactElement {
+  if (!props.activeSessionKey) {
+    return <EmptyDetail text="从左侧选择一个 session，查看其上下文压缩状态。" />;
+  }
+  if (props.pending && !props.compaction) {
+    return <DetailLoading />;
+  }
+  if (!props.compaction) {
+    return <EmptyDetail text="加载失败，请重试。" />;
+  }
+  const { head, active, history } = props.compaction;
+  return (
+    <div className="compaction-view-scroll">
+    <div className="detail-wrap">
+      <div className="detail-toolbar">
+        <div>
+          <div className="detail-title">Compaction</div>
+          <div className="detail-subtext">
+            {formatSessionKeyForTable(props.activeSessionKey)}
+            {" · "}
+            {active ? `generation ${active.generation} · 下一代 ${head.next_generation}` : "尚未压缩"}
+          </div>
+        </div>
+      </div>
+
+      {active ? (
+        <>
+          <div className="detail-grid">
+            {detailRow("generation", <code>{active.generation}</code>)}
+            {detailRow("source", <code>{active.source_from_seq} → {active.consolidated_through_seq}</code>)}
+            {detailRow("messages", <code>{active.source_message_count}</code>)}
+            {detailRow("tokens", <code>{formatTokens(active.tokens_before)} → {formatTokens(active.tokens_after)}</code>)}
+            {detailRow("threshold", <code>soft {formatTokens(active.threshold_tokens)} · hard {formatTokens(active.hard_input_tokens)} · tail {formatTokens(active.keep_recent_tokens)}</code>)}
+            {detailRow("model", <code>{active.model}</code>)}
+            {detailRow("window", <code>{formatTokens(active.context_window)}</code>)}
+            {detailRow("trigger", <span className="status-pill">{triggerLabel(active.trigger)}</span>)}
+            {detailRow("created", <code>{active.created_at}</code>)}
+          </div>
+          <div className="detail-block">
+            <div className="detail-label">当前摘要</div>
+            <Markdown className="detail-content">{active.summary}</Markdown>
+          </div>
+          <div className="detail-block">
+            <div className="detail-label">Summary Usage</div>
+            <JsonTreeBlock data={active.summary_usage} />
+          </div>
+          <div className="detail-block">
+            <div className="detail-label">Source Plan Digest</div>
+            <div className="detail-content mono compaction-digest">{active.source_plan_digest}</div>
+          </div>
+        </>
+      ) : (
+        <EmptyDetail text="该 session 尚未发生压缩——模型上下文达到 74% 水位后自动生成摘要。" />
+      )}
+
+      {history.length > 0 && (
+        <div className="detail-block">
+          <div className="detail-label">历史 generations</div>
+          {history.map((item) => (
+            <div key={item.generation} className="compaction-history-row">
+              <code>gen {item.generation}</code>
+              <span className="muted-text">{shortTs(item.created_at)}</span>
+              <code>{formatTokens(item.tokens_before)} → {formatTokens(item.tokens_after)}</code>
+              <span className="status-pill">{triggerLabel(item.trigger)}</span>
+              {item.invalidated_at ? (
+                <span className="type-pill compaction-invalidated" title={item.invalidated_reason ?? undefined}>已失效</span>
+              ) : (
+                <span className="type-pill compaction-valid">有效</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+    </div>
+  );
+}

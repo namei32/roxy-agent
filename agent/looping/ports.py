@@ -4,10 +4,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agent.config_models import ContextCompactionConfig
+
 if TYPE_CHECKING:
     from agent.context import ContextBuilder
     from agent.core.passive_turn import Reasoner
-    from agent.core.runner import CoreRunner
     from agent.core.runtime_support import ToolDiscoveryState
     from agent.provider import LLMProvider
     from agent.retrieval.protocol import MemoryRetrievalPipeline
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
     from core.memory.engine import MemoryEngine
     from core.memory.runtime import MemoryRuntime
     from proactive_v2.presence import PresenceStore
+    from session.compaction_runtime import SessionCompactionPort
     from session.manager import SessionManager
 
 
@@ -35,16 +37,6 @@ class LLMConfig:
     vl_available: bool = False
 
 
-@dataclass
-class MemoryConfig:
-    window: int = 20
-
-    @property
-    def keep_count(self) -> int:
-        """上下文携带条数，也是 consolidation 后 session 保留条数。"""
-        return max(2, ((max(1, self.window) + 1) // 2) * 2)
-
-
 # ── 服务对象分组（仅放对象，不放配置参数）──────────────────────────────────────
 
 
@@ -54,6 +46,8 @@ class LLMServices:
 
     provider: LLMProvider
     light_provider: LLMProvider
+    fallback_provider: LLMProvider | None = None
+    fallback_model: str = ""
 
 
 @dataclass
@@ -65,6 +59,7 @@ class MemoryServices:
 class SessionServices:
     session_manager: SessionManager
     presence: PresenceStore | None = None
+    compaction_runtime: "SessionCompactionPort | None" = None
 
 
 @dataclass
@@ -86,9 +81,10 @@ class AgentLoopDeps:
     session_services: SessionServices | None = None
     tool_discovery: "ToolDiscoveryState | None" = None
     reasoner: "Reasoner | None" = None
-    core_runner: "CoreRunner | None" = None
 
 @dataclass
 class AgentLoopConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
-    memory: MemoryConfig = field(default_factory=MemoryConfig)
+    context_compaction: ContextCompactionConfig = field(
+        default_factory=ContextCompactionConfig
+    )

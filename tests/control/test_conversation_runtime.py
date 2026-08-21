@@ -289,7 +289,7 @@ async def test_runtime_replays_two_interrupted_attempts_into_one_interaction(
             raise AssertionError("unreachable")
         captured_final = request
         source = request.metadata["_controlTurnInputSource"]
-        captured_inputs = [item.content for item in source.consumed_inputs()]
+        captured_inputs = [item.content for item in source.used_inputs()]
         return "final"
 
     runtime = ConversationRuntime(store, execute)
@@ -312,6 +312,8 @@ async def test_runtime_replays_two_interrupted_attempts_into_one_interaction(
 
     assert captured_final is not None
     assert captured_final.metadata["interactionId"] == first.id
+    assert result.id == third.id
+    assert result.interaction_id == first.id
     assert captured_final.metadata["continuedFromTurnId"] == second.id
     assert captured_final.metadata["attemptOrdinal"] == 2
     assert captured_final.metadata["priorInputCount"] == 2
@@ -351,7 +353,7 @@ async def test_runtime_seal_rejects_late_input_until_terminal(tmp_path: Path) ->
 
     async def execute(request: TurnRequest) -> str:
         source = request.metadata["_controlTurnInputSource"]
-        await source.seal()
+        await source.lock()
         sealed.set()
         await release.wait()
         return "done"

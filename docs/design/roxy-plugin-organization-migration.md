@@ -2,7 +2,7 @@
 
 - 状态：accepted；迁移候选 Gate/CI 已通过，待 Core PR 合入与 Bangumi 远端授权
 - 日期：2026-08-18
-- 决策：[0029 · roxy-plugins 是插件源码的 canonical GitHub 组织](../decisions/0029-roxy-plugins-is-canonical-plugin-organization.md)
+- 决策：[1002 · roxy-plugins 是插件源码的 canonical GitHub 组织](../decisions/1002-roxy-plugins-is-canonical-plugin-organization.md)
 - 关联条款：GOV-005、PLG-009、WSP-004～WSP-005、TST-006～TST-007
 
 ## 1. 目标与成功标准

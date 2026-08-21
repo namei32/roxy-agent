@@ -1,47 +1,33 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
-from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.context import ContextBuilder
-from agent.lifecycle.types import PromptRenderResult
-from agent.lifecycle.types import TurnPersistencePolicy
-from agent.looping.ports import SessionServices
-from agent.tools.registry import ToolRegistry
-from agent.core.runner import CoreRunner, CoreRunnerDeps
-from agent.control.context import current_turn_id
+from agent.looping.core import AgentLoop
 from bus.events import InboundMessage, OutboundMessage, SpawnCompletionItem
 from bus.internal_events import SpawnCompletionEvent
 
 
 @pytest.mark.asyncio
-async def test_core_runner_routes_passive_message_to_agent_core():
-    runner = CoreRunner(
-        CoreRunnerDeps(
-            agent_core=cast(
-                Any,
-                SimpleNamespace(
-                    process=AsyncMock(
-                        return_value=OutboundMessage(
-                            channel="cli",
-                            chat_id="1",
-                            content="final",
-                        )
-                    ),
-                    pipeline=SimpleNamespace(),
-                ),
-            ),
+async def test_react_routes_passive_message_to_pipeline():
+    loop = AgentLoop.__new__(AgentLoop)
+    loop._passive_pipeline = SimpleNamespace(
+        run=AsyncMock(
+            return_value=OutboundMessage(
+                channel="cli",
+                chat_id="1",
+                content="final",
+            )
         )
     )
     msg = InboundMessage(channel="cli", sender="hua", chat_id="1", content="hi")
 
-    out = await runner.process(msg, "cli:1")
+    out = await loop._react(msg, "cli:1")
 
     assert out.content == "final"
-    runner._agent_core.process.assert_awaited_once_with(
+    loop._passive_pipeline.run.assert_awaited_once_with(
         msg,
         "cli:1",
         dispatch_outbound=True,
@@ -49,17 +35,9 @@ async def test_core_runner_routes_passive_message_to_agent_core():
 
 
 @pytest.mark.asyncio
-async def test_core_runner_handles_spawn_completion_via_direct_helper_deps():
-    session = MagicMock()
-    session.get_history.return_value = [{"role": "user", "content": "old"}]
-    session_svc = SimpleNamespace(
-        session_manager=SimpleNamespace(get_or_create=MagicMock(return_value=session))
-    )
-    context = SimpleNamespace(
-        render=MagicMock(return_value=SimpleNamespace(messages=[{"role": "system", "content": "prompt"}]))
-    )
+async def test_react_handles_spawn_completion_via_session_pipeline():
     pipeline_mock = SimpleNamespace(
-        post_reasoning=AsyncMock(
+        run=AsyncMock(
             return_value=OutboundMessage(
                 channel="telegram",
                 chat_id="123",
@@ -67,32 +45,8 @@ async def test_core_runner_handles_spawn_completion_via_direct_helper_deps():
             )
         )
     )
-    tools = SimpleNamespace(set_context=MagicMock())
-    run_agent_loop_fn = AsyncMock(
-        return_value=("done", ["spawn"], [{"name": "spawn"}], None, None)
-    )
-    prompt_render_fn = AsyncMock(
-        return_value=PromptRenderResult(
-            messages=[{"role": "system", "content": "prompt"}]
-        )
-    )
-    runner = CoreRunner(
-        CoreRunnerDeps(
-            agent_core=cast(
-                Any,
-                SimpleNamespace(
-                    process=AsyncMock(),
-                    pipeline=pipeline_mock,
-                ),
-            ),
-            session=cast(SessionServices, session_svc),
-            context=cast(ContextBuilder, context),
-            tools=cast(ToolRegistry, tools),
-            memory_window=12,
-            run_agent_loop_fn=run_agent_loop_fn,
-            prompt_render_fn=prompt_render_fn,
-        )
-    )
+    loop = AgentLoop.__new__(AgentLoop)
+    loop._passive_pipeline = pipeline_mock
     item = SpawnCompletionItem(
         channel="telegram",
         chat_id="123",
@@ -107,28 +61,26 @@ async def test_core_runner_handles_spawn_completion_via_direct_helper_deps():
         ),
     )
 
-    turn_token = current_turn_id.set("turn:spawn-completion")
-    try:
-        out = await runner.process(item, "scheduler:job-1", dispatch_outbound=False)
-    finally:
-        current_turn_id.reset(turn_token)
+    out = await loop._react(item, "scheduler:job-1", dispatch_outbound=False)
 
     assert out.content == "spawn done"
-    session_svc.session_manager.get_or_create.assert_called_once_with("scheduler:job-1")
-    tools.set_context.assert_called_once_with(
-        channel="telegram",
-        chat_id="123",
-        session_key="scheduler:job-1",
-        turn_id="turn:spawn-completion",
-        current_timestamp=item.timestamp.isoformat(),
-    )
-    prompt_render_fn.assert_awaited_once()
-    render_input = prompt_render_fn.await_args.args[0]
-    assert render_input.session_key == "scheduler:job-1"
-    assert "后台任务回传" in render_input.content
-    run_agent_loop_fn.assert_awaited_once()
-    pipeline_mock.post_reasoning.assert_awaited_once()
-    pr_kwargs = pipeline_mock.post_reasoning.await_args.kwargs
-    assert pr_kwargs["dispatch_outbound"] is False
-    assert pr_kwargs["persistence"] == TurnPersistencePolicy(persist_user=False)
-    runner._agent_core.process.assert_not_awaited()
+    pipeline_mock.run.assert_awaited_once()
+    run_args = pipeline_mock.run.await_args
+    assert run_args.args[1] == "scheduler:job-1"
+    assert run_args.kwargs["dispatch_outbound"] is False
+    pseudo_msg = run_args.args[0]
+    assert "后台任务回传" in pseudo_msg.content
+    assert pseudo_msg.metadata == {
+        "skip_post_memory": True,
+        "omit_user_turn": True,
+        "skip_memory_retrieval": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_react_rejects_unknown_input():
+    loop = AgentLoop.__new__(AgentLoop)
+    loop._passive_pipeline = SimpleNamespace(run=AsyncMock())
+
+    with pytest.raises(TypeError, match="unsupported inbound item: object"):
+        await loop._react(object(), "cli:1")  # type: ignore[arg-type]

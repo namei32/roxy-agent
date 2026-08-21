@@ -36,7 +36,9 @@ from infra.mobile_realtime.attachments import (
     encode_attachment_chunk,
 )
 from infra.mobile_realtime.inbox import DurableInboxManager, InboxResetRequired
+from core.common.diagnostic_log import turn_milestone
 from infra.mobile_realtime.key_protection import (
+    FileMasterKeyStore,
     KeyProtectionError,
     KeysetManager,
     LoadedKeyset,
@@ -76,6 +78,7 @@ from infra.mobile_realtime.protocol import (
     MobileFrame,
     ProtocolDecodeError,
     ResumeControl,
+    TURN_OUTPUT_COMPLETED_CAPABILITY,
     frame_to_json,
     parse_frame,
 )
@@ -98,7 +101,12 @@ from infra.mobile_webui.http import (
     parse_single_range,
 )
 from infra.mobile_webui.manifest import ManifestError, canonical_manifest_bytes
-from infra.mobile_webui.protocol import ErrorCode, ErrorReplyWire, PrepareReplyWire, ReleaseViewWire
+from infra.mobile_webui.protocol import (
+    ErrorCode,
+    ErrorReplyWire,
+    PrepareReplyWire,
+    ReleaseViewWire,
+)
 from infra.mobile_webui.store import (
     MobileWebUiStore,
     ReleaseSelectionChangedError,
@@ -126,6 +134,8 @@ _CLOSE_VERSION = 4406
 _CONNECTION_CONTROL_SEND_TIMEOUT_SECONDS = 3.0
 _CONNECTION_CONTROL_LOCK_TIMEOUT_SECONDS = 30.0
 _CROCKFORD32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+_TIMELINE_TERMINAL_EVENT_TYPES = frozenset({"message.final", "turn.interrupted"})
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +186,9 @@ class ActiveMobileConnection:
     ready: bool
     delivery_task: asyncio.Task[None] | None
     capabilities: tuple[str, ...] = ()
-    plugin_ui_tasks: set[asyncio.Task[None]] = field(default_factory=_plugin_ui_task_set)
+    plugin_ui_tasks: set[asyncio.Task[None]] = field(
+        default_factory=_plugin_ui_task_set
+    )
     sent_condition: asyncio.Condition = field(default_factory=asyncio.Condition)
     reply_barrier: int | None = None
 
@@ -283,7 +295,9 @@ class MobileGatewayRuntime:
         self._delivery_lock = asyncio.Lock()
         self._publication_monitor_task: asyncio.Task[None] | None = None
         self._publication_selection_digest = (
-            publication.get_release_light().selection_digest if publication is not None else None
+            publication.get_release(verify_integrity=False).selection_digest
+            if publication is not None
+            else None
         )
 
     @property
@@ -513,6 +527,7 @@ class MobileGatewayRuntime:
                         device_id=device_id,
                         connection_epoch=connection_epoch,
                         last_ack=frame.payload.last_ack,
+                        active_turns=tuple(frame.payload.active_turns),
                         capabilities=capabilities,
                     )
                     resumed = True
@@ -563,10 +578,16 @@ class MobileGatewayRuntime:
                     connection = self._connections.get(device_id)
                     if connection is None:
                         return
-                    if isinstance(
-                        frame,
-                        (MobileWebUiReleaseGetCommand, MobileWebUiContentPrepareCommand),
-                    ) and "mobile-webui-ota-v1" not in connection.capabilities:
+                    if (
+                        isinstance(
+                            frame,
+                            (
+                                MobileWebUiReleaseGetCommand,
+                                MobileWebUiContentPrepareCommand,
+                            ),
+                        )
+                        and "mobile-webui-ota-v1" not in connection.capabilities
+                    ):
                         async with connection.send_lock:
                             await _send_reply(
                                 websocket,
@@ -608,7 +629,9 @@ class MobileGatewayRuntime:
                             device_id,
                         )
                         continue
-                    if isinstance(frame, GenericCommand) and _is_plugin_ui_command(frame):
+                    if isinstance(frame, GenericCommand) and _is_plugin_ui_command(
+                        frame
+                    ):
                         if frame.type == "plugin.ui.query":
                             self._start_plugin_ui_command(
                                 websocket,
@@ -704,11 +727,18 @@ class MobileGatewayRuntime:
         device_id: str,
         connection_epoch: int,
         last_ack: int,
+        active_turns: tuple[str, ...] = (),
         capabilities: tuple[str, ...] = (),
     ) -> None:
         """先占住设备投递槽，再在锁外重放并切换为实时投递。"""
 
-        # 1. 在短临界区内冻结重放窗口，并让并发新事件进入新连接队列
+        # 1. 冻结窗口前补齐 SessionDB 已终态、但旧 runtime 未发布的事件
+        await self.channel.reconcile_active_turns(
+            device_id=device_id,
+            active_turns=active_turns,
+        )
+
+        # 2. 在短临界区内冻结重放窗口，并让并发新事件进入新连接队列
         async with self._delivery_lock:
             replay_after, replay_through, terminal = self._prepare_resume(
                 device_id=device_id,
@@ -726,7 +756,7 @@ class MobileGatewayRuntime:
             )
             self._connections[device_id] = connection
 
-        # 2. 旧连接关闭和新连接重放都不占用全局投递锁
+        # 3. 旧连接关闭和新连接重放都不占用全局投递锁
         if previous is not None and previous.websocket is not websocket:
             await self._cancel_plugin_ui_connection(device_id, previous)
             async with previous.sent_condition:
@@ -755,7 +785,7 @@ class MobileGatewayRuntime:
                     if self._connections.get(device_id) is connection:
                         _ = self._connections.pop(device_id)
 
-        # 3. 原子切换 ready；重放期间积累的事件由同一设备任务顺序发送
+        # 4. 原子切换 ready；重放期间积累的事件由同一设备任务顺序发送
         async with self._delivery_lock:
             if self._connections.get(device_id) is not connection:
                 return
@@ -812,7 +842,10 @@ class MobileGatewayRuntime:
             return last_ack, last_ack, terminal
 
         # 已落盘 reset 是重建起点；重启后新写入的事件必须在同一冻结窗口续发
-        if replay.events and _stored_event_type(replay.events[0]) == "sync.reset_required":
+        if (
+            replay.events
+            and _stored_event_type(replay.events[0]) == "sync.reset_required"
+        ):
             reset = replay.events[0]
             if not self.storage.durable_event_range_is_contiguous(
                 device_id,
@@ -874,6 +907,7 @@ class MobileGatewayRuntime:
         # 1. 同一连接的重放帧不可被 command 或二进制回复穿插
         async with connection.send_lock:
             after_event_seq = replay_after
+            traces: list[_SentEventTrace] = []
             while after_event_seq < replay_through:
                 page = self.storage.read_durable_events(
                     device_id,
@@ -886,6 +920,13 @@ class MobileGatewayRuntime:
                 if not replay:
                     raise RuntimeError("mobile resume 冻结窗口出现 event_seq 缺口")
                 for event in replay:
+                    # 1a. 终态观测数据在 send 前解析，send 后只消费不可失败 typed data
+                    trace = _sent_event_trace(
+                        event,
+                        connection_epoch=connection.connection_epoch,
+                    )
+                    if trace is not None:
+                        traces.append(trace)
                     await _send_stored_event(
                         connection.websocket,
                         event.envelope_json,
@@ -893,6 +934,12 @@ class MobileGatewayRuntime:
                         connection.connection_epoch,
                     )
                 after_event_seq = replay[-1].event_seq
+            terminal_trace = _sent_event_trace(
+                terminal,
+                connection_epoch=connection.connection_epoch,
+            )
+            if terminal_trace is not None:
+                traces.append(terminal_trace)
             await _send_stored_event(
                 connection.websocket,
                 terminal.envelope_json,
@@ -900,7 +947,7 @@ class MobileGatewayRuntime:
                 connection.connection_epoch,
             )
 
-        # 2. 仅当前 epoch 可以推进 sent cursor
+        # 2. 仅当前 epoch 可以推进 sent cursor（owner 决策先于观测）
         async with self._delivery_lock:
             if self._connections.get(device_id) is not connection:
                 return
@@ -908,6 +955,10 @@ class MobileGatewayRuntime:
                 device_id,
                 through_event_seq=terminal.event_seq,
             )
+
+        # 3. cursor 已提交后再发终态观测；失败只显式记录，不产生重放歧义
+        for trace in traces:
+            _observe_sent_event(logger, trace)
 
     async def publish_event(
         self,
@@ -918,8 +969,13 @@ class MobileGatewayRuntime:
         turn_id: str | None = None,
         device_id: str | None = None,
         connection_epoch: int | None = None,
+        required_capability: str | None = None,
     ) -> None:
-        """把 P0 事件写入每个设备 inbox，并向在线连接即时投递。"""
+        """把 P0 事件写入每个设备 inbox，并向在线连接即时投递。
+
+        指定 required_capability 时只向声明了该能力的设备入箱；旧客户端
+        不声明即不收到该事件，避免未知事件触发协议拒绝。
+        """
 
         # 1. 先在协议边界验证事件，拒绝把坏 envelope 写入 SQLite
         event_id = _new_ulid()
@@ -936,20 +992,45 @@ class MobileGatewayRuntime:
             if device_id is not None:
                 if connection_epoch is not None:
                     connection = self._connections.get(device_id)
-                    if connection is None or connection.connection_epoch != connection_epoch:
+                    if (
+                        connection is None
+                        or connection.connection_epoch != connection_epoch
+                    ):
+                        return
+                if required_capability is not None:
+                    device = self.storage.read_device(device_id)
+                    if device is None or required_capability not in device.capabilities:
                         return
                 target_device_ids = (device_id,)
             else:
                 if connection_epoch is not None:
                     raise ValueError("广播事件不能指定 connection_epoch")
-                target_device_ids = tuple(
-                    device.device_id for device in self.storage.list_active_devices()
-                )
+                devices = self.storage.list_active_devices()
+                if required_capability is not None:
+                    devices = tuple(
+                        device
+                        for device in devices
+                        if required_capability in device.capabilities
+                    )
+                target_device_ids = tuple(device.device_id for device in devices)
             events = self.inbox.enqueue_many(
                 device_ids=target_device_ids,
                 event_id=event_id,
                 envelope_json=stored,
             )
+            if event_type in _TIMELINE_TERMINAL_EVENT_TYPES:
+                # 6a. 时间链：终态事件已按设备持久化入箱（只宣称 durable queued）；
+                #     enqueue_many 真实返回的每个设备副本各记一次，0 设备不虚报。
+                for event in events:
+                    _observe_queued_event(
+                        logger,
+                        session_id=session_id or "",
+                        turn_id=turn_id or "",
+                        client_message_id=_stored_client_message_id(stored),
+                        event_type=event_type,
+                        event_seq=event.event_seq,
+                        device_id=event.device_id,
+                    )
             for event in events:
                 target_device_id = event.device_id
                 connection = self._connections.get(target_device_id)
@@ -972,6 +1053,20 @@ class MobileGatewayRuntime:
                     continue
                 connection.pending_events.append(event)
                 self._schedule_delivery_locked(target_device_id, connection)
+
+    async def refresh_device_capabilities(
+        self,
+        *,
+        device_id: str,
+        capabilities: tuple[str, ...],
+    ) -> None:
+        """更新设备持久化能力，并同步当前连接的运行时能力。"""
+
+        self.storage.update_device_capabilities(device_id, capabilities)
+        async with self._delivery_lock:
+            connection = self._connections.get(device_id)
+            if connection is not None:
+                connection.capabilities = capabilities
 
     async def publish_event_with_outbound_attachments(
         self,
@@ -1112,7 +1207,9 @@ class MobileGatewayRuntime:
         """持久化设备撤销，并通知当前连接后以 4403 关闭。"""
 
         # 1. 先提交权威撤销状态，任何后续投递失败都不能回滚它
-        revoked = self.storage.revoke_device(device_id, revoked_at=revoked_at or _utc_now())
+        revoked = self.storage.revoke_device(
+            device_id, revoked_at=revoked_at or _utc_now()
+        )
         async with self._delivery_lock:
             connection = self._connections.pop(device_id, None)
         if connection is None:
@@ -1128,7 +1225,11 @@ class MobileGatewayRuntime:
                     "connection_epoch": connection.connection_epoch,
                     "payload": {
                         "device_id": revoked.device_id,
-                        "revoked_at": revoked.revoked_at.isoformat() if revoked.revoked_at is not None else None,
+                        "revoked_at": (
+                            revoked.revoked_at.isoformat()
+                            if revoked.revoked_at is not None
+                            else None
+                        ),
                     },
                 },
                 ensure_ascii=False,
@@ -1146,7 +1247,9 @@ class MobileGatewayRuntime:
             finally:
                 connection.send_lock.release()
         except (WebSocketDisconnect, RuntimeError, OSError, TimeoutError) as error:
-            logger.warning("mobile 撤销控制帧投递失败: device=%s error=%s", device_id, error)
+            logger.warning(
+                "mobile 撤销控制帧投递失败: device=%s error=%s", device_id, error
+            )
         finally:
             # 3. 无论控制帧是否送达，都强制关闭旧连接并保留已提交撤销
             await self._close_connection(
@@ -1207,16 +1310,25 @@ class MobileGatewayRuntime:
             if self.publication is None:
                 return
             try:
-                selection_digest = self.publication.get_release_light().selection_digest
+                selection_digest = self.publication.get_release(
+                    verify_integrity=False
+                ).selection_digest
                 if selection_digest == self._publication_selection_digest:
                     continue
                 await self.publish_webui_release_changed()
             except asyncio.CancelledError:
                 raise
-            except (ManifestError, RuntimeError, UnknownReleaseError, sqlite3.Error):
+            except (
+                ManifestError,
+                RuntimeError,
+                UnknownReleaseError,
+                sqlite3.Error,
+            ):
                 logger.exception("mobile WebUI publication hint watcher failed")
 
-    def _is_current_webui_connection(self, device_id: str, connection_epoch: int) -> bool:
+    def _is_current_webui_connection(
+        self, device_id: str, connection_epoch: int
+    ) -> bool:
         connection = self._connections.get(device_id)
         return bool(
             connection is not None
@@ -1289,15 +1401,21 @@ class MobileGatewayRuntime:
                         return
                     event = connection.pending_events.popleft()
 
-                # 2. WebSocket 写入仅占用本连接写锁
+                # 2. 所有可能失败的 envelope/type/identity 解析都在 send 前完成；
+                #     WebSocket 写入仅占用本连接写锁
+                trace = None
                 try:
+                    wire = _stored_event_to_wire(
+                        event.envelope_json,
+                        event_seq=event.event_seq,
+                        connection_epoch=connection.connection_epoch,
+                    )
+                    trace = _sent_event_trace(
+                        event,
+                        connection_epoch=connection.connection_epoch,
+                    )
                     async with connection.send_lock:
-                        await _send_stored_event(
-                            connection.websocket,
-                            event.envelope_json,
-                            event.event_seq,
-                            connection.connection_epoch,
-                        )
+                        await connection.websocket.send_text(frame_to_json(wire))
                 except (WebSocketDisconnect, RuntimeError, OSError) as error:
                     logger.warning(
                         "mobile 在线投递失败，事件保留到下次 resume: device=%s error=%s",
@@ -1307,20 +1425,40 @@ class MobileGatewayRuntime:
                     async with self._delivery_lock:
                         if self._connections.get(device_id) is connection:
                             _ = self._connections.pop(device_id)
+                    # 2a. 摘除后主动关闭旧 socket，避免其 receive 永久挂起阻塞设备重连；
+                    # close 失败按现有日志语义记录，不伪装原 send 已成功
+                    _ = asyncio.create_task(
+                        self._close_connection(
+                            device_id,
+                            connection,
+                            code=_CLOSE_SLOW_CONSUMER,
+                            reason="连接投递失败，请重新连接恢复",
+                        )
+                    )
                     return
-                # 3. 连接仍是当前 epoch 时才推进 sent cursor
+                # 3. 仅当前 epoch 的 delivery owner 先原子推进 cursor、完成 owner 决策
+                stopped = False
+                sent = False
                 async with self._delivery_lock:
                     if self._connections.get(device_id) is connection:
                         _ = self.inbox.mark_sent(
                             device_id,
                             through_event_seq=event.event_seq,
                         )
+                        sent = True
                         if (
                             connection.reply_barrier is not None
                             and event.event_seq >= connection.reply_barrier
                         ):
                             connection.delivery_task = None
-                            return
+                            stopped = True
+                # 4. 时间链：只有当前 epoch 成功提交 sent cursor 后才记录终态 sent；
+                #    被新 epoch 替换的旧 owner 物理 send 成功但未推进 cursor，绝不记
+                #    sent，重放后的新 epoch 对同 seq 只记一条。观测失败只显式记录。
+                if sent and trace is not None:
+                    _observe_sent_event(logger, trace)
+                if stopped:
+                    return
                 async with connection.sent_condition:
                     connection.sent_condition.notify_all()
         finally:
@@ -1411,7 +1549,9 @@ class MobileGatewayRuntime:
             if self.publication is None:
                 raise RuntimeError("WebUI publication store 未绑定")
             release = self.publication.get_release()
-            payload = ReleaseViewWire.model_validate(_release_view_json(release), strict=True).model_dump(mode="json", exclude_none=False)
+            payload = ReleaseViewWire.model_validate(
+                _release_view_json(release), strict=True
+            ).model_dump(mode="json", exclude_none=False)
             reply_type = "mobile.webui.release.get.ok"
         except (ManifestError, RuntimeError, sqlite3.Error, ValidationError) as error:
             logger.exception("读取 WebUI ReleaseView 失败")
@@ -1451,7 +1591,11 @@ class MobileGatewayRuntime:
             target_key = frame.payload.target_key
             target = release.target(target_key)
             if target is None:
-                raise MobileWebUiHttpError("target_not_found", "target 不属于当前 stable/preview", status_code=404)
+                raise MobileWebUiHttpError(
+                    "target_not_found",
+                    "target 不属于当前 stable/preview",
+                    status_code=404,
+                )
             grant = self.webui_http_tickets.issue(
                 device_id=device_id,
                 connection_epoch=connection_epoch,
@@ -1464,14 +1608,20 @@ class MobileGatewayRuntime:
                 "ticket": grant.ticket,
                 "expires_at": grant.expires_at.astimezone(timezone.utc).isoformat(),
             }
-            payload = PrepareReplyWire.model_validate(raw_payload, strict=True).model_dump(mode="json")
+            payload = PrepareReplyWire.model_validate(
+                raw_payload, strict=True
+            ).model_dump(mode="json")
         except MobileWebUiHttpError as error:
             reply_type = "mobile.webui.content.prepare.error"
-            payload = ErrorReplyWire(code=error.code, message=str(error)[:512]).model_dump(mode="json")
+            payload = ErrorReplyWire(
+                code=error.code, message=str(error)[:512]
+            ).model_dump(mode="json")
         except (ManifestError, RuntimeError, sqlite3.Error, ValidationError) as error:
             logger.exception("签发 WebUI content ticket 失败")
             reply_type = "mobile.webui.content.prepare.error"
-            payload = ErrorReplyWire(code="release_store_corrupt", message=str(error)[:512]).model_dump(mode="json")
+            payload = ErrorReplyWire(
+                code="release_store_corrupt", message=str(error)[:512]
+            ).model_dump(mode="json")
         async with connection.send_lock:
             await _send_reply(
                 websocket,
@@ -1514,6 +1664,7 @@ class MobileGatewayRuntime:
             return
         from infra.mobile_realtime.channel import MobileCommandError
 
+        reply_send_started = time.monotonic() if frame.type == "message.send" else None
         try:
             reply = await self.channel.handle_command(
                 device_id=device_id,
@@ -1547,10 +1698,7 @@ class MobileGatewayRuntime:
             if self._connections.get(device_id) is not connection:
                 raise RuntimeError("mobile command 连接已被新 epoch 替换")
             delivery_barrier = self.storage.read_cursor(device_id).next_event_seq - 1
-            if (
-                self.storage.read_cursor(device_id).sent_event_seq
-                < delivery_barrier
-            ):
+            if self.storage.read_cursor(device_id).sent_event_seq < delivery_barrier:
                 connection.reply_barrier = delivery_barrier
         await self._flush_connection_delivery(
             device_id,
@@ -1570,6 +1718,34 @@ class MobileGatewayRuntime:
                     session_id=reply.session_id,
                     turn_id=reply.turn_id,
                 )
+            # 时间链：message.send 的 reply 真实 socket 写出后打 content-free 里程碑，
+            # 区别于 bus accept 的 tl:send.ack；duration 为帧到达→reply 写出。
+            if reply_send_started is not None:
+                try:
+                    turn_milestone(
+                        logger,
+                        "tl:send.reply_sent",
+                        session_id=str(frame.session_id or reply.session_id or ""),
+                        turn_id=str(reply.turn_id or ""),
+                        client_message_id=(
+                            str(frame.payload.client_message_id)
+                            if isinstance(frame, MessageSendCommand)
+                            else ""
+                        ),
+                        duration_ms=(time.monotonic() - reply_send_started) * 1000,
+                        outcome="receipt_replayed" if reply.replayed else "sent",
+                        device_id=device_id,
+                        connection_epoch=connection_epoch,
+                        reply_type=reply.type,
+                        receipt_replayed=reply.replayed,
+                    )
+                except Exception as milestone_error:
+                    logger.error(
+                        "mobile reply_sent 观测失败（reply 已写出，不重放）: "
+                        "device=%s error=%s",
+                        device_id,
+                        milestone_error,
+                    )
         finally:
             async with self._delivery_lock:
                 if connection.reply_barrier == delivery_barrier:
@@ -1783,7 +1959,11 @@ class MobileGatewayRuntime:
         """校验 target-scoped ticket 并返回当前 immutable manifest。"""
 
         if self.publication is None or self.webui_http_tickets is None:
-            raise MobileWebUiHttpError("release_store_corrupt", "WebUI publication store 未绑定", status_code=500)
+            raise MobileWebUiHttpError(
+                "release_store_corrupt",
+                "WebUI publication store 未绑定",
+                status_code=500,
+            )
         try:
             verified = self.webui_http_tickets.verify(
                 ticket,
@@ -1793,9 +1973,13 @@ class MobileGatewayRuntime:
             release = self.publication.get_release()
             target = release.target(verified.target_key)
             if target is None or target.manifest_digest != manifest_digest:
-                raise MobileWebUiHttpError("resource_not_found", "manifest 不属于当前 target", status_code=404)
-            body = canonical_manifest_bytes(self.publication.get_manifest(manifest_digest))
-            current = self.publication.get_release_light()
+                raise MobileWebUiHttpError(
+                    "resource_not_found", "manifest 不属于当前 target", status_code=404
+                )
+            body = canonical_manifest_bytes(
+                self.publication.get_manifest(manifest_digest)
+            )
+            current = self.publication.get_release(verify_integrity=False)
             current_target = current.target(verified.target_key)
             if (
                 current.release_epoch != verified.release_epoch
@@ -1804,16 +1988,24 @@ class MobileGatewayRuntime:
                 or current_target.generation_id != verified.generation_id
                 or current_target.manifest_digest != verified.manifest_digest
             ):
-                raise MobileWebUiHttpError("target_changed", "manifest 读取期间 release 已变化", status_code=409)
+                raise MobileWebUiHttpError(
+                    "target_changed",
+                    "manifest 读取期间 release 已变化",
+                    status_code=409,
+                )
             return body, verified
         except WebUiTicketError as error:
             _raise_webui_ticket_http_error(error)
         except MobileWebUiHttpError:
             raise
         except UnknownReleaseError as error:
-            raise MobileWebUiHttpError("release_store_corrupt", str(error), status_code=500) from error
+            raise MobileWebUiHttpError(
+                "release_store_corrupt", str(error), status_code=500
+            ) from error
         except (ManifestError, RuntimeError, sqlite3.Error) as error:
-            raise MobileWebUiHttpError("release_store_corrupt", str(error), status_code=500) from error
+            raise MobileWebUiHttpError(
+                "release_store_corrupt", str(error), status_code=500
+            ) from error
 
     def read_webui_blob_http(
         self,
@@ -1826,7 +2018,11 @@ class MobileGatewayRuntime:
         """校验 target 成员关系并返回一个完整或单段有界 blob range。"""
 
         if self.publication is None or self.webui_http_tickets is None:
-            raise MobileWebUiHttpError("release_store_corrupt", "WebUI publication store 未绑定", status_code=500)
+            raise MobileWebUiHttpError(
+                "release_store_corrupt",
+                "WebUI publication store 未绑定",
+                status_code=500,
+            )
         try:
             verified = self.webui_http_tickets.verify(
                 ticket,
@@ -1839,9 +2035,12 @@ class MobileGatewayRuntime:
                 resource_digest=blob_digest,
             )
             content = blob.path.read_bytes()
-            if len(content) != blob.size_bytes or hashlib.sha256(content).hexdigest() != blob_digest:
+            if (
+                len(content) != blob.size_bytes
+                or hashlib.sha256(content).hexdigest() != blob_digest
+            ):
                 raise RuntimeError("CAS blob 内容与 publication metadata 不一致")
-            current = self.publication.get_release_light()
+            current = self.publication.get_release(verify_integrity=False)
             current_target = current.target(verified.target_key)
             if (
                 current.release_epoch != verified.release_epoch
@@ -1850,13 +2049,25 @@ class MobileGatewayRuntime:
                 or current_target.generation_id != verified.generation_id
                 or current_target.manifest_digest != verified.manifest_digest
             ):
-                raise MobileWebUiHttpError("target_changed", "blob 读取期间 release 已变化", status_code=409)
-            if range_header is not None and if_range is not None and if_range != f'"{blob_digest}"':
-                raise MobileWebUiHttpError("range_precondition_failed", "If-Range 与 blob 摘要不匹配", status_code=412)
+                raise MobileWebUiHttpError(
+                    "target_changed", "blob 读取期间 release 已变化", status_code=409
+                )
+            if (
+                range_header is not None
+                and if_range is not None
+                and if_range != f'"{blob_digest}"'
+            ):
+                raise MobileWebUiHttpError(
+                    "range_precondition_failed",
+                    "If-Range 与 blob 摘要不匹配",
+                    status_code=412,
+                )
             try:
                 selected = parse_single_range(range_header, len(content))
             except WebUiTicketError as error:
-                raise MobileWebUiHttpError("invalid_range", str(error), status_code=416) from error
+                raise MobileWebUiHttpError(
+                    "invalid_range", str(error), status_code=416
+                ) from error
             if selected is None:
                 start, end = 0, len(content) - 1
             else:
@@ -1868,13 +2079,21 @@ class MobileGatewayRuntime:
         except MobileWebUiHttpError:
             raise
         except ReleaseSelectionChangedError as error:
-            raise MobileWebUiHttpError("target_changed", str(error), status_code=409) from error
+            raise MobileWebUiHttpError(
+                "target_changed", str(error), status_code=409
+            ) from error
         except TargetResourceNotFoundError as error:
-            raise MobileWebUiHttpError("resource_not_found", str(error), status_code=404) from error
+            raise MobileWebUiHttpError(
+                "resource_not_found", str(error), status_code=404
+            ) from error
         except UnknownReleaseError as error:
-            raise MobileWebUiHttpError("resource_not_found", str(error), status_code=404) from error
+            raise MobileWebUiHttpError(
+                "resource_not_found", str(error), status_code=404
+            ) from error
         except (ManifestError, RuntimeError, sqlite3.Error) as error:
-            raise MobileWebUiHttpError("release_store_corrupt", str(error), status_code=500) from error
+            raise MobileWebUiHttpError(
+                "release_store_corrupt", str(error), status_code=500
+            ) from error
 
     async def handle_plugin_ui_http_query(
         self,
@@ -1954,6 +2173,7 @@ class MobileGatewayRuntime:
             if not loop.is_closed() and not loop.is_running():
                 loop.run_until_complete(asyncio.gather(task, return_exceptions=True))
             elif loop.is_running():
+
                 async def drain_cancelled_task() -> None:
                     await asyncio.gather(task, return_exceptions=True)
 
@@ -1976,9 +2196,14 @@ def build_mobile_gateway_runtime(
         workspace,
         config.key_encryption.keyset_manifest,
     )
-    keys = master_keys or SecretServiceMasterKeyStore(
-        config.key_encryption.master_key_namespace
-    )
+    if master_keys is not None:
+        keys = master_keys
+    elif config.key_encryption.provider == "file":
+        keys = FileMasterKeyStore(
+            _resolve_workspace_path(workspace, config.key_encryption.master_key_file)
+        )
+    else:
+        keys = SecretServiceMasterKeyStore(config.key_encryption.master_key_namespace)
     keysets = KeysetManager(current_path.parent, keys)
     storage = MobileRealtimeStorage(database_path)
     publication: MobileWebUiStore | None = None
@@ -2000,6 +2225,13 @@ def build_mobile_gateway_runtime(
                 keyset_manifest_path=str(config.key_encryption.keyset_manifest),
                 public_key_fingerprint=keyset.server_fingerprint,
             )
+        )
+        from infra.mobile_webui.auto_publish import auto_publish_webui
+
+        auto_publish_webui(
+            Path(__file__).resolve().parents[2],
+            workspace,
+            server_id=keyset.manifest.server_id,
         )
         publication = MobileWebUiStore(
             workspace / "mobile-webui",
@@ -2048,7 +2280,12 @@ def create_mobile_gateway_app(runtime: MobileGatewayRuntime) -> FastAPI:
         finally:
             await runtime.stop()
 
-    app = FastAPI(title="Roxy Mobile Realtime Gateway", docs_url=None, redoc_url=None, lifespan=lifespan)
+    app = FastAPI(
+        title="Roxy Mobile Realtime Gateway",
+        docs_url=None,
+        redoc_url=None,
+        lifespan=lifespan,
+    )
     app.add_middleware(GZipMiddleware, minimum_size=1024)
 
     @app.websocket("/ws")
@@ -2119,7 +2356,9 @@ def create_mobile_gateway_app(runtime: MobileGatewayRuntime) -> FastAPI:
                 str(error),
                 status_code=error.status_code,
             )
-        content_digest = base64.b64encode(hashlib.sha256(content).digest()).decode("ascii")
+        content_digest = base64.b64encode(hashlib.sha256(content).digest()).decode(
+            "ascii"
+        )
         representation_digest = base64.b64encode(bytes.fromhex(sha256)).decode("ascii")
         return Response(
             content=content,
@@ -2187,7 +2426,9 @@ def create_mobile_gateway_app(runtime: MobileGatewayRuntime) -> FastAPI:
         }
         if status == 206:
             headers["Content-Range"] = f"bytes {start}-{end}/{total}"
-        return Response(content=content, status_code=status, media_type=mime, headers=headers)
+        return Response(
+            content=content, status_code=status, media_type=mime, headers=headers
+        )
 
     return app
 
@@ -2349,6 +2590,130 @@ def _stored_event_type(event: DurableInboxEvent) -> str:
     return event_type
 
 
+def _stored_client_message_id(envelope_json: str) -> str:
+    """读取 durable envelope payload 中的 client_message_id，缺失返回空串。"""
+
+    try:
+        body = cast(dict[str, object], json.loads(envelope_json))
+    except json.JSONDecodeError:
+        return ""
+    payload = body.get("payload")
+    if not isinstance(payload, dict):
+        return ""
+    value = payload.get("client_message_id")
+    return value if isinstance(value, str) else ""
+
+
+@dataclass(frozen=True, slots=True)
+class _SentEventTrace:
+    """一次已物理 send 的终态事件的不可变观测数据（send 前解析完成）。"""
+
+    event_type: str
+    session_id: str
+    turn_id: str
+    client_message_id: str
+    device_id: str
+    event_seq: int
+    connection_epoch: int
+
+
+def _sent_event_trace(
+    event: DurableInboxEvent,
+    *,
+    connection_epoch: int,
+) -> _SentEventTrace | None:
+    """在物理 send 前解析终态事件的观测数据；非终态返回 None。
+
+    所有可能失败的 envelope/type/identity 解析都在 send 之前完成，send 成功后
+    的观测只消费这份不可失败的 typed data；envelope 本身的协议边界校验仍由
+    既有入箱路径与 _stored_event_to_wire 承担。
+    """
+
+    event_type = _stored_event_type(event)
+    if event_type not in _TIMELINE_TERMINAL_EVENT_TYPES:
+        return None
+    body = json.loads(event.envelope_json)
+    session_id = body.get("session_id")
+    turn_id = body.get("turn_id")
+    client_message_id = _stored_client_message_id(event.envelope_json)
+    return _SentEventTrace(
+        event_type=event_type,
+        session_id=session_id if isinstance(session_id, str) else "",
+        turn_id=turn_id if isinstance(turn_id, str) else "",
+        client_message_id=client_message_id,
+        device_id=event.device_id,
+        event_seq=event.event_seq,
+        connection_epoch=connection_epoch,
+    )
+
+
+def _observe_queued_event(
+    logger: logging.Logger,
+    *,
+    session_id: str,
+    turn_id: str,
+    client_message_id: str,
+    event_type: str,
+    event_seq: int,
+    device_id: str,
+) -> None:
+    """记录一次已真实持久化入箱的终态事件观测。
+
+    durable enqueue 已完成，观测失败只显式记录错误，绝不影响已提交的入箱。
+    """
+
+    try:
+        turn_milestone(
+            logger,
+            "tl:event.queued",
+            session_id=session_id,
+            turn_id=turn_id,
+            client_message_id=client_message_id,
+            counts=(
+                f"event_type={event_type} "
+                f"device_id={device_id} event_seq={event_seq}"
+            ),
+        )
+    except Exception as error:
+        logger.error(
+            "mobile 终态事件 queued 观测失败（enqueue 已提交）: "
+            "device_id=%s event_seq=%s error=%s",
+            device_id,
+            event_seq,
+            error,
+        )
+
+
+def _observe_sent_event(logger: logging.Logger, trace: _SentEventTrace) -> None:
+    """记录一次已真实 send 且已推进 cursor 的终态事件观测。
+
+    send 与 cursor 提交都已完成，观测失败只显式记录错误，绝不回滚已提交的
+    send/cursor，也不会让连接因已提交观测失败进入重放歧义。
+    """
+
+    try:
+        turn_milestone(
+            logger,
+            "tl:event.sent",
+            session_id=trace.session_id,
+            turn_id=trace.turn_id,
+            client_message_id=trace.client_message_id,
+            counts=(
+                f"event_type={trace.event_type} "
+                f"device_id={trace.device_id} event_seq={trace.event_seq} "
+                f"connection_epoch={trace.connection_epoch}"
+            ),
+        )
+    except Exception as error:
+        logger.error(
+            "mobile 终态事件 sent 观测失败（send/cursor 已提交，不重放）: "
+            "device_id=%s event_seq=%s error=%s",
+            trace.device_id,
+            trace.event_seq,
+            error,
+        )
+
+
 def _stored_event_to_wire(
     envelope_json: str,
     *,
@@ -2491,10 +2856,14 @@ def _message_content_http_bearer(request: Request) -> str:
 def _webui_http_bearer(request: Request) -> str:
     authorization = request.headers.get("authorization")
     if authorization is None or not authorization.startswith("Bearer "):
-        raise MobileWebUiHttpError("invalid_ticket", "WebUI 请求缺少 Bearer ticket", status_code=401)
+        raise MobileWebUiHttpError(
+            "invalid_ticket", "WebUI 请求缺少 Bearer ticket", status_code=401
+        )
     ticket = authorization.removeprefix("Bearer ")
     if not 1 <= len(ticket) <= 4096 or any(character.isspace() for character in ticket):
-        raise MobileWebUiHttpError("invalid_ticket", "WebUI Bearer ticket 无效", status_code=401)
+        raise MobileWebUiHttpError(
+            "invalid_ticket", "WebUI Bearer ticket 无效", status_code=401
+        )
     return ticket
 
 
@@ -2554,7 +2923,11 @@ def _message_content_error_response(
 
 def _mobile_webui_http_error_response(error: MobileWebUiHttpError) -> JSONResponse:
     response = JSONResponse(
-        {"error": ErrorReplyWire(code=error.code, message=str(error)[:512]).model_dump(mode="json")},
+        {
+            "error": ErrorReplyWire(
+                code=error.code, message=str(error)[:512]
+            ).model_dump(mode="json")
+        },
         status_code=error.status_code,
     )
     response.headers["Cache-Control"] = "no-store"
@@ -2688,8 +3061,12 @@ def _raise_webui_ticket_http_error(error: WebUiTicketError) -> NoReturn:
         "resource_not_found": 404,
     }.get(error.code)
     if status is None:
-        raise MobileWebUiHttpError("invalid_ticket", str(error), status_code=401) from error
-    raise MobileWebUiHttpError(cast(ErrorCode, error.code), str(error), status_code=status) from error
+        raise MobileWebUiHttpError(
+            "invalid_ticket", str(error), status_code=401
+        ) from error
+    raise MobileWebUiHttpError(
+        cast(ErrorCode, error.code), str(error), status_code=status
+    ) from error
 
 
 def _resolve_workspace_path(workspace: Path, configured: Path) -> Path:

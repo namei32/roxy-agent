@@ -17,7 +17,6 @@ export function emitThemeCatalog(): Plugin {
       });
       this.emitFile({
         type: "asset",
-        // 保留旧静态资源名，供已经缓存旧壳的嵌入页面继续读取。
         fileName: "akashic-theme-catalog.json",
         source: readFileSync(catalogPath, "utf8"),
       });

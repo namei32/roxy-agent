@@ -32,6 +32,7 @@ class McpServerSpec:
     command: tuple[str, ...]
     env: dict[str, str] = field(default_factory=dict)
     cwd: str = "."
+    candidate_read_only_tools: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,7 @@ class ManagedServiceSpec:
     cwd: str = "."
     readiness_url: str = ""
     startup_timeout_seconds: float = 15
+    validation_port_env: str = ""
 
 
 @dataclass(frozen=True)

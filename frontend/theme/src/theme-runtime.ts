@@ -162,8 +162,6 @@ function themeCss(): string {
   return CATALOG.themes.map((theme) => {
     const declarations = MATERIAL_COLOR_ROLES.flatMap((role) => colorDeclarations("md-sys-color", role, theme.material[role]));
     declarations.push(...DOMAIN_COLOR_ROLES.flatMap((role) => colorDeclarations("roxy-sys-color", role, theme.domain[role])));
-    // 已安装插件可能还引用旧的 --ak-* token；同一主题值双写，避免品牌升级
-    // 让旧 CSS 失去颜色。新源码一律使用 --roxy-*。
     declarations.push(...DOMAIN_COLOR_ROLES.flatMap((role) => colorDeclarations("ak-sys-color", role, theme.domain[role])));
     for (const [legacyRole, [group, role]] of Object.entries(LEGACY_COLOR_ALIASES)) {
       const value = group === "material"

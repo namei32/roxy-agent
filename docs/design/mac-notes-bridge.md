@@ -2,7 +2,7 @@
 
 - 状态：implementation
 - 日期：2026-08-07
-- 关联：[0027](../decisions/0027-mac-notes-bridge-writes-only-through-live-commit.md)、CAP-002～CAP-004
+- 关联：[0037](../decisions/0037-mac-notes-bridge-writes-only-through-live-commit.md)、CAP-002～CAP-004
 
 ```yaml
 change_type: feature
@@ -107,14 +107,15 @@ enabled = true
 host = "127.0.0.1"
 port = 6330
 bridge_id = "mac-primary"
-token = "${AKASHIC_NOTES_BRIDGE_TOKEN}"
+token = "${ROXY_NOTES_BRIDGE_TOKEN}"
 heartbeat_interval_seconds = 5
 offline_after_seconds = 15
 proposal_timeout_seconds = 5
 commit_timeout_seconds = 30
 ```
 
-`AKASHIC_NOTES_BRIDGE_TOKEN` 必须至少 32 字符，不进入仓库、workspace、Session 或插件配置。
+`ROXY_NOTES_BRIDGE_TOKEN` 必须至少 32 字符，不进入仓库、workspace、Session 或插件配置；
+已有部署仍可读取旧 `AKASHIC_NOTES_BRIDGE_TOKEN` 别名。
 Broker 的 `ws://` 端口强制只能监听 loopback；跨公网使用 WSS 反向代理，或由 Mac
 建立 SSH 本地转发后连接本机 `ws://127.0.0.1`。不要直接把 6330 暴露到公网。
 
@@ -122,7 +123,7 @@ Mac 首次配对生成 token 并保存到当前登录用户的 Keychain；命令
 服务环境后不要写入 shell history：
 
 ```bash
-cd /path/to/akashic-agent
+cd /path/to/roxy-agent
 .venv/bin/python -m companion.mac_notes_bridge pair --bridge-id mac-primary
 .venv/bin/python -m companion.mac_notes_bridge probe \
   --account default --folder Akashic
@@ -167,6 +168,12 @@ cd /path/to/akashic-agent
 ```
 
 撤销后还必须删除云端环境中的旧 token 并重启 Gateway；若要恢复，生成全新 token，不能复用旧值。
+
+Companion 新安装使用 `~/Library/Application Support/Roxy/NotesBridge`、`io.roxy.*` launchd label
+与 Keychain service。若只存在旧 `Akashic/NotesBridge` 数据目录，CLI 会继续原位读取旧 receipt；
+Keychain 查询也在 Roxy service 未命中时读取旧 service。此兼容只读既有状态，不移动、合并或删除
+旧目录。Apple Notes folder 默认仍是历史 `Akashic`；切换为 `Roxy` 必须显式传入 `--folder Roxy`
+并同步修改云端插件配置。
 
 ## 8. 已完成的确定性证据
 

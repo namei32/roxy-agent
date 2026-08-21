@@ -9,7 +9,10 @@ from agent.identity import (
     default_plugin_home_path,
     default_workspace_path,
     roxy_env,
+    roxy_env_from,
+    set_roxy_env_in,
     set_roxy_env,
+    unset_roxy_env_in,
 )
 from agent.config import _load_mobile_realtime_config, resolve_app_server_endpoint
 from agent.model_runtime.auth.store import Credential, CredentialStore
@@ -39,6 +42,22 @@ def test_roxy_environment_wins_but_legacy_alias_remains_readable(
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+
+
+def test_child_environment_writes_and_clears_both_namespaces() -> None:
+    environment = {
+        "ROXY_BOOT_ID": "canonical",
+        "AKASHIC_BOOT_ID": "legacy",
+    }
+
+    assert roxy_env_from(environment, "BOOT_ID") == "canonical"
+    set_roxy_env_in(environment, "WORKSPACE", "/tmp/roxy-child")
+    assert environment["ROXY_WORKSPACE"] == "/tmp/roxy-child"
+    assert environment["AKASHIC_WORKSPACE"] == "/tmp/roxy-child"
+
+    unset_roxy_env_in(environment, "BOOT_ID")
+    assert "ROXY_BOOT_ID" not in environment
+    assert "AKASHIC_BOOT_ID" not in environment
 
 
 def test_default_paths_keep_an_unmigrated_installation_available(

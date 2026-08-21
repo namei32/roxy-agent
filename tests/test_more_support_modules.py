@@ -4,9 +4,11 @@ from typing import Any, cast
 import asyncio
 import httpx
 import json
+import logging
 import runpy
 import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -30,6 +32,7 @@ from plugins.default_proactive.anyaction import AnyActionGate, QuotaStore
 from bootstrap.app import AppRuntime
 from bootstrap.providers import build_providers, build_vl_provider
 from bus.event_bus import EventBus
+from session.manager import Session
 
 
 class _Response:
@@ -44,9 +47,7 @@ class _Response:
         message = SimpleNamespace(content=content, tool_calls=tool_calls or [])
         if reasoning_content is not None:
             message.reasoning_content = reasoning_content
-        self.choices = [
-            SimpleNamespace(message=message, finish_reason=finish_reason)
-        ]
+        self.choices = [SimpleNamespace(message=message, finish_reason=finish_reason)]
         self.usage = usage
 
 
@@ -69,7 +70,7 @@ class _FakeClient:
     async def create(self, **kwargs):
         self.calls.append(kwargs)
         response = self._responses.pop(0)
-        if isinstance(response, Exception):
+        if isinstance(response, BaseException):
             raise response
         return response
 
@@ -522,6 +523,112 @@ async def test_provider_payload_snapshot_can_enable_per_instance(
     assert len(files) == 1
     payload = json.loads(files[0].read_text(encoding="utf-8"))
     assert payload["messages"][0]["content"] == "dev"
+
+
+def test_provider_payload_snapshot_rotates_by_count_and_reuses_latest_inode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    snapshot_dir = tmp_path / "payloads"
+    last_payload = tmp_path / "last.json"
+    monkeypatch.setattr(provider_module, "_PAYLOAD_SNAPSHOT_DIR", snapshot_dir)
+    monkeypatch.setattr(provider_module, "_LAST_PAYLOAD_PATH", last_payload)
+    monkeypatch.setattr(provider_module, "_PAYLOAD_SNAPSHOT_MAX_FILES", 3)
+    monkeypatch.setattr(provider_module, "_PAYLOAD_SNAPSHOT_MAX_BYTES", 1024 * 1024)
+
+    for index in range(5):
+        provider_module._save_llm_payload_snapshot(
+            {"request": index},
+            enabled=True,
+        )
+
+    files = sorted(snapshot_dir.glob("*.json"))
+    assert len(files) == 3
+    assert [json.loads(item.read_text())["request"] for item in files] == [2, 3, 4]
+    assert json.loads(last_payload.read_text())["request"] == 4
+    assert last_payload.stat().st_ino == files[-1].stat().st_ino
+
+
+def test_provider_payload_snapshot_rotates_by_total_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    snapshot_dir = tmp_path / "payloads"
+    last_payload = tmp_path / "last.json"
+    monkeypatch.setattr(provider_module, "_PAYLOAD_SNAPSHOT_DIR", snapshot_dir)
+    monkeypatch.setattr(provider_module, "_LAST_PAYLOAD_PATH", last_payload)
+    monkeypatch.setattr(provider_module, "_PAYLOAD_SNAPSHOT_MAX_FILES", 16)
+    monkeypatch.setattr(provider_module, "_PAYLOAD_SNAPSHOT_MAX_BYTES", 700)
+
+    for index in range(4):
+        provider_module._save_llm_payload_snapshot(
+            {"request": index, "content": "x" * 300},
+            enabled=True,
+        )
+
+    files = sorted(snapshot_dir.glob("*.json"))
+    assert len(files) == 2
+    assert sum(item.stat().st_size for item in files) <= 700
+    assert [json.loads(item.read_text())["request"] for item in files] == [2, 3]
+
+
+def test_provider_payload_snapshot_rejects_oversize_without_losing_latest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+):
+    snapshot_dir = tmp_path / "payloads"
+    last_payload = tmp_path / "last.json"
+    monkeypatch.setattr(provider_module, "_PAYLOAD_SNAPSHOT_DIR", snapshot_dir)
+    monkeypatch.setattr(provider_module, "_LAST_PAYLOAD_PATH", last_payload)
+    monkeypatch.setattr(provider_module, "_PAYLOAD_SNAPSHOT_MAX_BYTES", 256)
+
+    saved = provider_module._save_llm_payload_snapshot({"request": 1}, enabled=True)
+    rejected = provider_module._save_llm_payload_snapshot(
+        {"content": "x" * 300},
+        enabled=True,
+    )
+
+    assert saved is not None
+    assert rejected is None
+    assert json.loads(last_payload.read_text())["request"] == 1
+    assert "跳过超限快照" in caplog.text
+
+
+def test_provider_payload_snapshot_serializes_rotation_and_cleans_stale_temp(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    snapshot_dir = tmp_path / "payloads"
+    snapshot_dir.mkdir()
+    stale_temp = snapshot_dir / ".interrupted.json.tmp"
+    stale_temp.write_text("partial")
+    last_payload = tmp_path / "last.json"
+    stale_link = tmp_path / ".last.json.123-000001.tmp"
+    stale_link.write_text("stale")
+    monkeypatch.setattr(provider_module, "_PAYLOAD_SNAPSHOT_DIR", snapshot_dir)
+    monkeypatch.setattr(provider_module, "_LAST_PAYLOAD_PATH", last_payload)
+    monkeypatch.setattr(provider_module, "_PAYLOAD_SNAPSHOT_MAX_FILES", 4)
+    monkeypatch.setattr(provider_module, "_PAYLOAD_SNAPSHOT_MAX_BYTES", 1024 * 1024)
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        saved = list(
+            executor.map(
+                lambda index: provider_module._save_llm_payload_snapshot(
+                    {"request": index},
+                    enabled=True,
+                ),
+                range(12),
+            )
+        )
+
+    files = sorted(snapshot_dir.glob("*.json"))
+    assert all(item is not None for item in saved)
+    assert len(files) == 4
+    assert not stale_temp.exists()
+    assert not stale_link.exists()
+    assert last_payload.stat().st_ino in {item.stat().st_ino for item in files}
+    assert all(item.stat().st_mode & 0o777 == 0o600 for item in files)
 
 
 @pytest.mark.asyncio
@@ -1045,7 +1152,7 @@ async def test_deepseek_tool_call_round_trips_reasoning_content(
 
 
 @pytest.mark.asyncio
-async def test_deepseek_thinking_request_patches_dirty_history(
+async def test_deepseek_explicit_thinking_patches_dirty_history(
     monkeypatch: pytest.MonkeyPatch,
 ):
     fake = _FakeClient([_Response(content="ok")])
@@ -1068,6 +1175,107 @@ async def test_deepseek_thinking_request_patches_dirty_history(
     )
 
     assert fake.calls[-1]["messages"][1]["reasoning_content"] == ""
+
+
+@pytest.mark.asyncio
+async def test_deepseek_default_thinking_patches_only_missing_reasoning_content(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fake = _FakeClient([_Response(content="ok")])
+    monkeypatch.setattr("agent.provider.AsyncOpenAI", lambda **_: fake)
+    provider = LLMProvider(api_key="k", provider_name="deepseek")
+    messages = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "old reply"},
+        {"role": "user", "content": "again"},
+        {
+            "role": "assistant",
+            "content": "tool reply",
+            "reasoning_content": "已有推理",
+        },
+        {"role": "user", "content": "continue"},
+    ]
+
+    await provider.chat(
+        messages=messages,
+        tools=[],
+        model="deepseek-v4-pro",
+        max_tokens=10,
+    )
+
+    sent = fake.calls[-1]["messages"]
+    assert sent[1]["reasoning_content"] == ""
+    assert sent[3]["reasoning_content"] == "已有推理"
+    assert "reasoning_content" not in messages[1]
+
+
+@pytest.mark.asyncio
+async def test_deepseek_explicit_disabled_thinking_keeps_history_unpatched(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fake = _FakeClient([_Response(content="ok")])
+    monkeypatch.setattr("agent.provider.AsyncOpenAI", lambda **_: fake)
+    provider = LLMProvider(
+        api_key="k",
+        provider_name="deepseek",
+        extra_body={"enable_thinking": False},
+    )
+
+    await provider.chat(
+        messages=[
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "old reply"},
+            {"role": "user", "content": "again"},
+        ],
+        tools=[],
+        model="deepseek-v4-pro",
+        max_tokens=10,
+    )
+
+    sent = fake.calls[-1]
+    assert sent["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert "reasoning_content" not in sent["messages"][1]
+
+
+@pytest.mark.asyncio
+async def test_deepseek_default_thinking_patches_session_tool_chain_replay(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fake = _FakeClient([_Response(content="ok")])
+    monkeypatch.setattr("agent.provider.AsyncOpenAI", lambda **_: fake)
+    provider = LLMProvider(api_key="k", provider_name="deepseek")
+    session = Session("cli:deepseek-tool-replay")
+    session.add_message("user", "完成长任务")
+    session.add_message(
+        "assistant",
+        "已完成",
+        tool_chain=[
+            {
+                "text": "",
+                "calls": [
+                    {
+                        "call_id": "call-1",
+                        "name": "probe",
+                        "arguments": {},
+                        "result": "ok",
+                    }
+                ],
+            }
+        ],
+    )
+    history = session.get_history()
+
+    await provider.chat(
+        messages=history,
+        tools=[],
+        model="deepseek-v4-pro",
+        max_tokens=10,
+    )
+
+    sent_assistant = fake.calls[-1]["messages"][1]
+    assert sent_assistant["tool_calls"][0]["function"]["name"] == "probe"
+    assert sent_assistant["reasoning_content"] == ""
+    assert "reasoning_content" not in history[1]
 
 
 async def _collect_delta(bucket: list, chunk) -> None:
@@ -1127,7 +1335,10 @@ async def test_app_runtime_start_passes_markdown_store_to_memory_optimizer(
         aclose=AsyncMock(),
     )
     core = SimpleNamespace(
-        loop=SimpleNamespace(run=lambda: "loop-task"),
+        loop=SimpleNamespace(
+            run=lambda: "loop-task",
+            bind_plugin_rollout_fact_provider=MagicMock(),
+        ),
         bus=SimpleNamespace(dispatch_outbound=lambda: "bus-task"),
         event_bus=EventBus(),
         tools=MagicMock(),
@@ -1138,8 +1349,9 @@ async def test_app_runtime_start_passes_markdown_store_to_memory_optimizer(
         light_provider=MagicMock(),
         memory_runtime=memory_runtime,
         presence=MagicMock(),
-            workspace_mcp_watcher_task=None,
-            start=AsyncMock(),
+        plugin_manager=MagicMock(),
+        workspace_mcp_watcher_task=None,
+        start=AsyncMock(),
         stop=AsyncMock(),
     )
     monkeypatch.setattr(
@@ -1148,7 +1360,12 @@ async def test_app_runtime_start_passes_markdown_store_to_memory_optimizer(
     monkeypatch.setattr(
         "bootstrap.app.start_channels",
         AsyncMock(
-            return_value=SimpleNamespace(start_all=AsyncMock(), stop_all=AsyncMock())
+            return_value=SimpleNamespace(
+                start_all=AsyncMock(),
+                stop_all=AsyncMock(),
+                bind_plugin_channels=MagicMock(),
+                swap_plugin_channels=AsyncMock(),
+            )
         ),
     )
     build_proactive_runtime = MagicMock(return_value=([], None))
@@ -1183,7 +1400,9 @@ async def test_app_runtime_start_passes_markdown_store_to_memory_optimizer(
     await app.start()
 
     build_memory_optimizer_task.assert_called_once()
-    assert build_memory_optimizer_task.call_args.kwargs["memory_store"] is markdown_store
+    assert (
+        build_memory_optimizer_task.call_args.kwargs["memory_store"] is markdown_store
+    )
     assert app.dashboard_server.manual_memory_optimizer is memory_optimizer
     await app.shutdown()
 
@@ -1201,9 +1420,7 @@ async def test_group_filter_paths() -> None:
 
     bad_user = SimpleNamespace(user_id="9", raw_message="hi")
     assert (
-        await DefaultGroupFilter("10001").should_process(
-            bad_user, cast(Any, group)
-        )
+        await DefaultGroupFilter("10001").should_process(bad_user, cast(Any, group))
         is False
     )
 
@@ -1294,9 +1511,7 @@ def test_bootstrap_proactive_builders_cover_enabled_and_disabled_paths(
         proactive_kwargs.update(kwargs)
         return SimpleNamespace(run=lambda: "loop-task")
 
-    monkeypatch.setattr(
-        "bootstrap.proactive.ProactiveLoop", _build_loop
-    )
+    monkeypatch.setattr("bootstrap.proactive.ProactiveLoop", _build_loop)
     monkeypatch.setattr("bootstrap.proactive.ProactiveStateStore", lambda path: path)
     monkeypatch.setattr(
         "bootstrap.proactive.MemoryOptimizer",
@@ -1325,9 +1540,10 @@ def test_bootstrap_proactive_builders_cover_enabled_and_disabled_paths(
         push_tool=MagicMock(),
         memory_store=MagicMock(),
         presence=MagicMock(),
-        agent_loop=cast(Any, SimpleNamespace(
-            processing_state=SimpleNamespace(is_busy=lambda: False)
-        )),
+        agent_loop=cast(
+            Any,
+            SimpleNamespace(processing_state=SimpleNamespace(is_busy=lambda: False)),
+        ),
     )
     assert tasks == ["loop-task"]
     assert loop is not None
@@ -1338,3 +1554,774 @@ def test_bootstrap_proactive_builders_cover_enabled_and_disabled_paths(
     )
     assert mem_tasks == [("mem-task", 7200)]
     assert mem_optimizer is not None
+
+
+def _milestone_events(
+    caplog: pytest.LogCaptureFixture,
+    event: str,
+) -> list[dict[str, object]]:
+    return [
+        cast(dict[str, object], record.akashic_fields)
+        for record in caplog.records
+        if getattr(record, "akashic_fields", None) is not None
+        and record.akashic_fields.get("event") == event
+    ]
+
+
+class _FakeClock:
+    """Controllable monotonic clock；只由测试显式推进，不 sleep。"""
+
+    def __init__(self) -> None:
+        self.now = 1_000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance_ms(self, ms: float) -> None:
+        self.now += ms / 1000.0
+
+
+@pytest.mark.asyncio
+async def test_provider_raw_first_sampled_before_callback(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    clock = _FakeClock()
+    monkeypatch.setattr(provider_module.time, "monotonic", clock)
+    stream = _FakeStream(
+        [
+            SimpleNamespace(
+                id="chunk-1",
+                choices=[
+                    SimpleNamespace(
+                        delta=SimpleNamespace(content="好", tool_calls=[]),
+                        finish_reason="stop",
+                    )
+                ],
+            )
+        ]
+    )
+    fake = _FakeClient([stream])
+    monkeypatch.setattr("agent.provider.AsyncOpenAI", lambda **_: fake)
+
+    async def _slow_callback(_chunk: dict[str, str]) -> None:
+        clock.advance_ms(100.0)
+
+    with caplog.at_level(logging.INFO, logger="agent.provider"):
+        result = await LLMProvider(api_key="k").chat(
+            messages=[{"role": "user", "content": "hi"}],
+            tools=[],
+            model="m",
+            max_tokens=10,
+            on_content_delta=_slow_callback,
+        )
+
+    assert result.content == "好"
+    first_any = _milestone_events(caplog, "tl:provider.raw.first_any")
+    first_answer = _milestone_events(caplog, "tl:provider.raw.first_answer")
+    done = _milestone_events(caplog, "tl:provider.transport.done")
+    assert len(first_any) == 1
+    first_any_counts = cast(str, first_any[0]["counts"])
+    assert "kind=answer" in first_any_counts
+    assert "response_id=chunk-1" in first_any_counts
+    assert "stream_attempt=1" in first_any_counts
+    assert first_any[0]["duration_ms"] == 0.0
+    assert len(first_answer) == 1
+    first_answer_counts = cast(str, first_answer[0]["counts"])
+    assert "response_id=chunk-1" in first_answer_counts
+    assert "stream_attempt=1" in first_answer_counts
+    assert first_answer[0]["duration_ms"] == 0.0
+    assert len(done) == 1
+    assert done[0]["outcome"] == "done"
+    assert done[0]["duration_ms"] == 100.0
+    span_id = first_any_counts.split("span_id=")[1].split(" ")[0]
+    assert f"span_id={span_id}" in first_answer_counts
+    assert f"span_id={span_id}" in cast(str, done[0]["counts"])
+    assert "stream_attempt=1" in cast(str, done[0]["counts"])
+
+
+@pytest.mark.asyncio
+async def test_provider_raw_tool_first_only_first_any_tool(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    stream = _FakeStream(
+        [
+            SimpleNamespace(
+                id="toolchunk-1",
+                choices=[
+                    SimpleNamespace(
+                        delta=SimpleNamespace(
+                            content=None,
+                            tool_calls=[
+                                SimpleNamespace(
+                                    index=0,
+                                    id="1",
+                                    function=SimpleNamespace(
+                                        name="search", arguments='{"q":"1"}'
+                                    ),
+                                )
+                            ],
+                        ),
+                        finish_reason="tool_calls",
+                    )
+                ],
+            )
+        ]
+    )
+    fake = _FakeClient([stream])
+    monkeypatch.setattr("agent.provider.AsyncOpenAI", lambda **_: fake)
+
+    with caplog.at_level(logging.INFO, logger="agent.provider"):
+        result = await LLMProvider(api_key="k").chat(
+            messages=[{"role": "user", "content": "hi"}],
+            tools=[],
+            model="m",
+            max_tokens=10,
+            on_content_delta=lambda chunk: _collect_delta([], chunk),
+        )
+
+    assert result.tool_calls[0].name == "search"
+    assert result.finish_reason == "tool_calls"
+    first_any = _milestone_events(caplog, "tl:provider.raw.first_any")
+    assert len(first_any) == 1
+    counts = cast(str, first_any[0]["counts"])
+    assert "kind=tool" in counts
+    assert "response_id=toolchunk-1" in counts
+    assert "stream_attempt=1" in counts
+    assert "span_id=" in counts
+    assert _milestone_events(caplog, "tl:provider.raw.first_thinking") == []
+    assert _milestone_events(caplog, "tl:provider.raw.first_answer") == []
+    assert stream.closed is True
+
+
+@pytest.mark.asyncio
+async def test_provider_transport_error_read_failure_closes_stream(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    stream = _FakeStream([httpx.ReadTimeout("stream idle")])
+    fake = _FakeClient([stream])
+    monkeypatch.setattr("agent.provider.AsyncOpenAI", lambda **_: fake)
+
+    with caplog.at_level(logging.INFO, logger="agent.provider"):
+        with pytest.raises(LLMNetworkTimeoutError, match="流读取网络超时") as exc_info:
+            await LLMProvider(api_key="k", read_timeout_s=0.01, max_retries=0).chat(
+                messages=[{"role": "user", "content": "hi"}],
+                tools=[],
+                model="m",
+                max_tokens=10,
+                on_content_delta=lambda chunk: _collect_delta([], chunk),
+            )
+
+    assert isinstance(exc_info.value.__cause__, httpx.ReadTimeout)
+    assert stream.closed is True
+    errors = _milestone_events(caplog, "tl:provider.transport.error")
+    assert len(errors) == 1
+    assert errors[0]["outcome"] == "error"
+    assert _milestone_events(caplog, "tl:provider.transport.retry") == []
+    assert _milestone_events(caplog, "tl:provider.transport.done") == []
+
+
+def _counts_span(counts: str) -> str:
+    return counts.split("span_id=")[1].split(" ")[0]
+
+
+@pytest.mark.asyncio
+async def test_provider_cancelled_during_consume_records_single_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    stream = _FakeStream([asyncio.CancelledError("cancelled")])
+    fake = _FakeClient([stream])
+    monkeypatch.setattr("agent.provider.AsyncOpenAI", lambda **_: fake)
+
+    with caplog.at_level(logging.INFO, logger="agent.provider"):
+        with pytest.raises(asyncio.CancelledError):
+            await LLMProvider(api_key="k").chat(
+                messages=[{"role": "user", "content": "hi"}],
+                tools=[],
+                model="m",
+                max_tokens=10,
+                on_content_delta=lambda chunk: _collect_delta([], chunk),
+            )
+
+    starts = _milestone_events(caplog, "tl:provider.transport.start")
+    cancelled = _milestone_events(caplog, "tl:provider.transport.cancelled")
+    assert len(starts) == 1
+    assert len(cancelled) == 1
+    assert cancelled[0]["outcome"] == "cancelled"
+    assert cancelled[0]["duration_ms"] is not None
+    assert cast(str, starts[0]["counts"]) == cast(str, cancelled[0]["counts"])
+    assert _milestone_events(caplog, "tl:provider.transport.done") == []
+    assert _milestone_events(caplog, "tl:provider.transport.error") == []
+    assert stream.closed is True
+
+
+@pytest.mark.asyncio
+async def test_provider_cancelled_during_create_records_single_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    fake = _FakeClient([asyncio.CancelledError("cancelled")])
+    monkeypatch.setattr("agent.provider.AsyncOpenAI", lambda **_: fake)
+
+    with caplog.at_level(logging.INFO, logger="agent.provider"):
+        with pytest.raises(asyncio.CancelledError):
+            await LLMProvider(api_key="k").chat(
+                messages=[{"role": "user", "content": "hi"}],
+                tools=[],
+                model="m",
+                max_tokens=10,
+                on_content_delta=lambda chunk: _collect_delta([], chunk),
+            )
+
+    starts = _milestone_events(caplog, "tl:provider.transport.start")
+    cancelled = _milestone_events(caplog, "tl:provider.transport.cancelled")
+    http_starts = _milestone_events(caplog, "tl:provider.http.start")
+    http_cancelled = _milestone_events(caplog, "tl:provider.http.cancelled")
+    assert len(starts) == 1
+    assert len(cancelled) == 1
+    assert cancelled[0]["outcome"] == "cancelled"
+    assert cast(str, starts[0]["counts"]) == cast(str, cancelled[0]["counts"])
+    assert len(http_starts) == 1
+    assert http_starts[0]["duration_ms"] is None
+    assert len(http_cancelled) == 1
+    assert http_cancelled[0]["outcome"] == "cancelled"
+    assert http_cancelled[0]["duration_ms"] is not None
+    assert "http_attempt=1" in cast(str, http_cancelled[0]["counts"])
+    assert _milestone_events(caplog, "tl:provider.transport.done") == []
+    assert _milestone_events(caplog, "tl:provider.transport.error") == []
+    assert _milestone_events(caplog, "tl:provider.http.done") == []
+    assert _milestone_events(caplog, "tl:provider.http.error") == []
+    assert _milestone_events(caplog, "tl:provider.http.retry") == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message,expected",
+    [
+        ("content_policy_violation rejected by safety review", ContentSafetyError),
+        ("maximum context length exceeded for model", ContextLengthError),
+    ],
+)
+async def test_provider_http_terminal_error_closes_http_span_before_raise(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    message: str,
+    expected: type[Exception],
+):
+    fake = _FakeClient([RuntimeError(message)])
+    monkeypatch.setattr("agent.provider.AsyncOpenAI", lambda **_: fake)
+
+    with caplog.at_level(logging.INFO, logger="agent.provider"):
+        with pytest.raises(expected):
+            await LLMProvider(api_key="k").chat(
+                messages=[{"role": "user", "content": "hi"}],
+                tools=[],
+                model="m",
+                max_tokens=10,
+                on_content_delta=lambda chunk: _collect_delta([], chunk),
+            )
+
+    http_start = _milestone_events(caplog, "tl:provider.http.start")
+    http_error = _milestone_events(caplog, "tl:provider.http.error")
+    assert len(http_start) == 1
+    assert http_start[0]["duration_ms"] is None
+    assert len(http_error) == 1
+    assert http_error[0]["outcome"] == "error"
+    assert "http_attempt=1" in cast(str, http_error[0]["counts"])
+    assert _milestone_events(caplog, "tl:provider.http.retry") == []
+    assert _milestone_events(caplog, "tl:provider.http.done") == []
+    transport_errors = _milestone_events(caplog, "tl:provider.transport.error")
+    assert len(transport_errors) == 1
+    assert transport_errors[0]["outcome"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_provider_read_backoff_cancelled_records_backoff_cancelled_event(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    interrupted = _FakeStream([httpx.RemoteProtocolError("incomplete chunked read")])
+    fake = _FakeClient([interrupted])
+    monkeypatch.setattr("agent.provider.AsyncOpenAI", lambda **_: fake)
+    sleep = AsyncMock(side_effect=asyncio.CancelledError)
+    monkeypatch.setattr(provider_module.asyncio, "sleep", sleep)
+
+    with caplog.at_level(logging.INFO, logger="agent.provider"):
+        with pytest.raises(asyncio.CancelledError):
+            await LLMProvider(api_key="k", max_retries=1).chat(
+                messages=[{"role": "user", "content": "hi"}],
+                tools=[],
+                model="m",
+                max_tokens=10,
+                on_content_delta=lambda chunk: _collect_delta([], chunk),
+            )
+
+    starts = _milestone_events(caplog, "tl:provider.transport.start")
+    retries = _milestone_events(caplog, "tl:provider.transport.retry")
+    cancelled = _milestone_events(caplog, "tl:provider.transport.cancelled")
+    backoff_cancelled = _milestone_events(
+        caplog, "tl:provider.transport.backoff_cancelled"
+    )
+    assert len(starts) == 1
+    assert starts[0]["duration_ms"] is None
+    assert len(retries) == 1
+    assert retries[0]["outcome"] == "retry"
+    # retry 已闭合 transport attempt，backoff 取消不得再记 cancelled 双终态。
+    assert cancelled == []
+    assert len(backoff_cancelled) == 1
+    assert backoff_cancelled[0]["outcome"] == "cancelled"
+    assert backoff_cancelled[0]["duration_ms"] is not None
+    span_id = _counts_span(cast(str, starts[0]["counts"]))
+    assert f"span_id={span_id}" in cast(str, retries[0]["counts"])
+    assert f"span_id={span_id}" in cast(str, backoff_cancelled[0]["counts"])
+    ordered = [
+        record.akashic_fields["event"]
+        for record in caplog.records
+        if getattr(record, "akashic_fields", None) is not None
+    ]
+    assert ordered.index("tl:provider.transport.retry") < ordered.index(
+        "tl:provider.transport.backoff_cancelled"
+    )
+    assert _milestone_events(caplog, "tl:provider.transport.done") == []
+    assert _milestone_events(caplog, "tl:provider.transport.error") == []
+
+
+@pytest.mark.asyncio
+async def test_provider_http_telemetry_first_failure_then_success(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    stream = _FakeStream(
+        [
+            SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        delta=SimpleNamespace(content="好", tool_calls=[]),
+                        finish_reason="stop",
+                    )
+                ]
+            )
+        ]
+    )
+    fake = _FakeClient([httpx.RemoteProtocolError("peer disconnected"), stream])
+    sleep = AsyncMock()
+    monkeypatch.setattr("agent.provider.AsyncOpenAI", lambda **_: fake)
+    monkeypatch.setattr(provider_module.asyncio, "sleep", sleep)
+
+    with caplog.at_level(logging.INFO, logger="agent.provider"):
+        result = await LLMProvider(api_key="k", max_retries=1).chat(
+            messages=[{"role": "user", "content": "hi"}],
+            tools=[],
+            model="m",
+            max_tokens=10,
+            on_content_delta=lambda chunk: _collect_delta([], chunk),
+        )
+
+    assert result.content == "好"
+    http_start = _milestone_events(caplog, "tl:provider.http.start")
+    http_done = _milestone_events(caplog, "tl:provider.http.done")
+    http_error = _milestone_events(caplog, "tl:provider.http.error")
+    http_retry = _milestone_events(caplog, "tl:provider.http.retry")
+    assert len(http_start) == 2
+    assert len(http_done) == 1
+    assert http_error == []
+    assert len(http_retry) == 1
+    assert http_start[0]["duration_ms"] is None
+    assert http_start[1]["duration_ms"] is None
+    assert "http_attempt=1" in cast(str, http_start[0]["counts"])
+    assert "http_attempt=1" in cast(str, http_retry[0]["counts"])
+    assert "http_attempt=2" in cast(str, http_start[1]["counts"])
+    assert "http_attempt=2" in cast(str, http_done[0]["counts"])
+    span_id = _counts_span(cast(str, http_start[0]["counts"]))
+    for events in (http_start, http_done, http_retry):
+        for entry in events:
+            counts = cast(str, entry["counts"])
+            assert f"span_id={span_id}" in counts
+            assert "stream_attempt=1" in counts
+    transport_start = _milestone_events(caplog, "tl:provider.transport.start")
+    transport_done = _milestone_events(caplog, "tl:provider.transport.done")
+    assert len(transport_start) == 1
+    assert len(transport_done) == 1
+    assert f"span_id={span_id}" in cast(str, transport_start[0]["counts"])
+    assert f"span_id={span_id}" in cast(str, transport_done[0]["counts"])
+    assert "stream_attempt=1" in cast(str, transport_start[0]["counts"])
+    assert "stream_attempt=1" in cast(str, transport_done[0]["counts"])
+    assert transport_start[0]["duration_ms"] is None
+    sleep.assert_awaited_once_with(1.0)
+
+
+@pytest.mark.asyncio
+async def test_provider_transport_retry_telemetry_same_span_1based(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    interrupted = _FakeStream([httpx.RemoteProtocolError("incomplete chunked read")])
+    recovered = _FakeStream(
+        [
+            SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        delta=SimpleNamespace(content="完成", tool_calls=[]),
+                        finish_reason="stop",
+                    )
+                ]
+            )
+        ]
+    )
+    fake = _FakeClient([interrupted, recovered])
+    sleep = AsyncMock()
+    monkeypatch.setattr("agent.provider.AsyncOpenAI", lambda **_: fake)
+    monkeypatch.setattr(provider_module.asyncio, "sleep", sleep)
+
+    with caplog.at_level(logging.INFO, logger="agent.provider"):
+        result = await LLMProvider(api_key="k", max_retries=1).chat(
+            messages=[{"role": "user", "content": "hi"}],
+            tools=[],
+            model="m",
+            max_tokens=10,
+            on_content_delta=lambda chunk: _collect_delta([], chunk),
+        )
+
+    assert result.content == "完成"
+    starts = _milestone_events(caplog, "tl:provider.transport.start")
+    retries = _milestone_events(caplog, "tl:provider.transport.retry")
+    done = _milestone_events(caplog, "tl:provider.transport.done")
+    assert len(starts) == 2
+    assert len(retries) == 1
+    assert len(done) == 1
+    assert "stream_attempt=1" in cast(str, starts[0]["counts"])
+    assert "stream_attempt=1" in cast(str, retries[0]["counts"])
+    assert "stream_attempt=2" in cast(str, starts[1]["counts"])
+    assert "stream_attempt=2" in cast(str, done[0]["counts"])
+    assert retries[0]["outcome"] == "retry"
+    assert done[0]["outcome"] == "done"
+    span_id = _counts_span(cast(str, starts[0]["counts"]))
+    for events in (starts, retries, done):
+        for entry in events:
+            assert f"span_id={span_id}" in cast(str, entry["counts"])
+    http_start = _milestone_events(caplog, "tl:provider.http.start")
+    http_done = _milestone_events(caplog, "tl:provider.http.done")
+    assert len(http_start) == 2
+    assert len(http_done) == 2
+    assert "stream_attempt=1" in cast(str, http_start[0]["counts"])
+    assert "stream_attempt=2" in cast(str, http_start[1]["counts"])
+    assert f"span_id={span_id}" in cast(str, http_start[0]["counts"])
+    assert f"span_id={span_id}" in cast(str, http_start[1]["counts"])
+    assert f"span_id={span_id}" in cast(str, http_done[0]["counts"])
+    assert f"span_id={span_id}" in cast(str, http_done[1]["counts"])
+    sleep.assert_awaited_once_with(1.0)
+
+
+@pytest.mark.asyncio
+async def test_provider_non_streaming_emits_no_stream_telemetry(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    fake = _FakeClient([_Response(content="ok")])
+    monkeypatch.setattr("agent.provider.AsyncOpenAI", lambda **_: fake)
+
+    with caplog.at_level(logging.INFO, logger="agent.provider"):
+        result = await LLMProvider(api_key="k").chat([], [], "m", 1)
+
+    assert result.content == "ok"
+    assert _milestone_events(caplog, "tl:provider.transport.start") == []
+    assert _milestone_events(caplog, "tl:provider.http.start") == []
+    assert _milestone_events(caplog, "tl:provider.http.done") == []
+
+
+@pytest.mark.asyncio
+async def test_provider_nonstream_span_exactly_one_done(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    fake = _FakeClient([_Response(content="ok")])
+    monkeypatch.setattr("agent.provider.AsyncOpenAI", lambda **_: fake)
+
+    with caplog.at_level(logging.INFO, logger="agent.provider"):
+        result = await LLMProvider(api_key="k").chat([], [], "m", 1)
+
+    assert result.content == "ok"
+    starts = _milestone_events(caplog, "tl:provider.nonstream.start")
+    done = _milestone_events(caplog, "tl:provider.nonstream.done")
+    assert len(starts) == 1
+    assert len(done) == 1
+    assert done[0]["outcome"] == "done"
+    assert done[0]["duration_ms"] is not None
+    assert cast(float, done[0]["duration_ms"]) >= 0.0
+    span_id = _counts_span(cast(str, starts[0]["counts"]))
+    assert f"span_id={span_id}" in cast(str, done[0]["counts"])
+    # 非流式总 span 携 provider/model 与中性身份字段；未经过 passive_turn 时
+    # provider_call_id/provider_operation 为占位、provider_attempt=0。
+    for entry in (starts[0], done[0]):
+        counts = _counts_map(cast(str, entry["counts"]))
+        assert counts["provider"] == "-"
+        assert counts["model"] == "m"
+        assert counts["provider_call_id"] == "-"
+        assert counts["provider_attempt"] == "0"
+        assert counts["provider_operation"] == "-"
+    assert _milestone_events(caplog, "tl:provider.nonstream.error") == []
+    assert _milestone_events(caplog, "tl:provider.nonstream.cancelled") == []
+
+
+@pytest.mark.asyncio
+async def test_provider_nonstream_http_retry_keeps_single_total_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    """nonstream 内部 HTTP 重试不展开为通用 attempt：total start 仍恰一个 error 终态。"""
+    fake = _FakeClient(
+        [httpx.RemoteProtocolError("peer disconnected"), RuntimeError("still down")]
+    )
+    sleep = AsyncMock()
+    monkeypatch.setattr("agent.provider.AsyncOpenAI", lambda **_: fake)
+    monkeypatch.setattr(provider_module.asyncio, "sleep", sleep)
+
+    with caplog.at_level(logging.INFO, logger="agent.provider"):
+        with pytest.raises(RuntimeError, match="still down"):
+            await LLMProvider(api_key="k", max_retries=1).chat([], [], "m", 1)
+
+    assert len(fake.calls) == 2
+    sleep.assert_awaited_once_with(1.0)
+    starts = _milestone_events(caplog, "tl:provider.nonstream.start")
+    errors = _milestone_events(caplog, "tl:provider.nonstream.error")
+    assert len(starts) == 1
+    assert len(errors) == 1
+    assert errors[0]["outcome"] == "error"
+    assert errors[0]["duration_ms"] is not None
+    assert cast(str, starts[0]["counts"]) == cast(str, errors[0]["counts"])
+    assert _milestone_events(caplog, "tl:provider.nonstream.done") == []
+    assert _milestone_events(caplog, "tl:provider.nonstream.cancelled") == []
+
+
+@pytest.mark.asyncio
+async def test_provider_nonstream_cancelled_closes_single_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    fake = _FakeClient([asyncio.CancelledError("cancelled")])
+    monkeypatch.setattr("agent.provider.AsyncOpenAI", lambda **_: fake)
+
+    with caplog.at_level(logging.INFO, logger="agent.provider"):
+        with pytest.raises(asyncio.CancelledError):
+            await LLMProvider(api_key="k").chat([], [], "m", 1)
+
+    starts = _milestone_events(caplog, "tl:provider.nonstream.start")
+    cancelled = _milestone_events(caplog, "tl:provider.nonstream.cancelled")
+    assert len(starts) == 1
+    assert len(cancelled) == 1
+    assert cancelled[0]["outcome"] == "cancelled"
+    assert cancelled[0]["duration_ms"] is not None
+    assert cast(str, starts[0]["counts"]) == cast(str, cancelled[0]["counts"])
+    assert _milestone_events(caplog, "tl:provider.nonstream.done") == []
+    assert _milestone_events(caplog, "tl:provider.nonstream.error") == []
+
+
+def _counts_map(counts: str) -> dict[str, str]:
+    return dict(part.split("=", 1) for part in counts.split() if "=" in part)
+
+
+_TRANSPORT_TERMINALS = frozenset(
+    {
+        "tl:provider.transport.done",
+        "tl:provider.transport.error",
+        "tl:provider.transport.retry",
+        "tl:provider.transport.cancelled",
+    }
+)
+_HTTP_TERMINALS = frozenset(
+    {
+        "tl:provider.http.done",
+        "tl:provider.http.error",
+        "tl:provider.http.retry",
+        "tl:provider.http.cancelled",
+    }
+)
+
+
+def _assert_attempt_exactly_one_terminal(
+    caplog: pytest.LogCaptureFixture,
+    *,
+    start_event: str,
+    terminals: frozenset[str],
+    identity_keys: tuple[str, ...],
+) -> dict[tuple[str, ...], list[str]]:
+    """把每个 start 与其终态按身份 join，证明每个 attempt 恰一个终态。"""
+
+    starts: dict[tuple[str, ...], list[str]] = {}
+    closes: dict[tuple[str, ...], list[str]] = {}
+    for record in caplog.records:
+        fields = getattr(record, "akashic_fields", None)
+        if fields is None:
+            continue
+        event = fields.get("event")
+        if not isinstance(event, str) or (
+            event != start_event and event not in terminals
+        ):
+            continue
+        counts = _counts_map(cast(str, fields.get("counts") or ""))
+        key = tuple(counts[name] for name in identity_keys)
+        bucket = starts if event == start_event else closes
+        bucket.setdefault(key, []).append(event)
+    assert set(starts) == set(
+        closes
+    ), f"{start_event}: 存在未闭合的 start 或没有 start 的终态"
+    for key, start_list in starts.items():
+        assert (
+            len(start_list) == 1
+        ), f"{start_event} {key} 出现 {len(start_list)} 次 start"
+        assert (
+            len(closes[key]) == 1
+        ), f"{start_event} {key} 终态数量 {len(closes[key])}: {closes[key]}"
+    return closes
+
+
+_GOOD_CHUNK = SimpleNamespace(
+    choices=[
+        SimpleNamespace(
+            delta=SimpleNamespace(content="好", tool_calls=[]),
+            finish_reason="stop",
+        )
+    ]
+)
+
+_TRANSPORT_SPAN_SCENARIOS = [
+    {
+        "name": "success",
+        "responses": [_FakeStream([_GOOD_CHUNK])],
+        "max_retries": 0,
+        "backoff_cancel": False,
+        "expect_error": None,
+        "transport": ["done"],
+        "http": ["done"],
+    },
+    {
+        "name": "nonretryable_error",
+        "responses": [_FakeStream([RuntimeError("invalid request payload")])],
+        "max_retries": 1,
+        "backoff_cancel": False,
+        "expect_error": RuntimeError,
+        "transport": ["error"],
+        "http": ["done"],
+    },
+    {
+        "name": "retry_success",
+        "responses": [
+            httpx.RemoteProtocolError("peer disconnected"),
+            _FakeStream([_GOOD_CHUNK]),
+        ],
+        "max_retries": 1,
+        "backoff_cancel": False,
+        "expect_error": None,
+        "transport": ["done"],
+        "http": ["retry", "done"],
+    },
+    {
+        "name": "read_retry_success",
+        "responses": [
+            _FakeStream([httpx.RemoteProtocolError("incomplete chunked read")]),
+            _FakeStream([_GOOD_CHUNK]),
+        ],
+        "max_retries": 1,
+        "backoff_cancel": False,
+        "expect_error": None,
+        "transport": ["retry", "done"],
+        "http": ["done", "done"],
+    },
+    {
+        "name": "create_backoff_cancelled",
+        "responses": [httpx.RemoteProtocolError("peer disconnected")],
+        "max_retries": 1,
+        "backoff_cancel": True,
+        "expect_error": asyncio.CancelledError,
+        "transport": ["cancelled"],
+        "http": ["retry"],
+    },
+    {
+        "name": "read_backoff_cancelled",
+        "responses": [
+            _FakeStream([httpx.RemoteProtocolError("incomplete chunked read")])
+        ],
+        "max_retries": 1,
+        "backoff_cancel": True,
+        "expect_error": asyncio.CancelledError,
+        "transport": ["retry"],
+        "http": ["done"],
+    },
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "scenario",
+    _TRANSPORT_SPAN_SCENARIOS,
+    ids=lambda s: s["name"],
+)
+async def test_provider_span_closure_exactly_one_terminal_per_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    scenario: dict[str, object],
+):
+    """每个 transport/http start 按身份 join 后必须恰有一个终态。"""
+    fake = _FakeClient(list(cast(list, scenario["responses"])))
+    monkeypatch.setattr("agent.provider.AsyncOpenAI", lambda **_: fake)
+    sleep = (
+        AsyncMock(side_effect=asyncio.CancelledError)
+        if scenario["backoff_cancel"]
+        else AsyncMock()
+    )
+    monkeypatch.setattr(provider_module.asyncio, "sleep", sleep)
+
+    with caplog.at_level(logging.INFO, logger="agent.provider"):
+        if scenario["expect_error"] is None:
+            result = await LLMProvider(
+                api_key="k",
+                max_retries=cast(int, scenario["max_retries"]),
+            ).chat(
+                messages=[{"role": "user", "content": "hi"}],
+                tools=[],
+                model="m",
+                max_tokens=10,
+                on_content_delta=lambda chunk: _collect_delta([], chunk),
+            )
+            assert result.content == "好"
+        else:
+            with pytest.raises(cast(type[BaseException], scenario["expect_error"])):
+                await LLMProvider(
+                    api_key="k",
+                    max_retries=cast(int, scenario["max_retries"]),
+                ).chat(
+                    messages=[{"role": "user", "content": "hi"}],
+                    tools=[],
+                    model="m",
+                    max_tokens=10,
+                    on_content_delta=lambda chunk: _collect_delta([], chunk),
+                )
+        if scenario["backoff_cancel"]:
+            sleep.assert_awaited()
+
+    transport_terminals = _assert_attempt_exactly_one_terminal(
+        caplog,
+        start_event="tl:provider.transport.start",
+        terminals=_TRANSPORT_TERMINALS,
+        identity_keys=("span_id", "stream_attempt"),
+    )
+    http_terminals = _assert_attempt_exactly_one_terminal(
+        caplog,
+        start_event="tl:provider.http.start",
+        terminals=_HTTP_TERMINALS,
+        identity_keys=("span_id", "stream_attempt", "http_attempt"),
+    )
+    ordered_transport = [
+        closes[0].rsplit(".", 1)[-1]
+        for _, closes in sorted(transport_terminals.items())
+    ]
+    assert ordered_transport == cast(list, scenario["transport"])
+    ordered_http = [
+        closes[0].rsplit(".", 1)[-1] for _, closes in sorted(http_terminals.items())
+    ]
+    assert ordered_http == cast(list, scenario["http"])
+    for span_id, stream_attempt, _http_attempt in http_terminals:
+        assert (span_id, stream_attempt) in transport_terminals

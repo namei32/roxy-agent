@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 import sqlite3
@@ -93,7 +94,7 @@ class AppleNotesReceiptStore:
         """Reserve one durable operation or return its exact replay."""
 
         self._ensure_schema()
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             _ = conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT * FROM note_operations WHERE idempotency_key=?",
@@ -136,7 +137,7 @@ class AppleNotesReceiptStore:
 
     def get_operation(self, operation_id: str) -> OperationReceipt | None:
         self._ensure_schema()
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             row = conn.execute(
                 "SELECT * FROM note_operations WHERE operation_id=?",
                 (operation_id,),
@@ -145,7 +146,7 @@ class AppleNotesReceiptStore:
 
     def get_document(self, document_key: str) -> NoteDocument | None:
         self._ensure_schema()
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             row = conn.execute(
                 "SELECT * FROM note_documents WHERE document_key=?",
                 (document_key,),
@@ -154,7 +155,7 @@ class AppleNotesReceiptStore:
 
     def latest_for_document(self, document_key: str) -> OperationReceipt | None:
         self._ensure_schema()
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             row = conn.execute(
                 """
                 SELECT * FROM note_operations
@@ -225,7 +226,7 @@ class AppleNotesReceiptStore:
         """Commit the external receipt and document mapping in one transaction."""
 
         self._ensure_schema()
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             _ = conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT * FROM note_operations WHERE operation_id=?",
@@ -330,7 +331,7 @@ class AppleNotesReceiptStore:
         error_detail: str,
     ) -> OperationReceipt:
         self._ensure_schema()
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             _ = conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT * FROM note_operations WHERE operation_id=?",
@@ -371,7 +372,7 @@ class AppleNotesReceiptStore:
             if self._initialized:
                 return
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            with self._connect(raw=True) as conn:
+            with closing(self._connect(raw=True)) as conn:
                 version = int(conn.execute("PRAGMA user_version").fetchone()[0])
                 if version not in {0, self.SCHEMA_VERSION}:
                     raise RuntimeError(f"Apple Notes 收据库版本不受支持: {version}")

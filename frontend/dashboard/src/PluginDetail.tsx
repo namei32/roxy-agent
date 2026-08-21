@@ -10,6 +10,7 @@ export function PluginDetail(props: {
   const Detail = props.plugin.Detail;
 
   // 1. React-native plugins compose straight into the host tree (shared React).
+  // 必要 effect：legacy 插件 DOM render 契约（renderDetail 直接操作 ref 节点），不可改为渲染期计算
   useEffect(() => {
     if (Detail) return;
     if (ref.current && props.plugin.renderDetail) {
@@ -22,22 +23,12 @@ export function PluginDetail(props: {
   // 2. Otherwise fall back to the legacy DOM render contract.
   if (Detail) {
     return (
-      <div
-        className="plugin-workbench-root"
-        data-roxy-plugin={props.plugin.id}
-        data-akashic-plugin={props.plugin.id}
-      >
+      <div className="plugin-workbench-root" data-roxy-plugin={props.plugin.id} data-akashic-plugin={props.plugin.id}>
         <Detail item={props.item} dispatch={props.dispatch} />
       </div>
     );
   }
-  return (
-    <div
-      ref={ref}
-      data-roxy-plugin={props.plugin.id}
-      data-akashic-plugin={props.plugin.id}
-    />
-  );
+  return <div ref={ref} data-roxy-plugin={props.plugin.id} data-akashic-plugin={props.plugin.id} />;
 }
 
 export function PluginMain(props: {
@@ -52,6 +43,7 @@ export function PluginMain(props: {
     dispatchRef.current = props.dispatch;
   }, [props.dispatch]);
 
+  // 必要 effect：legacy renderMain 自己拥有 DOM、timer、listener；宿主只更新 dispatch，不可改为渲染期计算
   useEffect(() => {
     if (Main) return;
     // legacy renderMain 自己拥有 DOM、timer、listener；宿主只更新 dispatch。
@@ -62,21 +54,10 @@ export function PluginMain(props: {
 
   if (Main) {
     return (
-      <div
-        className="plugin-workbench-root"
-        data-roxy-plugin={props.plugin.id}
-        data-akashic-plugin={props.plugin.id}
-      >
+      <div className="plugin-workbench-root" data-roxy-plugin={props.plugin.id} data-akashic-plugin={props.plugin.id}>
         <Main dispatch={props.dispatch} />
       </div>
     );
   }
-  return (
-    <div
-      className="plugin-workbench-root"
-      ref={ref}
-      data-roxy-plugin={props.plugin.id}
-      data-akashic-plugin={props.plugin.id}
-    />
-  );
+  return <div className="plugin-workbench-root" ref={ref} data-roxy-plugin={props.plugin.id} data-akashic-plugin={props.plugin.id} />;
 }

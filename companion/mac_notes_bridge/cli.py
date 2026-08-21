@@ -65,7 +65,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"SSH 隧道 launchd 已安装并启动: {plist_path}")
         return 0
     if args.command == "uninstall-ssh-tunnel":
-        _uninstall_launchd_service(_SSH_TUNNEL_LABEL)
+        _uninstall_ssh_tunnel()
         print("SSH 隧道 launchd 已停止并移除")
         return 0
     if args.command == "probe":
@@ -422,6 +422,11 @@ def _install_ssh_tunnel(args: argparse.Namespace) -> Path:
     return _install_launchd_payload(_SSH_TUNNEL_LABEL, payload)
 
 
+def _uninstall_ssh_tunnel() -> None:
+    _uninstall_launchd_service(_SSH_TUNNEL_LABEL)
+    _uninstall_launchd_service(_LEGACY_SSH_TUNNEL_LABEL)
+
+
 def _ssh_tunnel_program_arguments(
     *,
     target: str,
@@ -490,16 +495,30 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _default_data_dir(home: Path | None = None) -> str:
+    """新安装使用 Roxy 目录，旧 companion 状态存在时继续原位读取。"""
+
+    root = home if home is not None else Path.home()
+    canonical = root / "Library" / "Application Support" / "Roxy" / "NotesBridge"
+    legacy = root / "Library" / "Application Support" / "Akashic" / "NotesBridge"
+    if canonical.exists():
+        return str(canonical)
+    if legacy.exists():
+        return str(legacy)
+    return str(canonical)
+
+
 def _add_runtime_options(parser: argparse.ArgumentParser, *, include_url: bool) -> None:
     if include_url:
         parser.add_argument("--url", required=True)
     parser.add_argument("--bridge-id", default="mac-primary")
     parser.add_argument(
         "--data-dir",
-        default="~/Library/Application Support/Roxy/NotesBridge",
+        default=_default_data_dir(),
     )
     parser.add_argument("--account", default="default")
-    parser.add_argument("--folder", default="Roxy")
+    # Notes folder 是外部用户数据；升级不能在未授权时切换到第二个文件夹。
+    parser.add_argument("--folder", default="Akashic")
     parser.add_argument("--no-create-folder", action="store_true")
 
 
@@ -514,14 +533,16 @@ def _parser() -> argparse.ArgumentParser:
     status = commands.add_parser("status", help="查看本机进程与心跳快照")
     status.add_argument(
         "--data-dir",
-        default="~/Library/Application Support/Roxy/NotesBridge",
+        default=_default_data_dir(),
     )
     run = commands.add_parser("run", help="前台运行 Bridge")
     _add_runtime_options(run, include_url=True)
     run.add_argument("--max-message-bytes", type=int, default=1024 * 1024)
     probe = commands.add_parser("probe", help="验证 Notes 与自动化权限")
     _add_runtime_options(probe, include_url=False)
-    reconcile = commands.add_parser("reconcile", help="按 operation marker 核对不确定写入")
+    reconcile = commands.add_parser(
+        "reconcile", help="按 operation marker 核对不确定写入"
+    )
     _add_runtime_options(reconcile, include_url=False)
     reconcile.add_argument("--operation-id", required=True)
     install = commands.add_parser("install-launchd", help="安装并启动用户级常驻服务")
@@ -537,7 +558,7 @@ def _parser() -> argparse.ArgumentParser:
     tunnel.add_argument("--remote-port", type=int, default=6330)
     tunnel.add_argument(
         "--data-dir",
-        default="~/Library/Application Support/Roxy/NotesBridge",
+        default=_default_data_dir(),
     )
     _ = commands.add_parser(
         "uninstall-ssh-tunnel", help="停止并删除 Notes Bridge SSH 隧道"
