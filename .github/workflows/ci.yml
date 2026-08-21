@@ -72,6 +72,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          # 测试 checkout 必须 detached，避免取得 clean main 的 WebUI 自动发布权限。
+          ref: ${{ github.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
