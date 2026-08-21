@@ -111,7 +111,7 @@ jobs:
         env:
           PYTHONWARNINGS: "ignore:.*AbstractEventLoopPolicy.*:DeprecationWarning"
         run: |
-          .venv/bin/pytest -q -W error tests/
+          .venv/bin/pytest -vv -W error -o faulthandler_timeout=120 tests/
 
   docker-control-gate:
     runs-on: ubuntu-latest
