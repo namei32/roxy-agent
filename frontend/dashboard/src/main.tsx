@@ -1196,6 +1196,7 @@ function ModuleSwitcher(props: {
         ref={triggerRef}
         className="module-switcher-trigger"
         type="button"
+        aria-label={`切换工作台模块，当前为${currentLabel}`}
         aria-expanded={open}
         aria-controls="dashboard-module-options"
         onClick={() => setOpen((current) => !current)}
