@@ -177,7 +177,7 @@ const DesktopMessageRow = React.memo(function DesktopMessageRow({
                   }}
                 />
               ) : undefined}
-              processStartContent={message.role === "assistant" ? (
+              processStartContent={message.role === "assistant" && activeSessionId ? (
                 <MobilePluginSlot
                   name="turn.before_reasoning"
                   sessionId={activeSessionId}
@@ -185,7 +185,7 @@ const DesktopMessageRow = React.memo(function DesktopMessageRow({
                   turnId={message.streaming ? message.id : undefined}
                 />
               ) : undefined}
-              beforeProcessBlock={(block) => message.role === "assistant" && block.kind === "tool" ? (
+              beforeProcessBlock={(block) => message.role === "assistant" && activeSessionId && block.kind === "tool" ? (
                 <MobilePluginSlot
                   name="turn.before_tool"
                   sessionId={activeSessionId}
@@ -194,7 +194,7 @@ const DesktopMessageRow = React.memo(function DesktopMessageRow({
                   block={block}
                 />
               ) : null}
-              answerEndContent={message.role === "assistant" ? (
+              answerEndContent={message.role === "assistant" && activeSessionId ? (
                 <MobilePluginSlot
                   name="turn.after_answer"
                   sessionId={activeSessionId}

@@ -368,7 +368,7 @@ class WebChatChannel:
     async def _create_session(self, websocket: WebSocket, request_id: str) -> str:
         chat_id = uuid4().hex
         session_key = self._session_key(chat_id)
-        await self._add_connection(session_key, websocket)
+        await self._select_connection(session_key, websocket)
         logger.info(
             "[web_chat] session.create session=%s socket=%s",
             session_key,
@@ -387,12 +387,12 @@ class WebChatChannel:
         request_id: str,
         payload: dict[str, Any],
     ) -> str:
-        """把已连接 socket 绑定到已知会话，并补投该会话积压的终态帧。"""
+        """把 socket 切换到指定会话，并补投该会话积压的终态帧。"""
         session_key = self._normalize_session_id(payload.get("session_id"))
         if not session_key:
             await self._send_error(websocket, request_id, "session_id 缺失或无效")
             return ""
-        await self._add_connection(session_key, websocket)
+        await self._select_connection(session_key, websocket)
         logger.info(
             "[web_chat] session.attach session=%s socket=%s count=%d",
             session_key,
@@ -495,7 +495,7 @@ class WebChatChannel:
                 reply_content,
                 sender_label="你" if reply_role == "user" else "Roxy",
             )
-        await self._add_connection(session_key, websocket)
+        await self._select_connection(session_key, websocket)
         chat_id = self._chat_id(session_key)
         logger.debug(
             "[web_chat] message.send accepted session=%s chat_id=%s connection_count=%d",
@@ -662,14 +662,33 @@ class WebChatChannel:
         )
         _ = self._active_turn_ids.pop(session_key, None)
 
-    async def _add_connection(self, session_key: str, websocket: WebSocket) -> None:
+    async def _select_connection(
+        self,
+        session_key: str,
+        websocket: WebSocket,
+    ) -> None:
+        detached: list[str] = []
         async with self._connection_lock:
+            # A desktop socket has one selected conversation. Removing previous
+            # bindings only changes live delivery; any running turn keeps its
+            # session owner and may finish in the background.
+            for bound_key in list(self._connections):
+                if bound_key == session_key:
+                    continue
+                sockets = self._connections[bound_key]
+                if websocket not in sockets:
+                    continue
+                sockets.discard(websocket)
+                detached.append(bound_key)
+                if not sockets:
+                    _ = self._connections.pop(bound_key, None)
             self._connections.setdefault(session_key, set()).add(websocket)
             logger.info(
-                "[web_chat] add connection session=%s socket=%s count=%d",
+                "[web_chat] select connection session=%s socket=%s count=%d detached=%s",
                 session_key,
                 self._socket_id(websocket),
                 len(self._connections[session_key]),
+                ",".join(detached) or "-",
             )
         await self._refill_terminal(session_key, websocket)
 

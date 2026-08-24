@@ -43,6 +43,11 @@ test("desktop reply availability uses one history index", () => {
   assert.doesNotMatch(conversation, /messages\.some/);
 });
 
+test("desktop turn plugins require an active session context", () => {
+  assert.match(conversation, /message\.role === "assistant" && activeSessionId \? \(/);
+  assert.match(conversation, /message\.role === "assistant" && activeSessionId && block\.kind === "tool" \? \(/);
+});
+
 test("shared message contracts no longer import the desktop entry", async () => {
   const sources = await Promise.all([
     "message-view.tsx",

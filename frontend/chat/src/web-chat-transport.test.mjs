@@ -95,6 +95,36 @@ test("foreign frames cannot mutate the active session and push terminal lands im
   assert.equal(messages[0].streaming, true);
 });
 
+test("blank new-chat surface rejects stale session frames", () => {
+  let messages = [];
+  let status = "idle";
+  let activeTurnId = null;
+  const loadedSessions = [];
+  const loadedMessages = [];
+  const context = {
+    activeSessionId: () => "",
+    activateSession: () => {},
+    setError: () => {},
+    setMessages: (updater) => { messages = updater(messages); },
+    getStatus: () => status,
+    setStatus: (next) => { status = next; },
+    getActiveTurnId: () => activeTurnId,
+    setActiveTurnId: (next) => { activeTurnId = next; },
+    loadSessions: async () => { loadedSessions.push("refresh"); },
+    loadMessages: async (sessionId) => { loadedMessages.push(sessionId); },
+  };
+
+  applyChatFrame(parseChatFrame({ type: "turn.started", session_id: "old", turn_id: "old-turn", content: "" }), context);
+  applyChatFrame(parseChatFrame({ type: "answer.delta", session_id: "old", turn_id: "old-turn", delta: "不应显示" }), context);
+  applyChatFrame(parseChatFrame({ type: "message.final", session_id: "old", turn_id: "old-turn", content: "旧会话回复" }), context);
+
+  assert.deepEqual(messages, []);
+  assert.equal(status, "idle");
+  assert.equal(activeTurnId, null);
+  assert.deepEqual(loadedMessages, []);
+  assert.deepEqual(loadedSessions, ["refresh"]);
+});
+
 test("output completed enters finalizing then terminal returns to idle", () => {
   let status = "idle";
   let activeTurnId = null;
