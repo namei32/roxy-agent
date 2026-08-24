@@ -104,6 +104,33 @@ CREATE TABLE IF NOT EXISTS consolidation_commits (
     digest TEXT NOT NULL,
     completed_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS consolidation_jobs (
+    source_ref      TEXT PRIMARY KEY,
+    digest          TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'in_progress',
+    extraction_json TEXT,
+    attempt_count   INTEGER NOT NULL DEFAULT 1,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    completed_at    TEXT
+);
+CREATE TABLE IF NOT EXISTS memory_item_sources (
+    source_key TEXT PRIMARY KEY,
+    source_ref TEXT NOT NULL,
+    item_id    TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_memory_item_sources_item
+    ON memory_item_sources (item_id);
+CREATE TABLE IF NOT EXISTS embedding_cache (
+    namespace    TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    embedding    TEXT NOT NULL,
+    dimension    INTEGER NOT NULL,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+    PRIMARY KEY (namespace, content_hash)
+);
 CREATE TABLE IF NOT EXISTS memory_replacements (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     old_item_id       TEXT NOT NULL,
@@ -138,6 +165,10 @@ def _now_iso() -> str:
 def _content_hash(summary: str, memory_type: str) -> str:
     text = re.sub(r"\s+", " ", summary.lower().strip()) + memory_type
     return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
+def _embedding_content_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _coerce_emotional_weight(value: object) -> int:
@@ -491,57 +522,131 @@ CREATE VIRTUAL TABLE IF NOT EXISTS vec_items USING vec0(
         extra: dict[str, object] | None = None,
         happened_at: str | None = None,
         emotional_weight: int = 0,
+        source_key: str | None = None,
     ) -> str:
-        """写入或强化一条记忆。返回 'new:id' 或 'reinforced:id'"""
+        """写入或强化一条记忆，并可按 source_key 保证逐来源幂等。"""
         chash = _content_hash(summary, memory_type)
         emotional_weight = _coerce_emotional_weight(emotional_weight)
-        existing = self._db.execute(
-            "SELECT id, status FROM memory_items WHERE content_hash=? AND memory_type=?",
-            (chash, memory_type),
-        ).fetchone()
-        if existing:
-            row_id, status = existing
-            if status == "superseded":
-                self._db.execute(
-                    "UPDATE memory_items SET status='active', reinforcement=reinforcement+1, updated_at=?, emotional_weight=MAX(emotional_weight, ?) WHERE id=?",
-                    (_now_iso(), emotional_weight, row_id),
-                )
+        dedupe_key = str(source_key or "").strip()
+        new_item_rowid: int | None = None
+        self._db.execute("BEGIN IMMEDIATE")
+        try:
+            if dedupe_key:
+                receipt = self._db.execute(
+                    "SELECT item_id FROM memory_item_sources WHERE source_key=?",
+                    (dedupe_key,),
+                ).fetchone()
+                if receipt is not None:
+                    self._db.execute("COMMIT")
+                    return f"skipped:{receipt[0]}"
+
+            existing = self._db.execute(
+                "SELECT id, status FROM memory_items WHERE content_hash=? AND memory_type=?",
+                (chash, memory_type),
+            ).fetchone()
+            if existing:
+                item_id, status = existing
+                if status == "superseded":
+                    self._db.execute(
+                        "UPDATE memory_items SET status='active', reinforcement=reinforcement+1, updated_at=?, emotional_weight=MAX(emotional_weight, ?) WHERE id=?",
+                        (_now_iso(), emotional_weight, item_id),
+                    )
+                else:
+                    self._db.execute(
+                        "UPDATE memory_items SET reinforcement=reinforcement+1, updated_at=?, emotional_weight=MAX(emotional_weight, ?) WHERE id=?",
+                        (_now_iso(), emotional_weight, item_id),
+                    )
+                result = f"reinforced:{item_id}"
             else:
-                self._db.execute(
-                    "UPDATE memory_items SET reinforcement=reinforcement+1, updated_at=?, emotional_weight=MAX(emotional_weight, ?) WHERE id=?",
-                    (_now_iso(), emotional_weight, row_id),
+                item_id = hashlib.md5(
+                    f"{chash}{time.time()}".encode()
+                ).hexdigest()[:12]
+                cur = self._db.execute(
+                    """INSERT INTO memory_items
+                       (id, memory_type, summary, content_hash, embedding, emotional_weight,
+                        extra_json, source_ref, happened_at, created_at, updated_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        item_id,
+                        memory_type,
+                        summary,
+                        chash,
+                        json.dumps(embedding) if embedding is not None else None,
+                        emotional_weight,
+                        json.dumps(extra) if extra else None,
+                        source_ref,
+                        happened_at,
+                        _now_iso(),
+                        _now_iso(),
+                    ),
                 )
-            self._db.commit()
-            return f"reinforced:{row_id}"
+                new_item_rowid = cur.lastrowid
+                result = f"new:{item_id}"
 
-        item_id = hashlib.md5(f"{chash}{time.time()}".encode()).hexdigest()[:12]
-        cur = self._db.execute(
-            """INSERT INTO memory_items
-               (id, memory_type, summary, content_hash, embedding, emotional_weight,
-                extra_json, source_ref, happened_at, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                item_id,
-                memory_type,
-                summary,
-                chash,
-                json.dumps(embedding) if embedding is not None else None,
-                emotional_weight,
-                json.dumps(extra) if extra else None,
-                source_ref,
-                happened_at,
-                _now_iso(),
-                _now_iso(),
-            ),
-        )
-        item_rowid = cur.lastrowid
-        self._db.commit()
+            if dedupe_key:
+                self._db.execute(
+                    """INSERT INTO memory_item_sources
+                       (source_key, source_ref, item_id, created_at)
+                       VALUES (?, ?, ?, ?)""",
+                    (dedupe_key, str(source_ref or ""), item_id, _now_iso()),
+                )
+            self._db.execute("COMMIT")
+        except BaseException:
+            self._db.rollback()
+            raise
 
-        if embedding is not None and item_rowid is not None:
-            self._vec_insert(item_rowid, embedding)
+        if embedding is not None and new_item_rowid is not None:
+            self._vec_insert(new_item_rowid, embedding)
             self._db.commit()
 
-        return f"new:{item_id}"
+        return result
+
+    @_synchronized
+    def get_item_id_by_source_key(self, source_key: str) -> str | None:
+        key = str(source_key or "").strip()
+        if not key:
+            return None
+        row = self._db.execute(
+            "SELECT item_id FROM memory_item_sources WHERE source_key=?",
+            (key,),
+        ).fetchone()
+        return None if row is None else str(row[0])
+
+    @_synchronized
+    def record_item_source_once(
+        self,
+        *,
+        source_key: str,
+        source_ref: str,
+        item_id: str,
+    ) -> str:
+        """为已合并到旧条目的结果补写幂等 receipt。"""
+
+        key = str(source_key or "").strip()
+        source = str(source_ref or "").strip()
+        target = str(item_id or "").strip()
+        if not key or not target:
+            raise ValueError("memory item source_key/item_id 不能为空")
+        self._db.execute("BEGIN IMMEDIATE")
+        try:
+            row = self._db.execute(
+                "SELECT item_id FROM memory_item_sources WHERE source_key=?",
+                (key,),
+            ).fetchone()
+            if row is not None:
+                self._db.execute("COMMIT")
+                return f"skipped:{row[0]}"
+            self._db.execute(
+                """INSERT INTO memory_item_sources
+                   (source_key, source_ref, item_id, created_at)
+                   VALUES (?, ?, ?, ?)""",
+                (key, source, target, _now_iso()),
+            )
+            self._db.execute("COMMIT")
+            return f"recorded:{target}"
+        except BaseException:
+            self._db.rollback()
+            raise
 
     @_synchronized
     def upsert_consolidation_event(
@@ -638,12 +743,245 @@ CREATE VIRTUAL TABLE IF NOT EXISTS vec_items USING vec0(
             raise
 
     @_synchronized
+    def link_consolidation_event_to_existing(
+        self,
+        *,
+        source_ref: str,
+        item_id: str,
+        emotional_weight: int = 0,
+    ) -> str:
+        """把语义重复事件链接到旧条目，同一 source_ref 只强化一次。"""
+
+        source = str(source_ref or "").strip()
+        target = str(item_id or "").strip()
+        if not source or not target:
+            raise ValueError("consolidation source_ref/item_id 不能为空")
+        emotional_weight = _coerce_emotional_weight(emotional_weight)
+        self._db.execute("BEGIN IMMEDIATE")
+        try:
+            receipt = self._db.execute(
+                "SELECT item_id FROM consolidation_events WHERE source_ref=?",
+                (source,),
+            ).fetchone()
+            if receipt is not None:
+                self._db.execute("COMMIT")
+                return f"skipped:{receipt[0] or source}"
+            exists = self._db.execute(
+                "SELECT 1 FROM memory_items WHERE id=?",
+                (target,),
+            ).fetchone()
+            if exists is None:
+                raise KeyError(f"memory item not found: {target}")
+            self._db.execute(
+                """UPDATE memory_items
+                   SET reinforcement=reinforcement+1,
+                       emotional_weight=MAX(emotional_weight, ?),
+                       updated_at=?
+                   WHERE id=?""",
+                (emotional_weight, _now_iso(), target),
+            )
+            self._db.execute(
+                """INSERT INTO consolidation_events(source_ref, item_id, created_at)
+                   VALUES (?, ?, ?)""",
+                (source, target, _now_iso()),
+            )
+            self._db.execute("COMMIT")
+            return f"reinforced:{target}"
+        except BaseException:
+            self._db.rollback()
+            raise
+
+    @_synchronized
     def has_consolidation_source_ref(self, source_ref: str) -> bool:
         row = self._db.execute(
             "SELECT 1 FROM consolidation_events WHERE source_ref=? LIMIT 1",
             ((source_ref or "").strip(),),
         ).fetchone()
         return row is not None
+
+    @_synchronized
+    def begin_consolidation_job(self, *, source_ref: str, digest: str) -> None:
+        """创建可恢复 job；同一 source_ref 不允许对应不同输入。"""
+
+        source = str(source_ref or "").strip()
+        value = str(digest or "").strip()
+        if not source or not value:
+            raise ValueError("consolidation job source_ref/digest 不能为空")
+        now = _now_iso()
+        self._db.execute("BEGIN IMMEDIATE")
+        try:
+            row = self._db.execute(
+                "SELECT digest FROM consolidation_jobs WHERE source_ref=?",
+                (source,),
+            ).fetchone()
+            if row is None:
+                self._db.execute(
+                    """INSERT INTO consolidation_jobs
+                       (source_ref, digest, status, attempt_count, created_at, updated_at)
+                       VALUES (?, ?, 'in_progress', 1, ?, ?)""",
+                    (source, value, now, now),
+                )
+            else:
+                if str(row[0]) != value:
+                    raise ValueError(f"consolidation job digest 冲突: {source}")
+                self._db.execute(
+                    """UPDATE consolidation_jobs
+                       SET attempt_count=attempt_count+1, updated_at=?
+                       WHERE source_ref=?""",
+                    (now, source),
+                )
+            self._db.execute("COMMIT")
+        except BaseException:
+            self._db.rollback()
+            raise
+
+    @_synchronized
+    def load_consolidation_extraction(
+        self,
+        *,
+        source_ref: str,
+        digest: str,
+    ) -> tuple[bool, dict[str, object] | None]:
+        """返回 (是否已持久化, 提取结果)；JSON null 也是已完成结果。"""
+
+        source = str(source_ref or "").strip()
+        value = str(digest or "").strip()
+        row = self._db.execute(
+            """SELECT digest, extraction_json
+               FROM consolidation_jobs WHERE source_ref=?""",
+            (source,),
+        ).fetchone()
+        if row is None:
+            return False, None
+        if str(row[0]) != value:
+            raise ValueError(f"consolidation job digest 冲突: {source}")
+        raw = row[1]
+        if raw is None:
+            return False, None
+        try:
+            parsed: object = json.loads(str(raw))
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise ValueError(f"consolidation extraction JSON 损坏: {source}") from exc
+        if parsed is not None and not isinstance(parsed, dict):
+            raise ValueError(f"consolidation extraction 必须是 JSON object/null: {source}")
+        return True, cast(dict[str, object] | None, parsed)
+
+    @_synchronized
+    def save_consolidation_extraction(
+        self,
+        *,
+        source_ref: str,
+        digest: str,
+        extraction: dict[str, object] | None,
+    ) -> dict[str, object] | None:
+        """持久化 LLM 阶段输出；并发写入时保留第一个成功结果。"""
+
+        source = str(source_ref or "").strip()
+        value = str(digest or "").strip()
+        if not source or not value:
+            raise ValueError("consolidation job source_ref/digest 不能为空")
+        encoded = json.dumps(
+            extraction,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        now = _now_iso()
+        self._db.execute("BEGIN IMMEDIATE")
+        try:
+            row = self._db.execute(
+                """SELECT digest, extraction_json
+                   FROM consolidation_jobs WHERE source_ref=?""",
+                (source,),
+            ).fetchone()
+            if row is None:
+                self._db.execute(
+                    """INSERT INTO consolidation_jobs
+                       (source_ref, digest, status, extraction_json,
+                        attempt_count, created_at, updated_at)
+                       VALUES (?, ?, 'in_progress', ?, 1, ?, ?)""",
+                    (source, value, encoded, now, now),
+                )
+                stored = encoded
+            else:
+                if str(row[0]) != value:
+                    raise ValueError(f"consolidation job digest 冲突: {source}")
+                stored = row[1]
+                if stored is None:
+                    self._db.execute(
+                        """UPDATE consolidation_jobs
+                           SET extraction_json=?, updated_at=? WHERE source_ref=?""",
+                        (encoded, now, source),
+                    )
+                    stored = encoded
+            self._db.execute("COMMIT")
+        except BaseException:
+            self._db.rollback()
+            raise
+
+        try:
+            parsed: object = json.loads(str(stored))
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise ValueError(f"consolidation extraction JSON 损坏: {source}") from exc
+        if parsed is not None and not isinstance(parsed, dict):
+            raise ValueError(f"consolidation extraction 必须是 JSON object/null: {source}")
+        return cast(dict[str, object] | None, parsed)
+
+    @_synchronized
+    def get_cached_embedding(
+        self,
+        *,
+        namespace: str,
+        text: str,
+    ) -> list[float] | None:
+        cache_namespace = str(namespace or "").strip()
+        if not cache_namespace:
+            raise ValueError("embedding cache namespace 不能为空")
+        row = self._db.execute(
+            """SELECT embedding, dimension FROM embedding_cache
+               WHERE namespace=? AND content_hash=?""",
+            (cache_namespace, _embedding_content_hash(text)),
+        ).fetchone()
+        if row is None:
+            return None
+        embedding = _json_embedding(row[0], context="embedding cache")
+        if embedding is None or len(embedding) != int(row[1]):
+            raise ValueError("embedding cache 维度与内容不一致")
+        return embedding
+
+    @_synchronized
+    def put_cached_embedding(
+        self,
+        *,
+        namespace: str,
+        text: str,
+        embedding: list[float],
+    ) -> None:
+        cache_namespace = str(namespace or "").strip()
+        if not cache_namespace:
+            raise ValueError("embedding cache namespace 不能为空")
+        validated = _json_embedding(
+            json.dumps(embedding),
+            context="embedding cache write",
+        )
+        if validated is None:
+            raise ValueError("embedding cache 不允许空向量")
+        now = _now_iso()
+        self._db.execute(
+            """INSERT INTO embedding_cache
+               (namespace, content_hash, embedding, dimension, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(namespace, content_hash) DO NOTHING""",
+            (
+                cache_namespace,
+                _embedding_content_hash(text),
+                json.dumps(validated),
+                len(validated),
+                now,
+                now,
+            ),
+        )
+        self._db.commit()
 
     @_synchronized
     def has_completed_consolidation_commit(
@@ -690,12 +1028,32 @@ CREATE VIRTUAL TABLE IF NOT EXISTS vec_items USING vec0(
             if row is not None:
                 if str(row[0]) != value:
                     raise ValueError(f"consolidation commit digest 冲突: {source}")
+                self._db.execute(
+                    """UPDATE consolidation_jobs
+                       SET status='completed', completed_at=COALESCE(completed_at, ?),
+                           updated_at=?
+                       WHERE source_ref=? AND digest=?""",
+                    (_now_iso(), _now_iso(), source, value),
+                )
                 self._db.execute("COMMIT")
                 return
+            job = self._db.execute(
+                "SELECT digest FROM consolidation_jobs WHERE source_ref=?",
+                (source,),
+            ).fetchone()
+            if job is not None and str(job[0]) != value:
+                raise ValueError(f"consolidation job digest 冲突: {source}")
+            completed_at = _now_iso()
             self._db.execute(
                 "INSERT INTO consolidation_commits(source_ref, digest, completed_at) "
                 "VALUES (?, ?, ?)",
-                (source, value, _now_iso()),
+                (source, value, completed_at),
+            )
+            self._db.execute(
+                """UPDATE consolidation_jobs
+                   SET status='completed', completed_at=?, updated_at=?
+                   WHERE source_ref=? AND digest=?""",
+                (completed_at, completed_at, source, value),
             )
             self._db.execute("COMMIT")
         except BaseException:

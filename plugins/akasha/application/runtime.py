@@ -7,6 +7,7 @@ import math
 import os
 import tempfile
 import threading
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -76,15 +77,44 @@ class OnlineMemoryRuntime:
         self._writer_lease = WriterLease(memory_path)
         self._state_lock = threading.RLock()
         self.cycle = self._restore_or_replay()
+        self._published_sources = self._source_keys(self.cycle.turns)
 
     def close(self) -> None:
         self._writer_lease.close()
+
+    def has_committed_source(
+        self,
+        *,
+        session_key: str,
+        user_message_id: str,
+        assistant_message_id: str,
+    ) -> bool:
+        """Return whether the exact canonical source turn is already published."""
+
+        with self._state_lock:
+            return (
+                session_key,
+                user_message_id,
+                assistant_message_id,
+            ) in self._published_sources
+
+    @staticmethod
+    def _source_keys(turns: Iterable[Turn]) -> set[tuple[str, str, str]]:
+        return {
+            (
+                turn.session_key,
+                turn.user_message_id,
+                turn.assistant_message_id,
+            )
+            for turn in turns
+        }
 
     def rebuild_from_source(self) -> None:
         """从 canonical sessions source 全量替换派生索引与图快照。"""
 
         with self._state_lock:
             self.cycle = self._fresh_rebuild_from_source()
+            self._published_sources = self._source_keys(self.cycle.turns)
 
     def query_turn(
         self,
@@ -252,7 +282,9 @@ class OnlineMemoryRuntime:
             )
         except Exception:
             self.cycle = self._restore_persisted_cycle()
+            self._published_sources = self._source_keys(self.cycle.turns)
             raise
+        self._published_sources.update(self._source_keys(staged.turns))
         return OnlineCommit(last_turn, last_commit)
 
     def _restore_or_replay(self) -> MemoryCycle:

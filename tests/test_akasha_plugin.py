@@ -1044,6 +1044,128 @@ def _assert_span_closed(
 
 
 @pytest.mark.asyncio
+async def test_turn_commit_replay_skips_already_published_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="plugins.akasha.engine")
+    _create_sessions(tmp_path / "sessions.db")
+    monkeypatch.setattr("plugins.akasha.engine.Embedder", _Embedder)
+    engine = _engine(tmp_path)
+    started = datetime(2026, 7, 6, 8, tzinfo=timezone.utc)
+    _append_turn(
+        tmp_path / "sessions.db",
+        sequence=0,
+        user="alpha start",
+        assistant="first answer",
+        started=started,
+    )
+    event = _event(
+        sequence=0,
+        user="alpha start",
+        assistant="first answer",
+        started=started,
+    )
+
+    await engine._on_turn_committed(event)  # noqa: SLF001
+    await engine._wait_for_publication()  # noqa: SLF001
+
+    async def unexpected_embed(_text: str) -> list[float]:
+        raise AssertionError("replay must not call single embedding provider")
+
+    async def unexpected_embed_batch(_texts: list[str]) -> list[list[float]]:
+        raise AssertionError("replay must not call batch embedding provider")
+
+    monkeypatch.setattr(engine._embedder, "embed", unexpected_embed)  # noqa: SLF001
+    monkeypatch.setattr(  # noqa: SLF001
+        engine._embedder,
+        "embed_batch",
+        unexpected_embed_batch,
+    )
+    try:
+        await engine._on_turn_committed(event)  # noqa: SLF001
+        await engine._wait_for_publication()  # noqa: SLF001
+        embed_records = _milestone_records(caplog, "akasha.embed.start")
+        assert len(embed_records) == 1
+        skip_records = _milestone_records(caplog, "akasha.commit_source.skip")
+        replay_counts = _counts_map(
+            str(skip_records[-1].akashic_fields["counts"])
+        )
+        assert replay_counts["reason"] == "source_replay"
+    finally:
+        _close_engine(engine)
+
+
+@pytest.mark.asyncio
+async def test_turn_commit_retry_after_stage_failure_reuses_embedding_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="plugins.akasha.engine")
+    _create_sessions(tmp_path / "sessions.db")
+    monkeypatch.setattr("plugins.akasha.engine.Embedder", _Embedder)
+    engine = _engine(tmp_path)
+    started = datetime(2026, 7, 6, 8, tzinfo=timezone.utc)
+    _append_turn(
+        tmp_path / "sessions.db",
+        sequence=0,
+        user="alpha start",
+        assistant="first answer",
+        started=started,
+    )
+    event = _event(
+        sequence=0,
+        user="alpha start",
+        assistant="first answer",
+        started=started,
+    )
+    original_stage = engine._runtime.stage_from_source  # noqa: SLF001
+    fail_once = True
+
+    def injected_stage_failure(**kwargs):
+        nonlocal fail_once
+        if fail_once:
+            fail_once = False
+            raise RuntimeError("injected stage failure")
+        return original_stage(**kwargs)
+
+    monkeypatch.setattr(
+        engine._runtime,  # noqa: SLF001
+        "stage_from_source",
+        injected_stage_failure,
+    )
+    with pytest.raises(RuntimeError, match="injected stage failure"):
+        await engine._on_turn_committed(event)  # noqa: SLF001
+
+    async def unexpected_embed(_text: str) -> list[float]:
+        raise AssertionError("retry must not call single embedding provider")
+
+    async def unexpected_embed_batch(_texts: list[str]) -> list[list[float]]:
+        raise AssertionError("retry must not call batch embedding provider")
+
+    monkeypatch.setattr(engine._embedder, "embed", unexpected_embed)  # noqa: SLF001
+    monkeypatch.setattr(  # noqa: SLF001
+        engine._embedder,
+        "embed_batch",
+        unexpected_embed_batch,
+    )
+    try:
+        await engine._on_turn_committed(event)  # noqa: SLF001
+        await engine._wait_for_publication()  # noqa: SLF001
+        embed_records = _milestone_records(caplog, "akasha.embed.start")
+        retry_counts = _counts_map(
+            str(embed_records[-1].akashic_fields["counts"])
+        )
+        assert retry_counts["embed_mode"] == "cached"
+        assert retry_counts["cache_hits"] == "2"
+        assert retry_counts["cache_misses"] == "0"
+    finally:
+        _close_engine(engine)
+
+
+@pytest.mark.asyncio
 async def test_turn_commit_blocked_embed_keeps_fanout_open_at_embed_start(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

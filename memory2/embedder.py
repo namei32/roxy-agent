@@ -5,6 +5,8 @@ Embedding 客户端，对接 DashScope text-embedding-v3（OpenAI 兼容接口�
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import math
 
@@ -99,6 +101,22 @@ class Embedder:
     @property
     def model_id(self) -> str:
         return self._model
+
+    @property
+    def cache_namespace(self) -> str:
+        """标识会影响向量结果的 provider/model 配置，不包含 API key。"""
+
+        payload = json.dumps(
+            {
+                "url": self._url,
+                "model": self._model,
+                "dimensions": self._output_dimensionality,
+                "max_text_len": self.MAX_TEXT_LEN,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     async def embed(self, text: str) -> list[float]:
         """单条 embed"""

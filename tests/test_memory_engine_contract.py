@@ -30,6 +30,37 @@ from core.memory.runtime import MemoryRuntime
 class _CommitMarkerStore:
     def __init__(self) -> None:
         self.completed: dict[str, str] = {}
+        self.extractions: dict[str, tuple[str, dict[str, object] | None]] = {}
+
+    def begin_consolidation_job(self, *, source_ref: str, digest: str) -> None:
+        existing = self.extractions.get(source_ref)
+        if existing is not None and existing[0] != digest:
+            raise ValueError("digest conflict")
+
+    def load_consolidation_extraction(
+        self, *, source_ref: str, digest: str
+    ) -> tuple[bool, dict[str, object] | None]:
+        existing = self.extractions.get(source_ref)
+        if existing is None:
+            return False, None
+        if existing[0] != digest:
+            raise ValueError("digest conflict")
+        return True, existing[1]
+
+    def save_consolidation_extraction(
+        self,
+        *,
+        source_ref: str,
+        digest: str,
+        extraction: dict[str, object] | None,
+    ) -> dict[str, object] | None:
+        existing = self.extractions.get(source_ref)
+        if existing is not None:
+            if existing[0] != digest:
+                raise ValueError("digest conflict")
+            return existing[1]
+        self.extractions[source_ref] = (digest, extraction)
+        return extraction
 
     def has_completed_consolidation_commit(self, *, source_ref: str, digest: str) -> bool:
         existing = self.completed.get(source_ref)
