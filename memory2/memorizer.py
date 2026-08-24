@@ -4,6 +4,8 @@ Memory v2 写入器：将 consolidation 结果保存到 SQLite
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import logging
 import re
 from collections.abc import Mapping
@@ -58,6 +60,63 @@ class Memorizer:
     def __init__(self, store: MemoryStore2, embedder: Embedder) -> None:
         self._store = store
         self._embedder = embedder
+        self._embedding_locks: dict[
+            tuple[int, str], tuple[asyncio.Lock, int]
+        ] = {}
+        namespace = getattr(embedder, "cache_namespace", None)
+        if not isinstance(namespace, str) or not namespace.strip():
+            model_id = str(getattr(embedder, "model_id", "unknown"))
+            embedder_type = f"{type(embedder).__module__}.{type(embedder).__qualname__}"
+            namespace = f"{embedder_type}:{model_id}"
+        self._embedding_namespace = namespace.strip()
+
+    async def _embed_cached(self, text: str) -> list[float]:
+        cached = self._store.get_cached_embedding(
+            namespace=self._embedding_namespace,
+            text=text,
+        )
+        if cached is not None:
+            return cached
+
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        loop = asyncio.get_running_loop()
+        lock_key = (id(loop), digest)
+        lock_entry = self._embedding_locks.get(lock_key)
+        if lock_entry is None:
+            lock = asyncio.Lock()
+            waiter_count = 0
+        else:
+            lock, waiter_count = lock_entry
+        self._embedding_locks[lock_key] = (lock, waiter_count + 1)
+        try:
+            async with lock:
+                cached = self._store.get_cached_embedding(
+                    namespace=self._embedding_namespace,
+                    text=text,
+                )
+                if cached is not None:
+                    return cached
+                embedding = await self._embedder.embed(text)
+                self._store.put_cached_embedding(
+                    namespace=self._embedding_namespace,
+                    text=text,
+                    embedding=embedding,
+                )
+                stored = self._store.get_cached_embedding(
+                    namespace=self._embedding_namespace,
+                    text=text,
+                )
+                if stored is None:
+                    raise RuntimeError("embedding cache write was not persisted")
+                return stored
+        finally:
+            current = self._embedding_locks.get(lock_key)
+            if current is not None and current[0] is lock:
+                remaining = current[1] - 1
+                if remaining <= 0:
+                    del self._embedding_locks[lock_key]
+                else:
+                    self._embedding_locks[lock_key] = (lock, remaining)
 
     async def save_item(
         self,
@@ -70,7 +129,7 @@ class Memorizer:
     ) -> str:
         """embed → content_hash → upsert，返回 'new:id' 或 'reinforced:id'"""
         _validate_procedure_metadata(summary, memory_type, extra)
-        embedding = await self._embedder.embed(summary)
+        embedding = await self._embed_cached(summary)
         return self._store.upsert_item(
             memory_type=memory_type,
             summary=summary,
@@ -91,6 +150,7 @@ class Memorizer:
         emotional_weight: int = 0,
         merge_threshold: float = 0.70,
         supersede_threshold: float = 0.90,
+        source_key: str | None = None,
     ) -> str:
         """先 supersede 高相似旧条目，再写入新条目。
 
@@ -100,7 +160,11 @@ class Memorizer:
           的旧条目，防止同类状态事实堆积。
         """
         _validate_procedure_metadata(summary, memory_type, extra)
-        embedding = await self._embedder.embed(summary)
+        if source_key:
+            existing_item_id = self._store.get_item_id_by_source_key(source_key)
+            if existing_item_id is not None:
+                return f"skipped:{existing_item_id}"
+        embedding = await self._embed_cached(summary)
 
         if memory_type in ("procedure", "preference"):
             similar = self._store.vector_search(
@@ -125,6 +189,14 @@ class Memorizer:
                         "memorizer save_with_supersede: merged explicit procedure into %s",
                         merge_target["id"],
                     )
+                    if source_key:
+                        receipt_result = self._store.record_item_source_once(
+                            source_key=source_key,
+                            source_ref=source_ref,
+                            item_id=merge_target["id"],
+                        )
+                        if receipt_result.startswith("skipped:"):
+                            return receipt_result
                     return f"merged:{merge_target['id']}"
             similar = [
                 item
@@ -180,6 +252,7 @@ class Memorizer:
             extra=extra,
             happened_at=happened_at,
             emotional_weight=emotional_weight,
+            source_key=source_key,
         )
 
     async def save_from_consolidation(
@@ -202,11 +275,19 @@ class Memorizer:
                 )
                 text = ""
             if text:
-                embedding = await self._embedder.embed(text)
-                if self._should_semantic_dedup_event(
-                    embedding,
-                    emotional_weight=emotional_weight,
-                ):
+                embedding = await self._embed_cached(text)
+                duplicate_id = self._find_semantic_duplicate_event(embedding)
+                if duplicate_id is not None:
+                    result = self._store.link_consolidation_event_to_existing(
+                        source_ref=source_ref,
+                        item_id=duplicate_id,
+                        emotional_weight=emotional_weight,
+                    )
+                    if not result.startswith("skipped:"):
+                        logger.info(
+                            "memory2 event semantic-dedup: similar=%s",
+                            [duplicate_id],
+                        )
                     text = ""
             if text:
                 result = self._store.upsert_consolidation_event(
@@ -235,30 +316,20 @@ class Memorizer:
                 len(behavior_updates),
             )
 
-    def _should_semantic_dedup_event(
+    def _find_semantic_duplicate_event(
         self,
         embedding: list[float] | None,
-        *,
-        emotional_weight: int = 0,
-    ) -> bool:
+    ) -> str | None:
         if embedding is None:
-            return False
+            return None
         similar_ids = self._store.find_similar_recent_events(
             embedding,
             threshold=0.92,
             days_back=7,
         )
         if not similar_ids:
-            return False
-        self._store.reinforce_items_batch(
-            similar_ids[:1],
-            emotional_weight=emotional_weight,
-        )
-        logger.info(
-            "memory2 event semantic-dedup: similar=%s",
-            similar_ids[:1],
-        )
-        return True
+            return None
+        return similar_ids[0]
 
     def supersede_batch(self, ids: list[str]) -> None:
         self._store.mark_superseded_batch(ids)
@@ -317,7 +388,7 @@ class Memorizer:
             raise ValueError("merge_item 需要非空 item_id 和 merged_summary")
 
         memory_type, old_extra = self._store.get_item_merge_metadata(item_id)
-        new_embedding = await self._embedder.embed(merged_summary)
+        new_embedding = await self._embed_cached(merged_summary)
 
         # 2. 合并显式更新，并严格解析 procedure 字段。
         new_extra = dict(old_extra)

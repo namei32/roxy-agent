@@ -1133,6 +1133,18 @@ class AkashaMemoryEngine:
         assistant_id = event.assistant_message_id
         if not user_id or not assistant_id:
             raise ValueError("TurnCommitted requires persisted user and assistant IDs")
+        if self._runtime.has_committed_source(
+            session_key=event.session_key,
+            user_message_id=user_id,
+            assistant_message_id=assistant_id,
+        ):
+            _milestone(
+                "akasha.commit_source.skip",
+                counts="reason=source_replay",
+                outcome="skipped",
+                **identity,
+            )
+            return True
 
         # 2. Embed exact persisted text without blocking other provider calls.
         messages = _load_messages(
@@ -1143,29 +1155,66 @@ class AkashaMemoryEngine:
         )
         with self._lock:
             pending = self._pending.get(event.session_key)
-        embed_mode = "batch"
-        if (
+        pending_matches = (
             len(user_ids) == 1
             and pending is not None
             and pending.query_text == cast(str, messages[0]["content"])
-        ):
+        )
+        vectors_by_index: list[list[float] | None] = [
+            self._embedding_store.get(
+                message_id=str(message["id"]),
+                content=str(message["content"]),
+                model=self._embedding_model,
+            )
+            for message in messages
+        ]
+        cache_hits = sum(vector is not None for vector in vectors_by_index)
+        pending_reused = False
+        if pending_matches and vectors_by_index[0] is None:
+            vectors_by_index[0] = cast(PendingRetrieval, pending).query_dense.tolist()
+            pending_reused = True
+        missing_indexes = [
+            index
+            for index, vector in enumerate(vectors_by_index)
+            if vector is None
+        ]
+        if not missing_indexes:
+            embed_mode = "cached"
+        elif len(missing_indexes) == 1:
             embed_mode = "single"
-        embed_counts = f"embed_mode={embed_mode}"
+        else:
+            embed_mode = "batch"
+        embed_counts = (
+            f"embed_mode={embed_mode},cache_hits={cache_hits},"
+            f"cache_misses={len(missing_indexes)},"
+            f"pending_reused={int(pending_reused)}"
+        )
         _milestone("akasha.embed.start", counts=embed_counts, **identity)
         embed_started = perf_counter()
         try:
-            if embed_mode == "single":
-                assistant_vector = await self._embedder.embed(
-                    cast(str, messages[-1]["content"])
+            if len(missing_indexes) == 1:
+                index = missing_indexes[0]
+                vectors_by_index[index] = await self._embedder.embed(
+                    cast(str, messages[index]["content"])
                 )
-                vectors = [
-                    cast(PendingRetrieval, pending).query_dense.tolist(),
-                    assistant_vector,
-                ]
-            else:
-                vectors = await self._embedder.embed_batch(
-                    [cast(str, message["content"]) for message in messages]
+            elif missing_indexes:
+                generated = await self._embedder.embed_batch(
+                    [
+                        cast(str, messages[index]["content"])
+                        for index in missing_indexes
+                    ]
                 )
+                if len(generated) != len(missing_indexes):
+                    raise ValueError("embedding count differs from cache misses")
+                for index, vector in zip(
+                    missing_indexes,
+                    generated,
+                    strict=True,
+                ):
+                    vectors_by_index[index] = vector
+            if any(vector is None for vector in vectors_by_index):
+                raise RuntimeError("committed embedding resolution incomplete")
+            vectors = cast(list[list[float]], vectors_by_index)
         except asyncio.CancelledError:
             _milestone(
                 "akasha.embed.cancelled",
@@ -1248,6 +1297,18 @@ class AkashaMemoryEngine:
                 outcome="done",
                 **identity,
             )
+            if self._runtime.has_committed_source(
+                session_key=event.session_key,
+                user_message_id=user_id,
+                assistant_message_id=assistant_id,
+            ):
+                _milestone(
+                    "akasha.commit_source.skip",
+                    counts="reason=source_replay",
+                    outcome="skipped",
+                    **identity,
+                )
+                return True
             stage_started = perf_counter()
             _milestone("akasha.stage.start", **identity)
             try:

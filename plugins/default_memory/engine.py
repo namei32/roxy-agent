@@ -66,6 +66,17 @@ def _build_entry_source_ref(base_source_ref: str, entry: str) -> str:
     return f"{base_source_ref}#h:{digest}"
 
 
+def _build_implicit_item_source_key(
+    base_source_ref: str,
+    memory_type: str,
+    summary: str,
+) -> str:
+    normalized = " ".join(str(summary or "").lower().split())
+    payload = f"{memory_type}\0{normalized}"
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+    return f"{base_source_ref}#i:{memory_type}:{digest}"
+
+
 def _consolidation_commit_digest(event: ConsolidationCommitted) -> str:
     payload = {
         "source_ref": event.source_ref,
@@ -583,6 +594,9 @@ class DefaultMemoryEngine:
         self._event_bus = event_publisher
         self.closeables: list[object] = []
         self._event_wired = False
+        self._consolidation_locks: dict[
+            tuple[int, str], tuple[asyncio.Lock, int]
+        ] = {}
 
         db_path = resolve_memory_db_path(
             workspace=workspace,
@@ -721,9 +735,42 @@ class DefaultMemoryEngine:
         self,
         event: ConsolidationCommitted,
     ) -> None:
-        self._require_memorizer()
         digest = _consolidation_commit_digest(event)
-        if self._v2_store.has_completed_consolidation_commit(
+        loop = asyncio.get_running_loop()
+        lock_key = (id(loop), event.source_ref)
+        try:
+            locks = self._consolidation_locks
+        except AttributeError:
+            locks = {}
+            self._consolidation_locks = locks
+        lock_entry = locks.get(lock_key)
+        if lock_entry is None:
+            lock = asyncio.Lock()
+            waiter_count = 0
+        else:
+            lock, waiter_count = lock_entry
+        locks[lock_key] = (lock, waiter_count + 1)
+        try:
+            async with lock:
+                await self._process_consolidation_committed(event, digest=digest)
+        finally:
+            current = locks.get(lock_key)
+            if current is not None and current[0] is lock:
+                remaining = current[1] - 1
+                if remaining <= 0:
+                    del locks[lock_key]
+                else:
+                    locks[lock_key] = (lock, remaining)
+
+    async def _process_consolidation_committed(
+        self,
+        event: ConsolidationCommitted,
+        *,
+        digest: str,
+    ) -> None:
+        self._require_memorizer()
+        store = self._require_v2_store()
+        if store.has_completed_consolidation_commit(
             source_ref=event.source_ref,
             digest=digest,
         ):
@@ -732,6 +779,10 @@ class DefaultMemoryEngine:
                 event.source_ref,
             )
             return
+        store.begin_consolidation_job(
+            source_ref=event.source_ref,
+            digest=digest,
+        )
         save_coros = [
             self._save_from_consolidation(
                 history_entry=entry,
@@ -745,10 +796,20 @@ class DefaultMemoryEngine:
         ]
         if save_coros:
             await asyncio.gather(*save_coros)
-        implicit_result = await self._extract_implicit_long_term(
-            conversation=event.conversation,
-            existing_profile="",
+        extraction_found, implicit_result = store.load_consolidation_extraction(
+            source_ref=event.source_ref,
+            digest=digest,
         )
+        if not extraction_found:
+            implicit_result = await self._extract_implicit_long_term(
+                conversation=event.conversation,
+                existing_profile="",
+            )
+            implicit_result = store.save_consolidation_extraction(
+                source_ref=event.source_ref,
+                digest=digest,
+                extraction=implicit_result,
+            )
         if implicit_result:
             await self._save_implicit_long_term(
                 implicit_result,
@@ -756,7 +817,7 @@ class DefaultMemoryEngine:
                 scope_channel=event.scope_channel,
                 scope_chat_id=event.scope_chat_id,
             )
-        self._v2_store.mark_consolidation_commit_completed(
+        store.mark_consolidation_commit_completed(
             source_ref=event.source_ref,
             digest=digest,
         )
@@ -1116,6 +1177,7 @@ class DefaultMemoryEngine:
         source_ref: str,
         happened_at: str | None = None,
         emotional_weight: int = 0,
+        source_key: str | None = None,
     ) -> str:
         return await self._require_memorizer().save_item_with_supersede(
             summary=summary,
@@ -1124,6 +1186,7 @@ class DefaultMemoryEngine:
             source_ref=source_ref,
             happened_at=happened_at,
             emotional_weight=emotional_weight,
+            source_key=source_key,
         )
 
     async def _save_implicit_long_term(
@@ -1158,6 +1221,11 @@ class DefaultMemoryEngine:
                 emotional_weight=_coerce_emotional_weight(
                     item.get("emotional_weight")
                 ),
+                source_key=_build_implicit_item_source_key(
+                    source_ref,
+                    "profile",
+                    summary,
+                ),
             )
             saved_counts["profile"] += 1
             logger.info("consolidation long_term saved: type=profile %r", summary[:60])
@@ -1185,6 +1253,11 @@ class DefaultMemoryEngine:
                     source_ref=f"{source_ref}#implicit",
                     emotional_weight=_coerce_emotional_weight(
                         item.get("emotional_weight")
+                    ),
+                    source_key=_build_implicit_item_source_key(
+                        source_ref,
+                        memory_type,
+                        summary,
                     ),
                 )
                 saved_counts[memory_type] += 1
