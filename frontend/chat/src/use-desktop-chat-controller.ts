@@ -28,6 +28,11 @@ import {
 } from "./web-chat-message-data";
 import { applyChatFrame, parseChatFrame, sendWhenOpen, traceKindForChatFrame } from "./web-chat-transport";
 import { webTurnTrace } from "./web-turn-trace";
+
+function createWebSessionId(): string {
+  return `web:${createUuid().replaceAll("-", "")}`;
+}
+
 export function useDesktopChatController() {
   const [surface, setSurface] = useState<"chat" | "runtime">(
     () => new URLSearchParams(window.location.search).get("surface") === "runtime" ? "runtime" : "chat",
@@ -299,6 +304,21 @@ export function useDesktopChatController() {
     return socket;
   }, [loadMessagesSafely, loadSessionsSafely, reportError, scheduleReconnect, setMessages, setStatusLive]);
 
+  const selectSocketSession = useCallback((sessionId: string): void => {
+    const socket = connect();
+    // A connecting socket reads activeSessionRef in onopen, so one attach is enough.
+    if (socket.readyState !== WebSocket.OPEN) return;
+    try {
+      socket.send(JSON.stringify({
+        type: "session.attach",
+        request_id: createUuid(),
+        session_id: sessionId,
+      }));
+    } catch (error) {
+      reportError(error, "error");
+    }
+  }, [connect, reportError]);
+
   useEffect(() => {
     connectRef.current = connect;
   }, [connect]);
@@ -358,7 +378,7 @@ export function useDesktopChatController() {
 
   const ensureSession = useCallback(async () => {
     if (activeSessionRef.current) return activeSessionRef.current;
-    const sessionId = `web:${createUuid().replaceAll("-", "")}`;
+    const sessionId = createWebSessionId();
     activeSessionRef.current = sessionId;
     setActiveSessionId(sessionId);
     return sessionId;
@@ -461,28 +481,32 @@ export function useDesktopChatController() {
   }, [activeSessionId, connect, reportError]);
 
   const startNewChat = useCallback(() => {
+    const sessionId = createWebSessionId();
     setSurface("chat");
     window.history.replaceState(null, "", window.location.pathname);
-    activeSessionRef.current = "";
+    activeSessionRef.current = sessionId;
+    activeTurnIdRef.current = null;
     messagesRequestRef.current?.abort();
     olderMessagesRequestRef.current?.abort();
     modelsRequestRef.current?.abort();
     sendRequestRef.current?.abort();
     stopRequestRef.current?.abort();
-    setActiveSessionId("");
+    setActiveSessionId(sessionId);
     setPendingSessionId("");
     setMessages([]);
     setHistoryBeforeSeq(null);
     setHistoryHasMore(false);
     setHistoryLoadingOlder(false);
     setReplyTarget(null);
-    setStatus("idle");
+    setStatusLive("idle");
     setStopPending(false);
+    setError("");
     setSelectedRuntimeId("");
     setSelectedReasoningEffort("");
     setModelSelectionDirty(false);
+    selectSocketSession(sessionId);
     void loadModels("").catch((error: unknown) => reportError(error));
-  }, [loadModels, reportError, setMessages]);
+  }, [loadModels, reportError, selectSocketSession, setMessages, setStatusLive]);
 
   const activateSession = useCallback((sessionId: string) => {
     if (surface === "chat" && activeSessionRef.current === sessionId) return;
@@ -496,12 +520,13 @@ export function useDesktopChatController() {
     setModelState(null);
     setSelectedRuntimeId("");
     setModelSelectionDirty(false);
+    selectSocketSession(sessionId);
     void Promise.all([loadMessages(sessionId), loadModels(sessionId)])
       .catch((reason: unknown) => reportError(reason))
       .finally(() => {
         if (activeSessionRef.current === sessionId) setPendingSessionId("");
       });
-  }, [loadMessages, loadModels, reportError, surface]);
+  }, [loadMessages, loadModels, reportError, selectSocketSession, surface]);
 
   const openRuntime = useCallback(() => {
     setSurface("runtime");

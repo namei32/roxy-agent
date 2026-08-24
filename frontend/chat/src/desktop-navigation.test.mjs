@@ -29,6 +29,14 @@ test("session activation is idempotent and aborts stale model requests", () => {
   assert.match(controller, /fetchChatJson<unknown>\(`\/api\/chat\/models\$\{query\}`, \{ signal: controller\.signal \}\)/);
 });
 
+test("new chat owns a fresh draft session and resets the previous live turn", () => {
+  assert.match(controller, /const sessionId = createWebSessionId\(\)/);
+  assert.match(controller, /activeTurnIdRef\.current = null/);
+  assert.match(controller, /setActiveSessionId\(sessionId\)/);
+  assert.match(controller, /setStatusLive\("idle"\)/);
+  assert.match(controller, /selectSocketSession\(sessionId\)/);
+});
+
 test("shared navigation reports semantic session identities to both adapters", () => {
   assert.match(navigation, /onSessionActivate\(session\.id\)/);
   assert.match(navigation, /aria-current=\{session\.active \? "true" : undefined\}/);

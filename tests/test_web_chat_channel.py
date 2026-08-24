@@ -853,6 +853,43 @@ async def test_web_attach_refills_cached_terminal() -> None:
 
 
 @pytest.mark.asyncio
+async def test_web_attach_selects_one_session_while_previous_turn_finishes() -> None:
+    channel = WebChatChannel()
+    socket = _WebSocket()
+    await channel._select_connection("web:a", cast(Any, socket))
+    channel._active_turn_ids["web:a"] = "turn-a"
+
+    await channel._attach_session(
+        cast(Any, socket),
+        "select-b",
+        {"session_id": "web:b"},
+    )
+
+    assert cast(Any, socket) not in channel._connections.get("web:a", set())
+    assert cast(Any, socket) in channel._connections["web:b"]
+    assert channel._active_turn_ids["web:a"] == "turn-a"
+
+    await channel._on_response(OutboundMessage(
+        channel="web",
+        chat_id="a",
+        content="A 在后台完成",
+        control_turn_id="turn-a",
+    ))
+
+    assert socket.frames == []
+    assert channel._pending_terminal["web:a"]["content"] == "A 在后台完成"
+
+    await channel._attach_session(
+        cast(Any, socket),
+        "select-a",
+        {"session_id": "web:a"},
+    )
+
+    assert socket.frames[-1]["content"] == "A 在后台完成"
+    assert "web:a" not in channel._pending_terminal
+
+
+@pytest.mark.asyncio
 async def test_web_final_without_turn_is_not_cached() -> None:
     channel = WebChatChannel()
     with pytest.raises(RuntimeError, match="缺少 Server 权威 active turn"):

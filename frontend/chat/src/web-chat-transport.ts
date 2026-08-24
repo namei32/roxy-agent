@@ -129,12 +129,16 @@ export function applyChatFrame(frame: ChatFrame, context: WebChatFrameContext): 
     return;
   }
   if (!("session_id" in frame)) return;
-  if (context.activeSessionId() && frame.session_id !== context.activeSessionId()) {
+  const activeSessionId = context.activeSessionId();
+  if (!activeSessionId || frame.session_id !== activeSessionId) {
     console.debug("[chat-transport] skip frame for inactive session", {
       type: frame.type,
       frameSessionId: frame.session_id,
-      activeSessionId: context.activeSessionId(),
+      activeSessionId,
     });
+    // Background turns may finish after navigation. Refresh navigation metadata,
+    // but never project their terminal content into the newly selected surface.
+    if (frame.type === "message.final") void context.loadSessions();
     return;
   }
 
