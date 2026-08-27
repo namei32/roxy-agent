@@ -189,24 +189,44 @@ class PairingService:
             raise PairingSecretError("一次性 pairing secret 无效")
 
         # 2. 设备必须证明持有其声明的 P-256 私钥
-        transcript = _pair_claim_transcript(
-            server_id=self._keyset.manifest.server_id,
-            pairing_id=payload.pairing_id,
-            secret_hash=session.secret_hash,
-            device_public_key=payload.device_public_key,
-            device_name=payload.device_name,
-            capabilities=payload.capabilities,
-            client_nonce=payload.client_nonce,
-        )
         device_public_key = parse_device_public_key(payload.device_public_key)
-        try:
-            device_public_key.verify(
-                _decode_base64(payload.signature, "signature"),
-                transcript,
-                ec.ECDSA(hashes.SHA256()),
+        signature = _decode_base64(payload.signature, "signature")
+        transcript: bytes | None = None
+        # Android v0.8.32 仍用迁移前的 domain 构造 transcript。只有已知
+        # domain 且真正通过设备公钥验签的 transcript 才能进入确认流程。
+        secret_hashes = [session.secret_hash]
+        for domain in (_PAIRING_SECRET_DOMAIN, _LEGACY_PAIRING_SECRET_DOMAIN):
+            candidate_hash = _pairing_secret_hash(
+                payload.one_time_secret,
+                domain=domain,
             )
-        except (InvalidSignature, ValueError) as error:
-            raise PairingSignatureError("pair claim 设备签名无效") from error
+            if not any(
+                hmac.compare_digest(candidate_hash, known_hash)
+                for known_hash in secret_hashes
+            ):
+                secret_hashes.append(candidate_hash)
+        for secret_hash in secret_hashes:
+            candidate = _pair_claim_transcript(
+                server_id=self._keyset.manifest.server_id,
+                pairing_id=payload.pairing_id,
+                secret_hash=secret_hash,
+                device_public_key=payload.device_public_key,
+                device_name=payload.device_name,
+                capabilities=payload.capabilities,
+                client_nonce=payload.client_nonce,
+            )
+            try:
+                device_public_key.verify(
+                    signature,
+                    candidate,
+                    ec.ECDSA(hashes.SHA256()),
+                )
+            except (InvalidSignature, ValueError):
+                continue
+            transcript = candidate
+            break
+        if transcript is None:
+            raise PairingSignatureError("pair claim 设备签名无效")
 
         # 3. 同一 pairing 只接受同一 transcript 的幂等重试
         claim = PendingPairingClaim(
