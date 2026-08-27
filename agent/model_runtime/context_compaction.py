@@ -460,10 +460,8 @@ class ContextCompactor:
         # checkpoint even when the payload is small.  Apply the stricter budget
         # only when a real provider boundary (or an overflow retry) caused the
         # gate; this preserves the explicit force semantics for small payloads.
-        if (
-            estimated >= soft_limit
-            or estimated >= hard_limit
-            or trigger == "context_overflow"
+        if trigger == "context_overflow" or (
+            not force and (estimated >= soft_limit or estimated >= hard_limit)
         ):
             (
                 retained_token_budget,
@@ -832,70 +830,69 @@ class ContextCompactor:
         ]
         active_index = _active_execution_unit_index(candidates)
         if selection_budget is not None:
-            # Keep the longest suffix that fits the budget.  A live shell
-            # execution imposes a hard lower bound on the suffix start: its
-            # complete unit and everything after it must remain in the request.
+            # Start with the established raw-tail policy (the shortest suffix
+            # that reaches ``keep_recent_tokens``).  The budget is a safety
+            # ceiling, not a reason to retain every unit that happens to fit:
+            # keeping the longest fitting suffix would silently change the
+            # ledger/source-plan contract and can make ordinary tails much
+            # larger than the configured recent window.
+            kept_tokens = 0
+            cut = len(candidates)
+            for index in range(len(candidates) - 1, -1, -1):
+                kept_tokens += unit_tokens[index]
+                cut = index
+                if kept_tokens >= self._keep_recent_tokens:
+                    break
+            if kept_tokens < self._keep_recent_tokens:
+                raise ContextCompactionError(
+                    "context_compaction_no_valid_cut_before_keep_recent_target"
+                )
+            cut = min(cut, len(candidates) - 1)
+            if active_index is not None and cut > active_index:
+                cut = active_index
+            retained_tokens = sum(unit_tokens[cut:])
+            if retained_tokens <= selection_budget:
+                selected = candidates[:cut]
+                retained = candidates[cut:]
+                if not selected:
+                    raise ContextCompactionError("context_compaction_no_closed_prefix")
+                return selected, retained
+
+            # The normal tail would still overflow the post-summary budget.
+            # Reduce it only at complete-unit boundaries, preferring the
+            # newest units.  A live execution is a hard lower bound: it may
+            # use the absolute fallback budget, but it can never be dropped.
             if active_index is None:
                 start = len(candidates)
                 retained_tokens = 0
-                while start > 0 and (
-                    retained_tokens + unit_tokens[start - 1] <= selection_budget
-                ):
-                    start -= 1
-                    retained_tokens += unit_tokens[start]
             else:
                 start = active_index
                 retained_tokens = sum(unit_tokens[active_index:])
-                if retained_tokens > selection_budget and (
-                    fallback_retained_token_budget is None
-                    or retained_tokens > fallback_retained_token_budget
-                ):
-                    raise ContextCompactionError(
-                        "context_compaction_active_tail_exceeds_budget "
-                        f"estimated={retained_tokens} budget={retained_token_budget}"
-                    )
                 if retained_tokens > selection_budget:
-                    if fallback_retained_token_budget is None:
+                    if (
+                        fallback_retained_token_budget is None
+                        or retained_tokens > fallback_retained_token_budget
+                    ):
                         raise ContextCompactionError(
                             "context_compaction_active_tail_exceeds_budget "
                             f"estimated={retained_tokens} budget={selection_budget}"
                         )
                     selection_budget = fallback_retained_token_budget
-                while start > 0 and (
-                    retained_tokens + unit_tokens[start - 1] <= selection_budget
-                ):
-                    start -= 1
-                    retained_tokens += unit_tokens[start]
-
-            if (
-                start == len(candidates)
-                and fallback_retained_token_budget is not None
-                and unit_tokens[-1] <= fallback_retained_token_budget
+            while start > 0 and (
+                retained_tokens + unit_tokens[start - 1] <= selection_budget
             ):
-                # The conservative reserve can be larger than a complete
-                # closed batch on small contexts.  Keep that newest batch if
-                # it still fits the absolute boundary; larger suffixes remain
-                # governed by the conservative budget above.
-                start = len(candidates) - 1
-                retained_tokens = unit_tokens[-1]
-
-            # A forced compaction of a payload that is already small should
-            # retain the normal recent-tail invariant.  In the boundary path,
-            # start == 0 means the conservative budget was larger than the
-            # complete history; fall back to the legacy selector so that force
-            # still creates a useful checkpoint rather than failing with no
-            # selected prefix.
-            if start == 0:
-                retained_token_budget = None
-            else:
-                selected = candidates[:start]
-                retained = candidates[start:]
-                if not selected:
-                    # There is no closed source prefix to summarize.  This is
-                    # only reachable when a live execution starts at index 0;
-                    # preserve the existing error contract.
-                    raise ContextCompactionError("context_compaction_no_closed_prefix")
-                return selected, retained
+                start -= 1
+                retained_tokens += unit_tokens[start]
+            if start == 0 and active_index is not None:
+                raise ContextCompactionError("context_compaction_no_closed_prefix")
+            selected = candidates[:start]
+            retained = candidates[start:]
+            if not selected:
+                # No complete recent unit fits.  Summarize the entire closed
+                # prefix rather than sending a known-over-budget payload.
+                selected = candidates
+                retained = []
+            return selected, retained
         kept: list[CommittedContextUnit] = []
         kept_tokens = 0
         for unit in reversed(candidates):
