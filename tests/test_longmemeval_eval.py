@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -14,6 +15,7 @@ from eval.longmemeval.dataset import (
     EXPECTED_FULL_SIZE,
     EXPECTED_FULL_TYPE_COUNTS,
     DatasetValidationError,
+    LMEInstance,
     load_dataset,
     load_question_ids,
     parse_lme_datetime,
@@ -106,7 +108,10 @@ async def test_qa_turn_skips_unmeasured_post_response_embedding() -> None:
         answer_session_ids=(),
     )
 
-    result = await run_qa_instance(runtime, instance)
+    result = await run_qa_instance(
+        cast(BenchmarkRuntime, runtime),
+        cast(LMEInstance, instance),
+    )
 
     message = captured["message"]
     assert message.metadata["skip_post_memory"] is True
@@ -127,7 +132,7 @@ async def test_close_runtime_uses_production_owner_order() -> None:
         http_resources=SimpleNamespace(aclose=lambda: record("http")),
     )
 
-    await close_runtime(SimpleNamespace(core=core))
+    await close_runtime(cast(BenchmarkRuntime, SimpleNamespace(core=core)))
 
     assert calls == ["core", "memory", "http"]
 
