@@ -25,6 +25,7 @@ from infra.mobile_realtime.key_protection import (
 )
 from infra.mobile_realtime.pairing import (
     _LEGACY_PAIRING_SECRET_DOMAIN,
+    _confirmation_code,
     _pair_claim_transcript,
     _pairing_secret_hash,
     PairClaimPayload,
@@ -197,8 +198,51 @@ def test_claim_accepts_an_unexpired_legacy_pairing_session(tmp_path: Path) -> No
     storage.close()
 
 
-def test_pairing_rejects_wrong_secret_and_signature(tmp_path: Path) -> None:
+def test_claim_accepts_latest_android_signature_for_new_roxy_offer(
+    tmp_path: Path,
+) -> None:
+    """新 Core 创建的 QR 继续接受仍使用旧 domain 的 Android v0.8.32。"""
+
     storage, service, _ = _services(tmp_path)
+    offer = service.create_offer()
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_key = _device_public_key(private_key)
+    client_nonce = base64.urlsafe_b64encode(secrets.token_bytes(18)).decode("ascii")
+    transcript = _pair_claim_transcript(
+        server_id=offer.server_id,
+        pairing_id=offer.pairing_id,
+        secret_hash=_pairing_secret_hash(
+            offer.one_time_secret,
+            domain=_LEGACY_PAIRING_SECRET_DOMAIN,
+        ),
+        device_public_key=public_key,
+        device_name="Android v0.8.32",
+        capabilities=["stream-v1", "attachments-v1"],
+        client_nonce=client_nonce,
+    )
+    payload = PairClaimPayload(
+        pairing_id=offer.pairing_id,
+        one_time_secret=offer.one_time_secret,
+        device_public_key=public_key,
+        device_name="Android v0.8.32",
+        capabilities=["stream-v1", "attachments-v1"],
+        client_nonce=client_nonce,
+        signature=base64.b64encode(
+            private_key.sign(transcript, ec.ECDSA(hashes.SHA256()))
+        ).decode("ascii"),
+    )
+
+    claim = service.claim(payload)
+
+    assert claim.confirmation_code == _confirmation_code(transcript)
+    assert service.approve(claim.pairing_id, claim.confirmation_code).display_name == (
+        "Android v0.8.32"
+    )
+    storage.close()
+
+
+def test_pairing_rejects_wrong_secret_and_signature(tmp_path: Path) -> None:
+    storage, service, keyset = _services(tmp_path)
     device_key = ec.generate_private_key(ec.SECP256R1())
     payload, _ = _signed_claim(service, device_key)
 
@@ -213,6 +257,32 @@ def test_pairing_rejects_wrong_secret_and_signature(tmp_path: Path) -> None:
     )
     with pytest.raises(PairingSignatureError, match="签名无效"):
         service.claim(wrong_signature)
+
+    public_key = _device_public_key(device_key)
+    unsupported_transcript = _pair_claim_transcript(
+        server_id=keyset.manifest.server_id,
+        pairing_id=payload.pairing_id,
+        secret_hash=_pairing_secret_hash(
+            payload.one_time_secret,
+            domain=b"unsupported-mobile-pairing-secret-v1\x00",
+        ),
+        device_public_key=public_key,
+        device_name=payload.device_name,
+        capabilities=payload.capabilities,
+        client_nonce=payload.client_nonce,
+    )
+    unsupported_domain = payload.model_copy(
+        update={
+            "signature": base64.b64encode(
+                device_key.sign(
+                    unsupported_transcript,
+                    ec.ECDSA(hashes.SHA256()),
+                )
+            ).decode("ascii")
+        }
+    )
+    with pytest.raises(PairingSignatureError, match="签名无效"):
+        service.claim(unsupported_domain)
     storage.close()
 
 
