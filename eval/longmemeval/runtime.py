@@ -9,12 +9,21 @@ empty (honest baseline that forces all recall through the memory system).
 from __future__ import annotations
 
 import logging
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
+
+from plugins.default_memory.config import (
+    DefaultMemoryConfig,
+    default_memory_config_from_mapping,
+    ensure_default_memory_config_file,
+    render_default_memory_config,
+)
 
 logger = logging.getLogger(__name__)
 
-_BENCHMARK_SELF_MD = """\
+BENCHMARK_SELF_MD = """\
 # Identity
 
 You are a helpful assistant with access to long-term memory tools.
@@ -26,8 +35,7 @@ No greetings, no follow-up questions, no emoticons, no kaomoji.
 
 # Memory-grounded answering (MANDATORY)
 
-All benchmark questions are answerable from memory. Assume the answer exists in past conversations.
-Your job is to retrieve it. Do not give up early. Do not say you cannot find the answer unless you have already exhausted the required retrieval steps below.
+Your job is to retrieve relevant evidence before answering. Most questions are answerable, but some are deliberately unanswerable from the available history. Do not give up early or guess. Only state that the answer is unavailable after exhausting the required retrieval steps below.
 
 Step 1: ALWAYS call recall_memory first — for every question without exception.
 Step 2: Read the retrieved memories carefully.
@@ -63,9 +71,45 @@ Never ask the user for information you might already have in memory.
 class BenchmarkRuntime:
     core: object  # CoreRuntime
     workspace: Path
+    memory_config: DefaultMemoryConfig
 
 
-async def create_runtime(config_path: Path, workspace: Path) -> BenchmarkRuntime:
+def benchmark_memory_config(config_path: Path) -> DefaultMemoryConfig:
+    """Translate benchmark convenience tables into the memory plugin schema."""
+
+    raw = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    raw_memory = raw.get("memory")
+    if not isinstance(raw_memory, dict):
+        return DefaultMemoryConfig()
+    memory = cast(dict[str, Any], raw_memory)
+    payload: dict[str, object] = {}
+    for section in ("retrieval", "gate", "query_rewrite", "hyde"):
+        value = memory.get(section)
+        if value is not None:
+            if not isinstance(value, dict):
+                raise ValueError(f"memory.{section} must be a TOML table")
+            payload[section] = value
+    return default_memory_config_from_mapping(payload)
+
+
+def _install_benchmark_memory_config(
+    *, config_path: Path, workspace: Path
+) -> DefaultMemoryConfig:
+    memory_config = benchmark_memory_config(config_path)
+    plugin_config_path = ensure_default_memory_config_file(workspace=workspace)
+    plugin_config_path.write_text(
+        render_default_memory_config(memory_config),
+        encoding="utf-8",
+    )
+    return memory_config
+
+
+async def create_runtime(
+    config_path: Path,
+    workspace: Path,
+    *,
+    credential_workspace: Path | None = None,
+) -> BenchmarkRuntime:
     """Wire the full production stack into a temp workspace.
 
     Args:
@@ -78,6 +122,11 @@ async def create_runtime(config_path: Path, workspace: Path) -> BenchmarkRuntime
     from core.net.http import SharedHttpResources
 
     config = load_config(config_path, workspace=workspace)
+    if credential_workspace is not None:
+        credential_path = credential_workspace / "model-registry.sqlite3"
+        if not credential_path.is_file():
+            raise FileNotFoundError(f"credential registry not found: {credential_path}")
+        config.credential_store_path = credential_path
 
     # 1. Initialise workspace files (empty memory/SELF.md etc.).
     #    force=False so repeated calls on same workspace are idempotent.
@@ -86,9 +135,16 @@ async def create_runtime(config_path: Path, workspace: Path) -> BenchmarkRuntime
     # 2. Always overwrite SELF.md with the current benchmark persona.
     #    force=True so updated instructions propagate even on --qa-only reruns.
     self_md = workspace / "memory" / "SELF.md"
-    self_md.write_text(_BENCHMARK_SELF_MD, encoding="utf-8")
+    self_md.write_text(BENCHMARK_SELF_MD, encoding="utf-8")
 
-    # 3. Build the full production runtime (providers, tools, memory, loop).
+    # 3. The benchmark config keeps all knobs in one file. Materialise its
+    #    memory tables into the plugin-local config consumed by production.
+    memory_config = _install_benchmark_memory_config(
+        config_path=config_path,
+        workspace=workspace,
+    )
+
+    # 4. Build the full production runtime (providers, tools, memory, loop).
     http = SharedHttpResources()
     core = build_core_runtime(config, workspace, http)
 
@@ -97,20 +153,20 @@ async def create_runtime(config_path: Path, workspace: Path) -> BenchmarkRuntime
         workspace,
         config.model,
     )
-    return BenchmarkRuntime(core=core, workspace=workspace)
+    return BenchmarkRuntime(
+        core=core,
+        workspace=workspace,
+        memory_config=memory_config,
+    )
 
 
 async def close_runtime(rt: BenchmarkRuntime) -> None:
-    closeables = getattr(rt.core.memory_runtime, "closeables", [])
-    for obj in closeables:
-        close = getattr(obj, "close", None) or getattr(obj, "aclose", None)
-        if close:
-            try:
-                import asyncio
-                import inspect
-                if inspect.iscoroutinefunction(close):
-                    await close()
-                else:
-                    await asyncio.to_thread(close)
-            except Exception as e:
-                logger.warning("close failed: %s", e)
+    """Close the benchmark stack through the same owners as production."""
+
+    from bootstrap.cleanup import run_cleanup_steps
+
+    await run_cleanup_steps(
+        ("core.stop", rt.core.stop),
+        ("memory_runtime.aclose", rt.core.memory_runtime.aclose),
+        ("http_resources.aclose", rt.core.http_resources.aclose),
+    )
