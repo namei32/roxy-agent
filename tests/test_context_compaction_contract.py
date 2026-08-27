@@ -214,6 +214,42 @@ def test_tail_below_twenty_thousand_tokens_has_no_legal_cut() -> None:
         compactor._select_units(list(units))
 
 
+def test_boundary_compaction_summarizes_a_single_oversized_recent_unit() -> None:
+    # The newest closed interaction is larger than the safe retained-tail
+    # budget.  It must be promoted into the summary instead of being kept just
+    # because it is the most recent complete unit.
+    units = (_unit(1, 20_000), _unit(2, 120_000))
+    provider = _Provider(context_window=150_000)
+    segments = ContextPayloadSegments(
+        prefix=(),
+        committed_units=units,
+        current_anchor=({"role": "user", "content": "q", "tokens": 1},),
+    )
+    compactor = ContextCompactor(
+        provider=provider,
+        model="m",
+        scope_id="oversized-recent-unit",
+        payload_segments=segments,
+        max_output_tokens=0,
+        next_generation=1,
+        keep_recent_tokens=20_000,
+    )
+
+    messages = segments.flatten()
+    result = _run(
+        compactor.prepare(
+            messages,
+            pending_start=len(messages),
+            tools=[],
+        )
+    )
+
+    assert result.compacted
+    assert result.checkpoint is not None
+    assert result.checkpoint.retained_tail == ()
+    assert result.estimated_tokens < 150_000 * 0.74
+
+
 class _UsageProvider(_Provider):
     def __init__(self) -> None:
         super().__init__(context_window=100)
@@ -484,6 +520,79 @@ def test_mixed_segments_preserve_anchor_before_active_batches() -> None:
     assert result.checkpoint.committable
     assert "ACTIVE_SHOULD_NOT_PERSIST" not in result.checkpoint.summary
     assert "ACTIVE_SHOULD_NOT_PERSIST" not in str(result.checkpoint.retained_tail)
+
+
+def test_compaction_keeps_segments_in_projected_opaque_state_form() -> None:
+    opaque = {"schema_version": 1, "items": [{"type": "reasoning", "id": "r1"}]}
+    retained = CommittedContextUnit(
+        source_from_seq=2,
+        consolidated_through_seq=2,
+        source_message_ids=("retained",),
+        messages=(
+            {
+                "role": "assistant",
+                "content": "retained",
+                "tokens": 10,
+                "model_state": opaque,
+            },
+        ),
+        message_refs=(("retained", 2),),
+    )
+    active = (
+        {
+            "role": "assistant",
+            "content": "",
+            "tokens": 10,
+            "tool_calls": [{"id": "call-1"}],
+            "model_state": opaque,
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "content": "result",
+            "tokens": 10,
+        },
+    )
+    segments = ContextPayloadSegments(
+        prefix=(),
+        committed_units=(_unit(1, 100), retained),
+        current_anchor=(),
+        active_batches=(active,),
+    )
+    provider = _Provider(context_window=1_000)
+    compactor = ContextCompactor(
+        provider=provider,
+        model="m",
+        scope_id="opaque-projection",
+        payload_segments=segments,
+        max_output_tokens=100,
+        next_generation=1,
+        keep_recent_tokens=25,
+    )
+
+    messages = segments.flatten()
+    result = _run(
+        compactor.prepare(
+            messages,
+            pending_start=len(messages),
+            tools=[],
+            force=True,
+        )
+    )
+
+    assert result.compacted
+    assert messages == compactor._segments.flatten()
+    assert all("model_state" not in message for message in messages)
+
+    messages.append({"role": "user", "content": "next", "tokens": 1})
+    compactor.set_pending(messages)
+    _run(
+        compactor.prepare(
+            messages,
+            pending_start=compactor.pending_start,
+            tools=[],
+        )
+    )
 
 
 def test_summary_uses_current_once_then_distinct_fallback_once_with_own_budget() -> (

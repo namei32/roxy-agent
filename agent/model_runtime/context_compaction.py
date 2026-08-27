@@ -36,6 +36,11 @@ SUMMARY_HEADINGS = (
 SUMMARY_MAX_TOKENS = 8192
 KEEP_RECENT_TOKENS = 20_000
 SOFT_LIMIT_RATIO = 0.74
+# Leave room for the generated summary and estimator/provider accounting
+# overhead when selecting the retained suffix.  The value is deliberately
+# conservative: a compaction that leaves a little unused context is safer than
+# one that reaches the provider hard edge and fails after paying for a summary.
+COMPACTION_BUDGET_MARGIN_TOKENS = 1_024
 _SUMMARY_PROMPT = """更新当前长任务的上下文压缩摘要。
 
 摘要只替代已经完成的旧 session 历史，完整 messages 和 tool results 仍由 SessionDB 保留。只记录输入中已经出现的事实，不补充猜测，不把计划写成已完成。
@@ -448,7 +453,33 @@ class ContextCompactor:
         candidates = self._candidate_units()
         if not candidates:
             raise ContextCompactionError("context_compaction_no_closed_prefix")
-        selected_all, retained_all = self._select_units(candidates)
+        prefix, current_anchor, previous_temp, pending = self._split_segments()
+        retained_token_budget: int | None = None
+        fallback_retained_token_budget: int | None = None
+        # Forced compaction is also used by tests and by callers that want a
+        # checkpoint even when the payload is small.  Apply the stricter budget
+        # only when a real provider boundary (or an overflow retry) caused the
+        # gate; this preserves the explicit force semantics for small payloads.
+        if (
+            estimated >= soft_limit
+            or estimated >= hard_limit
+            or trigger == "context_overflow"
+        ):
+            (
+                retained_token_budget,
+                fallback_retained_token_budget,
+            ) = self._retained_token_budgets(
+                prefix=prefix,
+                current_anchor=current_anchor,
+                pending=pending,
+                tools=tools,
+                target_tokens=min(soft_limit, hard_limit),
+            )
+        selected_all, retained_all = self._select_units(
+            candidates,
+            retained_token_budget=retained_token_budget,
+            fallback_retained_token_budget=fallback_retained_token_budget,
+        )
         selected_committed = [
             unit for unit in selected_all if _is_persistable_unit(unit)
         ]
@@ -461,7 +492,6 @@ class ContextCompactor:
         retained_active = [
             unit for unit in retained_all if not _is_persistable_unit(unit)
         ]
-        prefix, current_anchor, previous_temp, pending = self._split_segments()
         current_prefix = [_copy_message(message) for message in prefix]
         temporary_summary = [_copy_message(message) for message in previous_temp]
         committed_checkpoint: ContextCompaction | None = None
@@ -634,16 +664,28 @@ class ContextCompactor:
         checkpoint = committed_checkpoint or temporary_checkpoint
         if checkpoint is None:
             raise ContextCompactionError("context_compaction_no_closed_prefix")
-        retained_active_batches = [tuple(unit.messages) for unit in retained_active]
+        # ``rebuilt`` is a provider-facing projection and deliberately removes
+        # opaque continuation state (for example Responses ``model_state``) from
+        # retained committed/active messages.  Keep the assembler's segments in
+        # that same canonical form; otherwise the next ``set_pending`` compares
+        # the projected live payload with stale, unprojected copies and raises a
+        # false prefix-mismatch error.
+        projected_retained_committed = [
+            _project_unit(unit) for unit in retained_committed
+        ]
+        projected_retained_active = [_project_unit(unit) for unit in retained_active]
+        retained_active_batches = [
+            tuple(unit.messages) for unit in projected_retained_active
+        ]
         self._segments = ContextPayloadSegments(
             prefix=tuple(current_prefix),
-            committed_units=tuple(retained_committed),
+            committed_units=tuple(projected_retained_committed),
             current_anchor=tuple(current_anchor),
             temporary_summary=tuple(temporary_summary),
             active_batches=tuple(retained_active_batches),
             pending=tuple(pending),
         )
-        self._committed_units = list(retained_committed)
+        self._committed_units = list(projected_retained_committed)
         self._completed_batches = retained_active_batches
         self._compaction = checkpoint
         messages[:] = rebuilt
@@ -703,12 +745,157 @@ class ContextCompactor:
             )
         return units
 
+    def _retained_token_budgets(
+        self,
+        *,
+        prefix: Sequence[dict[str, Any]],
+        current_anchor: Sequence[dict[str, Any]],
+        pending: Sequence[dict[str, Any]],
+        tools: list[dict],
+        target_tokens: int,
+    ) -> tuple[int, int]:
+        """Return conservative and absolute budgets for the retained suffix.
+
+        The suffix is only one part of the request.  System/prefix messages,
+        the current request, pending tool protocol messages and tool schemas
+        are fixed for this gate.  Reserve the maximum configured summary size
+        as well, because the summary is produced before the final payload is
+        known.  A negative result intentionally becomes zero: closed units can
+        still be summarized, while an oversized fixed/in-flight section will
+        produce an explicit ``context_compaction_insufficient`` error.  The
+        second budget is a last-resort allowance for one newest atomic unit: it
+        uses a one-token summary floor and avoids discarding a useful small
+        closed batch solely because the conservative reserve is larger than a
+        small provider context window.
+        """
+
+        if not isinstance(target_tokens, int) or isinstance(target_tokens, bool):
+            raise ValueError("context compaction target_tokens 必须是整数")
+        base_prefix = _without_previous_compaction(prefix)
+        fixed = _flatten_projection(
+            prefix=base_prefix,
+            committed=(),
+            current_anchor=current_anchor,
+            temporary_summary=(),
+            active=(),
+            pending=pending,
+        )
+        fixed_tokens = self._provider.estimate_context_tokens(fixed, tools)
+        reserve = SUMMARY_MAX_TOKENS + COMPACTION_BUDGET_MARGIN_TOKENS
+        budget = max(0, target_tokens - fixed_tokens - reserve)
+        absolute_budget = max(0, target_tokens - fixed_tokens - 1)
+        logger.info(
+            "context_compaction budget scope=%s target=%d fixed=%d "
+            "summary_reserve=%d retained_budget=%d absolute_budget=%d",
+            self._scope_id,
+            target_tokens,
+            fixed_tokens,
+            reserve,
+            budget,
+            absolute_budget,
+        )
+        return budget, absolute_budget
+
     def _select_units(
         self,
         candidates: list[CommittedContextUnit],
+        *,
+        retained_token_budget: int | None = None,
+        fallback_retained_token_budget: int | None = None,
     ) -> tuple[list[CommittedContextUnit], list[CommittedContextUnit]]:
         if len(candidates) < 2:
             raise ContextCompactionError("context_compaction_no_closed_prefix")
+        if retained_token_budget is not None and (
+            not isinstance(retained_token_budget, int)
+            or isinstance(retained_token_budget, bool)
+            or retained_token_budget < 0
+        ):
+            raise ValueError("retained_token_budget 必须是非负整数")
+        if fallback_retained_token_budget is not None and (
+            not isinstance(fallback_retained_token_budget, int)
+            or isinstance(fallback_retained_token_budget, bool)
+            or fallback_retained_token_budget < 0
+        ):
+            raise ValueError("fallback_retained_token_budget 必须是非负整数")
+        if (
+            retained_token_budget is not None
+            and fallback_retained_token_budget is not None
+            and fallback_retained_token_budget < retained_token_budget
+        ):
+            raise ValueError(
+                "fallback_retained_token_budget 不能小于 retained_token_budget"
+            )
+        selection_budget = retained_token_budget
+        unit_tokens = [
+            self._provider.estimate_appended_message_tokens(list(unit.messages))
+            for unit in candidates
+        ]
+        active_index = _active_execution_unit_index(candidates)
+        if selection_budget is not None:
+            # Keep the longest suffix that fits the budget.  A live shell
+            # execution imposes a hard lower bound on the suffix start: its
+            # complete unit and everything after it must remain in the request.
+            if active_index is None:
+                start = len(candidates)
+                retained_tokens = 0
+                while start > 0 and (
+                    retained_tokens + unit_tokens[start - 1] <= selection_budget
+                ):
+                    start -= 1
+                    retained_tokens += unit_tokens[start]
+            else:
+                start = active_index
+                retained_tokens = sum(unit_tokens[active_index:])
+                if retained_tokens > selection_budget and (
+                    fallback_retained_token_budget is None
+                    or retained_tokens > fallback_retained_token_budget
+                ):
+                    raise ContextCompactionError(
+                        "context_compaction_active_tail_exceeds_budget "
+                        f"estimated={retained_tokens} budget={retained_token_budget}"
+                    )
+                if retained_tokens > selection_budget:
+                    if fallback_retained_token_budget is None:
+                        raise ContextCompactionError(
+                            "context_compaction_active_tail_exceeds_budget "
+                            f"estimated={retained_tokens} budget={selection_budget}"
+                        )
+                    selection_budget = fallback_retained_token_budget
+                while start > 0 and (
+                    retained_tokens + unit_tokens[start - 1] <= selection_budget
+                ):
+                    start -= 1
+                    retained_tokens += unit_tokens[start]
+
+            if (
+                start == len(candidates)
+                and fallback_retained_token_budget is not None
+                and unit_tokens[-1] <= fallback_retained_token_budget
+            ):
+                # The conservative reserve can be larger than a complete
+                # closed batch on small contexts.  Keep that newest batch if
+                # it still fits the absolute boundary; larger suffixes remain
+                # governed by the conservative budget above.
+                start = len(candidates) - 1
+                retained_tokens = unit_tokens[-1]
+
+            # A forced compaction of a payload that is already small should
+            # retain the normal recent-tail invariant.  In the boundary path,
+            # start == 0 means the conservative budget was larger than the
+            # complete history; fall back to the legacy selector so that force
+            # still creates a useful checkpoint rather than failing with no
+            # selected prefix.
+            if start == 0:
+                retained_token_budget = None
+            else:
+                selected = candidates[:start]
+                retained = candidates[start:]
+                if not selected:
+                    # There is no closed source prefix to summarize.  This is
+                    # only reachable when a live execution starts at index 0;
+                    # preserve the existing error contract.
+                    raise ContextCompactionError("context_compaction_no_closed_prefix")
+                return selected, retained
         kept: list[CommittedContextUnit] = []
         kept_tokens = 0
         for unit in reversed(candidates):
@@ -1186,6 +1373,15 @@ def _strip_opaque_state(message: Mapping[str, Any]) -> dict[str, Any]:
     clean = _copy_message(message)
     clean.pop("model_state", None)
     return clean
+
+
+def _project_unit(unit: CommittedContextUnit) -> CommittedContextUnit:
+    """Use the same opaque-state-free representation as the live projection."""
+
+    return replace(
+        unit,
+        messages=tuple(_strip_opaque_state(message) for message in unit.messages),
+    )
 
 
 def canonical_source_plan(
