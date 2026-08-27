@@ -878,6 +878,17 @@ class ContextCompactor:
                             f"estimated={retained_tokens} budget={selection_budget}"
                         )
                     selection_budget = fallback_retained_token_budget
+            if (
+                start == len(candidates)
+                and fallback_retained_token_budget is not None
+                and unit_tokens[-1] <= fallback_retained_token_budget
+            ):
+                # The summary reserve is intentionally conservative.  If the
+                # newest complete unit still fits the absolute boundary, keep
+                # that unit as a useful fallback instead of promoting the
+                # entire history into one summary request.
+                start = len(candidates) - 1
+                retained_tokens = unit_tokens[-1]
             while start > 0 and (
                 retained_tokens + unit_tokens[start - 1] <= selection_budget
             ):
