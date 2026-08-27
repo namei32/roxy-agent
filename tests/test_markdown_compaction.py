@@ -19,12 +19,11 @@ class _Provider(LLMProvider):
         self.context_window = 4096
         self.prompts: list[str] = []
         self.max_tokens: list[int] = []
+        self.chat_kwargs: list[dict[str, Any]] = []
         self.max_output_tokens = 0
         self.estimated_tokens: int | None = None
 
-    def estimate_context_tokens(
-        self, messages: list[dict], tools: list[dict]
-    ) -> int:
+    def estimate_context_tokens(self, messages: list[dict], tools: list[dict]) -> int:
         if self.estimated_tokens is not None:
             return self.estimated_tokens
         prompt = str(messages[0]["content"])
@@ -34,6 +33,7 @@ class _Provider(LLMProvider):
         prompt = str(messages[0]["content"])
         self.prompts.append(prompt)
         self.max_tokens.append(int(kwargs["max_tokens"]))
+        self.chat_kwargs.append(dict(kwargs))
         return LLMResponse(
             content=json.dumps(
                 {
@@ -93,6 +93,26 @@ async def test_exact_markdown_plan_pages_by_consecutive_unit_ref(tmp_path):
     assert provider.max_tokens == [256, 256, 256]
     assert draft.source_ref == "session:checkpoint:1"
     assert len(draft.history_entry_payloads) == 3
+
+
+@pytest.mark.asyncio
+async def test_markdown_event_extraction_uses_declared_effort(tmp_path):
+    provider = _Provider()
+    maintenance = MarkdownMemoryMaintenance(
+        store=MarkdownMemoryStore(tmp_path),
+        provider=provider,
+        model="memory-model",
+        provider_input_budget=100,
+        reasoning_effort="medium",
+    )
+
+    await maintenance.prepare_compaction_markdown(
+        _source_plan()[:2],
+        source_ref="session:checkpoint:reasoning",
+    )
+
+    assert provider.chat_kwargs[0]["reasoning_effort"] == "medium"
+    assert provider.chat_kwargs[0]["disable_thinking"] is False
 
 
 @pytest.mark.asyncio

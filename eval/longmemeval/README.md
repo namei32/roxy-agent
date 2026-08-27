@@ -1,336 +1,180 @@
-# LongMemEval Benchmark
+# LongMemEval-S benchmark
 
-这个目录保留一版可提交的 LongMemEval 子集 benchmark。
+这套 harness 使用 roxy 的生产 `AgentLoop`、memory engine、SessionStore 和工具链，正式支持
+LongMemEval-S cleaned split 的全部 500 题、六种题型：
 
-当前 benchmark 只测三类题：
+| question type | n |
+|---|---:|
+| `single-session-user` | 70 |
+| `single-session-assistant` | 56 |
+| `single-session-preference` | 30 |
+| `multi-session` | 133 |
+| `temporal-reasoning` | 133 |
+| `knowledge-update` | 78 |
 
-```text
-┌────────────────────────────┐
-│ single-session-user        │
-├────────────────────────────┤
-│ single-session-preference  │
-├────────────────────────────┤
-│ knowledge-update           │
-└────────────────────────────┘
-```
+数据来自 [LongMemEval 官方仓库](https://github.com/xiaowu0162/LongMemEval) 的
+`longmemeval_s_cleaned.json`。数据目录和真实配置均被 `.gitignore` 排除。
+正式模板同时固定 cleaned 文件 SHA-256
+`d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442`；文件内容不一致时
+runner 会在任何模型调用前退出。
 
-对应数据文件：
+## 实验配置
 
-- `eval/longmemeval/data/longmemeval_roxy.json`
-
-## 它在测什么
-
-这不是纯 retrieval benchmark。
-它测的是 `roxy-agent` 这套记忆系统在真实 AgentLoop 里的端到端效果：
-
-```text
-┌────────────────────┐
-│ haystack 回放        │
-├────────────────────┤
-│ 正式 provider compaction │
-├────────────────────┤
-│ recall/search/fetch │
-├────────────────────┤
-│ 最终 QA + judge      │
-└────────────────────┘
-```
-
-所以它更接近：
-
-```text
-┌────────────────────┐
-│ memory-enabled agent│
-│ benchmark           │
-└────────────────────┘
-```
-
-不是：
-
-```text
-┌────────────────────┐
-│ 纯 memory engine     │
-│ benchmark           │
-└────────────────────┘
-```
-
-## 适用边界
-
-这版 benchmark 适合回答：
-
-- 单 session 用户事实记忆是否可用
-- 单 session 偏好记忆是否可用
-- knowledge update 场景里，系统最终能否选对更新后的答案
-- 改 compaction / recall / prompt 后，端到端有没有回归
-
-它不适合直接回答：
-
-- 纯 retrieval engine 排名
-- multi-session 能力
-- 时间推理的完整上限
-- “是否已经把旧记忆真正 supersede 掉”
-
-## 运行方式
-
-全量自动续跑：
+复制模板：
 
 ```bash
-python -m eval.longmemeval.run \
+cp eval/longmemeval/config.example.toml eval/longmemeval/config.toml
+```
+
+模板实现以下角色策略：
+
+| stage | model | reasoning effort |
+|---|---|---|
+| QA、工具规划、multi-session、temporal | `gpt-5.6-luna` | `max` |
+| consolidation / fact extraction | `gpt-5.6-luna` | `medium` |
+| Query rewrite、HyDE 与 fast retrieval helpers | `gpt-5.6-luna` | `medium` |
+| History gate | `gpt-5.6-luna` | `low` |
+| context compaction | `gpt-5.6-luna` | `none` |
+| Judge | `gpt-5.6-luna` | `xhigh` |
+| embedding | `text-embedding-v3` | — |
+
+history gate 与 query rewrite 是两个独立且可追踪的调用：gate 用 `low` 判定是否检索，只有需要
+检索时才以 `medium` 生成 rewritten query；HyDE 也独立使用 `medium`。runner 会在花费 API
+额度前校验真实运行策略，不匹配就退出。
+
+历史导入不是单纯向 `SessionStore` 填充消息。正式配置每 16 个历史 session 形成一个精确、持久化的
+source plan，并依次经过生产的 `MarkdownMemoryMaintenance → ConsolidationCommitted → default
+memory engine → embedding` 链路。批大小由
+`benchmark.longmemeval.consolidation_sessions_per_batch` 固定并写入 manifest，既避免 500 题因
+400k context window 从不触发 consolidation，也避免为约 2.4 万个历史 session 各发一次提取请求。
+
+历史 backfill 默认关闭逐 session 的 post-response invalidation。该 worker 面向新发生的在线 turn，
+在回填场景逐条运行会反复扫描同一批内容；knowledge update 仍由分批 consolidation 的
+supersede/merge 链路处理。需要做消融时可显式设置 `post_response_invalidation = true`。
+
+Codex 登录凭据由一个已有 workspace 的 `model-registry.sqlite3` 统一持有；每题的 session、
+memory DB 和结果仍各自隔离。向量 API key 通过 `BENCH_EMBED_API_KEY` 提供。
+
+## 正式运行
+
+先设置 embedding 凭据，再执行零模型调用 preflight，校验数据 SHA、500 题结构、配置、角色
+effort、Codex credential 和 embedding credential：
+
+```bash
+export BENCH_EMBED_API_KEY='...'
+
+uv run python -m eval.longmemeval.run \
   --config eval/longmemeval/config.toml \
-  --data eval/longmemeval/data/longmemeval_roxy.json \
-  --workspace /tmp/lme_bench \
-  --workers 4 \
+  --data eval/longmemeval/data/longmemeval_s_cleaned.json \
+  --workspace /tmp/longmemeval-role-aware \
+  --credential-workspace /path/to/your/roxy/workspace \
+  --preflight
+```
+
+通过后正式运行（沿用同一环境变量）：
+
+```bash
+uv run python -m eval.longmemeval.run \
+  --config eval/longmemeval/config.toml \
+  --data eval/longmemeval/data/longmemeval_s_cleaned.json \
+  --workspace /tmp/longmemeval-role-aware \
+  --credential-workspace /path/to/your/roxy/workspace \
+  --workers 2 \
   --resume-auto
 ```
 
-只跑某一类：
+`require_full_dataset = true` 会先验证总数、六类分布、ID 唯一性、session 数组对齐和证据
+session 引用，然后才应用 `--limit`、`--type` 或 `--ids-file`。因此 smoke run 仍会确认输入确实是
+官方完整 split：
 
 ```bash
-python -m eval.longmemeval.run \
+uv run python -m eval.longmemeval.run \
   --config eval/longmemeval/config.toml \
-  --data eval/longmemeval/data/longmemeval_roxy.json \
-  --workspace /tmp/lme_bench_user \
-  --type single-session-user \
-  --workers 4 \
-  --resume-auto
-```
-
-只跑 smoke：
-
-```bash
-python -m eval.longmemeval.run \
-  --config eval/longmemeval/config.toml \
-  --data eval/longmemeval/data/longmemeval_roxy.json \
-  --workspace /tmp/lme_bench_smoke \
+  --data eval/longmemeval/data/longmemeval_s_cleaned.json \
+  --workspace /tmp/longmemeval-smoke \
+  --credential-workspace /path/to/your/roxy/workspace \
   --limit 3 \
   --workers 1 \
   --resume-auto
 ```
 
-单题只重跑 QA：
+固定题目清单可用 JSON string array、`{"question_ids": [...]}` 或每行一个 ID：
 
 ```bash
-python -m eval.longmemeval.run_one_qa \
-  --config eval/longmemeval/config.toml \
-  --data eval/longmemeval/data/longmemeval_roxy.json \
-  --workspace /tmp/lme_one_case \
-  --question-id 94f70d80
+uv run python -m eval.longmemeval.make_manifest \
+  --data eval/longmemeval/data/longmemeval_s_cleaned.json \
+  --output eval/longmemeval/manifests/pilot-50.json \
+  --size 50 \
+  --seed 20260824
+
+uv run python -m eval.longmemeval.run ... --ids-file eval/longmemeval/manifests/pilot-50.json
 ```
 
-## `resume-auto`
+对照实验应使用同一 `--ids-file`、不同 workspace 和不同 `variant`，不要在两个实验间复用
+workspace。
 
-推荐始终使用 `--resume-auto`。
+## 断点恢复与防串组
 
-语义如下：
+每题写入：
 
-```text
-┌─────────────────────────────┐
-│ workspace/<qid>/result.json │
-└────────────┬────────────────┘
-             │ yes
-             v
-      ┌──────────────┐
-      │ 直接复用结果  │
-      └──────────────┘
-             │ no
-             v
-┌─────────────────────────────┐
-│ ingest_state.json.completed │
-└────────────┬────────────────┘
-             │ yes
-             v
-      ┌──────────────┐
-      │ 只跑 QA+judge │
-      └──────────────┘
-             │ no
-             v
-      ┌──────────────┐
-      │ ingest+QA+judge │
-      └──────────────┘
-```
-
-每题会落盘：
-
+- `workspace/<question_id>/ingest_state.json`
+- `workspace/<question_id>/ingest_report.json`
 - `workspace/<question_id>/result.json`
 - `workspace/<question_id>/trace.log`
-- `workspace/<question_id>/ingest_state.json`
 
-## 评分解释
+缓存和 ingest state 都带 `artifact_fingerprint`。它由数据、配置、benchmark prompt、单题超时和模型策略的
+SHA-256，以及运行时源码和依赖文件摘要组成；任一项变化后，`--resume-auto` 不会复用旧结果或旧 memory。正式重跑无需
+`--resume-auto` 时，runner 会先清空该题的隔离 workspace，避免重复 ingest。
+ingest state 还记录计划/已完成的 consolidation batch 数；某批失败不会被标记为完成，续跑会重建
+该题隔离 workspace，防止半成品触发重复 embedding。
+`ingest_report.json` 保存该阶段的模型调用、embedding 计数和耗时；因此 `--ingest-only` 与后续
+`--qa-only` 分开执行时，最终指标仍包含完整的 ingestion 成本。
 
-主看：
+## 输出与指标
 
-- `judge`
+一次运行输出三份文件：
 
-辅看：
+- `*.json`：完整结果、实验 manifest、overall / per-type / answerability 指标；
+- `*.hypotheses.jsonl`：官方 evaluator 接受的 `question_id` + `hypothesis`；
+- `*.manifest.json`：数据/config/prompt hash、实际模型与 effort、selection hash。
 
-- `F1`
-- `EM`
+主指标使用 task-aware LLM Judge；同时保留 token F1 和 exact match。Judge 调用失败记为
+`judge_error`，不会伪装成答错；分母通过 `judged_n` 单独报告。`*_abs` 题另外汇总 abstention
+准确率。runner 不把 `_abs` 标签告诉回答模型，benchmark persona 只允许模型在完整检索后自行
+判断不可回答。
 
-建议按下面顺序解读：
+该主指标按本实验要求使用 Luna `xhigh`，rubric 与官方六类判分语义兼容，但不应冒充官方
+`gpt-4o-2024-08-06` Judge 分段。`*.hypotheses.jsonl` 可直接交给 LongMemEval 官方 evaluator，
+作为单独标注模型、单独报告的可比副指标。
 
-```text
-┌──────────────┐
-│ 先看 judge    │
-├──────────────┤
-│ 再看 F1 / EM  │
-└──────────────┘
+consolidation source_ref 保留精确的 SessionStore message ID，因此 runner 会在回答完成后（绝不在
+模型输入中）把 `recall_memory`、`search_messages`、`fetch_messages` 的证据映射回官方
+`answer_session_ids`，报告每阶段的 macro gold-session coverage、any-hit 和 all-hit rate。由于一条
+consolidated memory 的 evidence 可能覆盖整批 16 个 session，这些指标明确命名为 evidence
+coverage，不冒充固定 top-k 的官方 retrieval Recall@k。
+
+完整 500 题结束后，用固定 50 题样本将 `xhigh` Judge 与 Luna `max` 复判做稳定性审计：
+
+```bash
+uv run python -m eval.longmemeval.audit_judge \
+  --results RESULTS.json \
+  --config eval/longmemeval/config.toml \
+  --workspace /tmp/longmemeval-judge-audit \
+  --credential-workspace /path/to/your/roxy/workspace \
+  --output RESULTS.judge-audit.json \
+  --size 50 \
+  --seed 20260824 \
+  --workers 2
 ```
 
-原因很简单：
+## 单题 QA
 
-- `judge` 更接近“最终回答在语义上对没对”
-- `F1 / EM` 容易受句式影响
-
-例如：
-
-- `Four bikes.` vs `4`
-- `Above your bed in the bedroom.` vs `in my bedroom`
-
-这种题常见 `judge=✅` 但 `F1` 不高。
-
-## 当前实现里的关键点
-
-### 1. judge 固定走主模型
-
-现在 judge 使用 `llm.main`，不再走 `llm.fast`。
-
-### 2. benchmark persona 是硬约束
-
-`SELF.md` 会在 benchmark runtime 里覆盖为专用 prompt，要求：
-
-- 英文短答
-- 所有题答案都假定存在于记忆里
-- 必须先 `recall_memory`
-- 必要时继续 `search_messages`
-- 具体事实题必须 `fetch_messages`
-- 允许中英混合 query
-
-### 3. ingest 不提供手动压缩旁路
-
-haystack 只追加进权威 SessionStore。Markdown 沉淀和 session checkpoint 与生产环境一致，
-只会在 QA 的真实 provider 调用达到模型上下文水位时发生。
-
-### 4. 每个回放 session 会跑一次 post-response invalidation
-
-benchmark ingest 在每个回放 session 后运行一次 `post_response_worker`。
-
-但要注意：
-
-```text
-┌────────────────────┐
-│ 它只更偏向处理        │
-│ 显式 invalidation    │
-├────────────────────┤
-│ 不是完整的            │
-│ “自然知识更新替换器”   │
-└────────────────────┘
+```bash
+uv run python -m eval.longmemeval.run_one_qa \
+  --config eval/longmemeval/config.toml \
+  --data eval/longmemeval/data/longmemeval_s_cleaned.json \
+  --workspace /tmp/longmemeval-one-case \
+  --credential-workspace /path/to/your/roxy/workspace \
+  --question-id QUESTION_ID \
+  --timeout 600
 ```
-
-## 当前观察到的结论
-
-### single-session-user
-
-这类题现在已经接近天花板。
-主要意义更偏回归基线，而不是继续深挖。
-
-### single-session-preference
-
-能测到：
-
-- 是否召回偏好相关证据
-- 是否把具体事件抽象成偏好
-
-这类题比 `single-session-user` 更容易暴露“召回到了但不会用”的问题。
-
-### knowledge-update
-
-这是当前最值得看的部分。
-
-现在测出来的真实情况更像：
-
-```text
-┌────────────────────┐
-│ 新旧记忆经常同时存在   │
-├────────────────────┤
-│ agent 通过 recall +   │
-│ search + fetch 选对新值│
-├────────────────────┤
-│ 但旧值未必真的被退休   │
-└────────────────────┘
-```
-
-所以目前 `knowledge-update` 的成功更常代表：
-
-- 检索和取证够强
-- agent 能在冲突里选对新值
-
-不自动代表：
-
-- supersede 机制已经稳定生效
-
-## 当前 stance
-
-这版 benchmark 的目标不是把 supersede 调得很激进。
-
-当前更偏保守策略：
-
-```text
-┌────────────────────┐
-│ 保留旧值             │
-├────────────────────┤
-│ 让新值更容易被找出来  │
-├────────────────────┤
-│ 由 agent 最终选新版   │
-└────────────────────┘
-```
-
-这个策略对产品可接受，但要明确：
-
-- 它保证的是最终答案正确率
-- 不是记忆库内部的一致性最优
-
-## 看 trace 的方式
-
-单题 trace 在：
-
-- `/tmp/.../<question_id>/trace.log`
-
-看 trace 时建议按这个顺序：
-
-```text
-┌────────────────────┐
-│ recall_memory       │
-├────────────────────┤
-│ fetch_messages      │
-├────────────────────┤
-│ search_messages     │
-├────────────────────┤
-│ 最终回答             │
-└────────────────────┘
-```
-
-如果答对了，要再问一句：
-
-```text
-┌────────────────────┐
-│ 是 recall 直接命中新值 │
-├────────────────────┤
-│ 还是 search/fetch    │
-│ 把新旧都拉出来后选对   │
-└────────────────────┘
-```
-
-这两种成功含义不一样。
-
-## 保留的脚本
-
-目录里只保留 benchmark 主路径需要的脚本：
-
-- `run.py`
-- `run_one_qa.py`
-- `ingest.py`
-- `runtime.py`
-- `qa_runner.py`
-- `metrics.py`
-- `dataset.py`
-
-不再保留一次性的 case runner。

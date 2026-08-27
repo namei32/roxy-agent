@@ -13,6 +13,11 @@ from agent.model_runtime.registry import (
     current_model_binding,
     model_config_digest,
 )
+from agent.model_runtime.call_trace import (
+    model_call_purpose,
+    start_model_call_capture,
+    stop_model_call_capture,
+)
 from agent.model_runtime.catalog.litellm_registry import resolve_catalog_capabilities
 from agent.model_runtime.catalog.litellm_registry import resolve_catalog_provider_id
 from agent.model_runtime.types import LLMResponse, ModelRequest
@@ -74,7 +79,9 @@ def _builder(config: Config, generation_id: int) -> ModelGeneration:
 
 
 @pytest.mark.asyncio
-async def test_running_execution_keeps_generation_and_next_execution_uses_reload() -> None:
+async def test_running_execution_keeps_generation_and_next_execution_uses_reload() -> (
+    None
+):
     registry = ModelRegistry(_config(), _builder)
     provider = registry.provider("default")
 
@@ -94,7 +101,9 @@ async def test_running_execution_keeps_generation_and_next_execution_uses_reload
 
 
 @pytest.mark.asyncio
-async def test_role_provider_preserves_zero_output_omission_and_local_override() -> None:
+async def test_role_provider_preserves_zero_output_omission_and_local_override() -> (
+    None
+):
     registry = ModelRegistry(_config(), _builder)
     provider = registry.provider("default", force_disable_thinking=True)
 
@@ -194,14 +203,15 @@ async def test_explicit_session_effort_is_scoped_to_selected_chat_model() -> Non
         await agent.chat([], [], "ignored", 0)
         await fast.chat([], [], "ignored", 0)
 
-    assert registry.current.providers["b"].last_kwargs["extra_body"] == {
-        "reasoning_effort": "high"
-    }
+    assert registry.current.providers["b"].last_kwargs["reasoning_effort"] == "high"
+    assert registry.current.providers["b"].last_kwargs["extra_body"] == {}
     assert registry.current.providers["fast-a"].last_kwargs["extra_body"] == {}
 
 
 @pytest.mark.asyncio
-async def test_fallback_provider_ignores_session_runtime_but_keeps_generation_effort() -> None:
+async def test_fallback_provider_ignores_session_runtime_but_keeps_generation_effort() -> (
+    None
+):
     config = _config()
     runtimes = dict(config.model_runtimes)
     runtimes["a"] = replace(
@@ -226,12 +236,56 @@ async def test_fallback_provider_ignores_session_runtime_but_keeps_generation_ef
         await selected.chat([], [], "ignored", 0)
         await fallback.chat([], [], "ignored", 0)
 
-    assert registry.current.providers["b"].last_kwargs["extra_body"] == {
-        "reasoning_effort": "high"
-    }
-    assert registry.current.providers["a"].last_kwargs["extra_body"] == {
-        "reasoning_effort": "low"
-    }
+    assert registry.current.providers["b"].last_kwargs["reasoning_effort"] == "high"
+    assert registry.current.providers["b"].last_kwargs["extra_body"] == {}
+    assert registry.current.providers["a"].last_kwargs["reasoning_effort"] == "low"
+    assert registry.current.providers["a"].last_kwargs["extra_body"] == {}
+
+
+@pytest.mark.asyncio
+async def test_call_effort_overrides_role_and_session_effort() -> None:
+    config = _config()
+    runtimes = dict(config.model_runtimes)
+    runtimes["b"] = replace(
+        runtimes["b"],
+        reasoning_effort="medium",
+        supported_reasoning_efforts=("low", "medium", "high", "xhigh"),
+    )
+    registry = ModelRegistry(replace(config, model_runtimes=runtimes), _builder)
+    provider = registry.provider("agent")
+
+    async with registry.execution_scope("b", "high"):
+        await provider.chat([], [], "ignored", 0, reasoning_effort="xhigh")
+
+    assert registry.current.providers["b"].last_kwargs["reasoning_effort"] == "xhigh"
+
+
+@pytest.mark.asyncio
+async def test_role_provider_emits_opt_in_call_trace() -> None:
+    registry = ModelRegistry(_config(), _builder)
+    provider = registry.provider("agent")
+    token, calls = start_model_call_capture()
+    try:
+        with model_call_purpose("judge"):
+            await provider.chat([], [], "ignored", 25_000, reasoning_effort="xhigh")
+    finally:
+        stop_model_call_capture(token)
+
+    assert calls == [
+        {
+            "sequence": 1,
+            "purpose": "judge",
+            "status": "success",
+            "role": "agent",
+            "runtime_id": "a",
+            "provider": "openai",
+            "model": "model-a",
+            "reasoning_effort": "xhigh",
+            "max_output_tokens": 25_000,
+            "tool_count": 0,
+            "elapsed_s": calls[0]["elapsed_s"],
+        }
+    ]
 
 
 @pytest.mark.asyncio

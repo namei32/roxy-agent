@@ -14,6 +14,12 @@ _MAIN_NETWORK_READ_TIMEOUT_S = 120.0
 _LIGHT_NETWORK_READ_TIMEOUT_S = 60.0
 
 
+def _credential_store(config: Config) -> CredentialStore:
+    if config.credential_store_path is not None:
+        return CredentialStore(config.credential_store_path)
+    return CredentialStore.for_workspace(config.workspace_path)
+
+
 def build_model_registry(config: Config) -> ModelRegistry:
     """Build the runtime model registry from the validated configuration."""
 
@@ -25,7 +31,7 @@ def _build_model_generation(config: Config, generation_id: int) -> ModelGenerati
 
     # 1. Reuse the established role builders and their fallback semantics.
     default_provider, fast_provider, agent_provider = build_providers(config)
-    credential_store = CredentialStore.for_workspace(config.workspace_path)
+    credential_store = _credential_store(config)
     runtime_providers: dict[str, LLMProvider] = {config.runtime_id: default_provider}
     for runtime_id, runtime in config.model_runtimes.items():
         if runtime_id in runtime_providers:
@@ -65,7 +71,7 @@ def build_providers(
     config: Config,
 ) -> tuple[LLMProvider, LLMProvider | None, LLMProvider | None]:
     payload_snapshot_enabled = config.dev_mode
-    credential_store = CredentialStore.for_workspace(config.workspace_path)
+    credential_store = _credential_store(config)
     main_extra = _sanitize_extra_body(
         base_url=config.base_url,
         extra_body=config.extra_body,
@@ -103,9 +109,18 @@ def build_providers(
         config.fast_runtime_id,
         system_prompt=config.system_prompt,
         read_timeout_s=_LIGHT_NETWORK_READ_TIMEOUT_S,
-        force_disable_thinking=True,
+        # An explicit named-runtime effort is a deliberate task policy. Keep
+        # the historical no-thinking default only when no effort was declared.
+        force_disable_thinking=not bool(
+            config.model_runtimes.get(config.fast_runtime_id)
+            and config.model_runtimes[config.fast_runtime_id].reasoning_effort
+        ),
     )
-    if light_provider is None and config.light_model and (config.light_api_key or config.light_base_url):
+    if (
+        light_provider is None
+        and config.light_model
+        and (config.light_api_key or config.light_base_url)
+    ):
         light_url = config.light_base_url or config.base_url or ""
         light_extra: dict[str, object] = (
             {}
@@ -142,7 +157,11 @@ def build_providers(
         system_prompt=config.system_prompt,
         read_timeout_s=_MAIN_NETWORK_READ_TIMEOUT_S,
     )
-    if agent_provider is None and config.agent_model and (config.agent_api_key or config.agent_base_url):
+    if (
+        agent_provider is None
+        and config.agent_model
+        and (config.agent_api_key or config.agent_base_url)
+    ):
         agent_url = config.agent_base_url or config.base_url or ""
         agent_extra = _sanitize_extra_body(base_url=agent_url, extra_body={})
         agent_provider = LLMProvider(
@@ -197,7 +216,7 @@ def _build_named_role_provider(
     return LLMProvider.from_runtime(
         runtime,
         system_prompt=system_prompt,
-        credential_store=CredentialStore.for_workspace(config.workspace_path),
+        credential_store=_credential_store(config),
         read_timeout_s=read_timeout_s,
         force_disable_thinking=force_disable_thinking,
         payload_snapshot_enabled=config.dev_mode,

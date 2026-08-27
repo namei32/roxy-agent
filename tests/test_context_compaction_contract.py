@@ -17,7 +17,6 @@ from agent.model_runtime.types import LLMResponse, ModelUsage
 from agent.provider import LLMProvider
 from agent.tool_runtime import append_tool_result
 
-
 _SUMMARY = """## Goal
 goal
 ## Constraints & Preferences
@@ -65,6 +64,37 @@ class _Provider(LLMProvider):
         if self.fail:
             raise RuntimeError("summary provider unavailable")
         return LLMResponse(content=_SUMMARY)
+
+
+def test_compaction_summary_uses_explicit_none_effort() -> None:
+    provider = _Provider()
+    segments = ContextPayloadSegments(
+        prefix=(),
+        committed_units=(_unit(1, 100), _unit(2, 100)),
+        current_anchor=({"role": "user", "content": "current", "tokens": 2},),
+    )
+    compactor = ContextCompactor(
+        provider=provider,
+        model="m",
+        scope_id="none-effort",
+        payload_segments=segments,
+        max_output_tokens=100,
+        keep_recent_tokens=1,
+        next_generation=1,
+        reasoning_effort="none",
+    )
+
+    _run(
+        compactor.prepare(
+            segments.flatten(),
+            pending_start=len(segments.flatten()),
+            tools=[],
+            force=True,
+        )
+    )
+
+    assert provider.calls[0]["reasoning_effort"] == "none"
+    assert provider.calls[0]["disable_thinking"] is False
 
 
 def _unit(seq: int, token_count: int, *, prefix: str = "m") -> CommittedContextUnit:
@@ -184,6 +214,42 @@ def test_tail_below_twenty_thousand_tokens_has_no_legal_cut() -> None:
         compactor._select_units(list(units))
 
 
+def test_boundary_compaction_summarizes_a_single_oversized_recent_unit() -> None:
+    # The newest closed interaction is larger than the safe retained-tail
+    # budget.  It must be promoted into the summary instead of being kept just
+    # because it is the most recent complete unit.
+    units = (_unit(1, 20_000), _unit(2, 120_000))
+    provider = _Provider(context_window=150_000)
+    segments = ContextPayloadSegments(
+        prefix=(),
+        committed_units=units,
+        current_anchor=({"role": "user", "content": "q", "tokens": 1},),
+    )
+    compactor = ContextCompactor(
+        provider=provider,
+        model="m",
+        scope_id="oversized-recent-unit",
+        payload_segments=segments,
+        max_output_tokens=0,
+        next_generation=1,
+        keep_recent_tokens=20_000,
+    )
+
+    messages = segments.flatten()
+    result = _run(
+        compactor.prepare(
+            messages,
+            pending_start=len(messages),
+            tools=[],
+        )
+    )
+
+    assert result.compacted
+    assert result.checkpoint is not None
+    assert result.checkpoint.retained_tail == ()
+    assert result.estimated_tokens < 150_000 * 0.74
+
+
 class _UsageProvider(_Provider):
     def __init__(self) -> None:
         super().__init__(context_window=100)
@@ -249,9 +315,21 @@ def test_committed_and_temporary_summary_usage_are_aggregated() -> None:
 def test_single_interaction_remains_atomic_after_closed_tool_batches() -> None:
     messages = (
         {"role": "user", "content": "u", "id": "m1", "seq": 1},
-        {"role": "assistant", "content": "", "tool_calls": [{"id": "c1"}], "id": "m2", "seq": 2},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "c1"}],
+            "id": "m2",
+            "seq": 2,
+        },
         {"role": "tool", "tool_call_id": "c1", "content": "r", "id": "m3", "seq": 3},
-        {"role": "assistant", "content": "", "tool_calls": [{"id": "c2"}], "id": "m4", "seq": 4},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "c2"}],
+            "id": "m4",
+            "seq": 4,
+        },
         {"role": "tool", "tool_call_id": "c2", "content": "r", "id": "m5", "seq": 5},
         {"role": "assistant", "content": "done", "id": "m6", "seq": 6},
     )
@@ -342,7 +420,9 @@ def test_live_shell_execution_blocks_cut_until_terminal_evidence_arrives() -> No
     assert "succeeded" in str(messages[-1]["content"])
 
 
-def test_generation_comes_from_store_head_and_temporary_projection_does_not_consume_it() -> None:
+def test_generation_comes_from_store_head_and_temporary_projection_does_not_consume_it() -> (
+    None
+):
     committed = _unit(1, 100)
     committed_tail = _unit(2, 100)
     segments = ContextPayloadSegments(
@@ -442,7 +522,82 @@ def test_mixed_segments_preserve_anchor_before_active_batches() -> None:
     assert "ACTIVE_SHOULD_NOT_PERSIST" not in str(result.checkpoint.retained_tail)
 
 
-def test_summary_uses_current_once_then_distinct_fallback_once_with_own_budget() -> None:
+def test_compaction_keeps_segments_in_projected_opaque_state_form() -> None:
+    opaque = {"schema_version": 1, "items": [{"type": "reasoning", "id": "r1"}]}
+    retained = CommittedContextUnit(
+        source_from_seq=2,
+        consolidated_through_seq=2,
+        source_message_ids=("retained",),
+        messages=(
+            {
+                "role": "assistant",
+                "content": "retained",
+                "tokens": 10,
+                "model_state": opaque,
+            },
+        ),
+        message_refs=(("retained", 2),),
+    )
+    active = (
+        {
+            "role": "assistant",
+            "content": "",
+            "tokens": 10,
+            "tool_calls": [{"id": "call-1"}],
+            "model_state": opaque,
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "content": "result",
+            "tokens": 10,
+        },
+    )
+    segments = ContextPayloadSegments(
+        prefix=(),
+        committed_units=(_unit(1, 100), retained),
+        current_anchor=(),
+        active_batches=(active,),
+    )
+    provider = _Provider(context_window=1_000)
+    compactor = ContextCompactor(
+        provider=provider,
+        model="m",
+        scope_id="opaque-projection",
+        payload_segments=segments,
+        max_output_tokens=100,
+        next_generation=1,
+        keep_recent_tokens=25,
+    )
+
+    messages = segments.flatten()
+    result = _run(
+        compactor.prepare(
+            messages,
+            pending_start=len(messages),
+            tools=[],
+            force=True,
+        )
+    )
+
+    assert result.compacted
+    assert messages == compactor._segments.flatten()
+    assert all("model_state" not in message for message in messages)
+
+    messages.append({"role": "user", "content": "next", "tokens": 1})
+    compactor.set_pending(messages)
+    _run(
+        compactor.prepare(
+            messages,
+            pending_start=compactor.pending_start,
+            tools=[],
+        )
+    )
+
+
+def test_summary_uses_current_once_then_distinct_fallback_once_with_own_budget() -> (
+    None
+):
     current = _Provider(context_window=500, fail=True, runtime_id="agent")
     fallback = _Provider(context_window=2_000, runtime_id="main")
     current.model = "selected-model"
@@ -528,7 +683,11 @@ def test_summary_does_not_duplicate_same_selected_main_provider() -> None:
         keep_recent_tokens=1,
     )
 
-    _run(compactor.prepare(compactor._segments.flatten(), pending_start=2, tools=[], force=True))
+    _run(
+        compactor.prepare(
+            compactor._segments.flatten(), pending_start=2, tools=[], force=True
+        )
+    )
 
     assert len(provider.calls) == 1
 
@@ -638,8 +797,12 @@ def test_logical_interaction_inputs_only_enter_temporary_summary() -> None:
 
 def test_summary_output_limit_keeps_strict_input_boundary() -> None:
     summary_input = [{"role": "user", "content": "summary", "tokens": 1}]
-    assert _summary_output_limit(_Provider(context_window=8_193), summary_input) == 8_191
-    assert _summary_output_limit(_Provider(context_window=8_192), summary_input) == 8_190
+    assert (
+        _summary_output_limit(_Provider(context_window=8_193), summary_input) == 8_191
+    )
+    assert (
+        _summary_output_limit(_Provider(context_window=8_192), summary_input) == 8_190
+    )
     with pytest.raises(ContextCompactionError, match="summary_input_exceeds_window"):
         _summary_output_limit(_Provider(context_window=2), summary_input)
 
@@ -810,9 +973,7 @@ def test_same_turn_temporary_summary_replaces_previous_projection() -> None:
     assert len(provider.calls) == 2
 
     compactor.acknowledge_committed_checkpoint(1)
-    next_units = tuple(
-        _unit(index, 2, prefix="next-") for index in range(10, 12)
-    )
+    next_units = tuple(_unit(index, 2, prefix="next-") for index in range(10, 12))
     compactor._committed_units = list(next_units)
     compactor._completed_batches = []
     compactor._segments = ContextPayloadSegments(

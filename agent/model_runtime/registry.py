@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Awaitable, Callable, Mapping
 
 from agent.config_models import Config, ModelRuntimeConfig
+from agent.model_runtime.call_trace import begin_model_call, finish_model_call
 from agent.model_runtime.store import ModelRegistryStore
 from agent.provider import LLMProvider
 
@@ -138,9 +139,7 @@ class ModelRegistry:
                 "catalogProvider": runtime.catalog_provider_id or runtime.provider,
                 "model": runtime.model,
                 "reasoningEffort": runtime.reasoning_effort,
-                "supportedReasoningEfforts": list(
-                    runtime.supported_reasoning_efforts
-                ),
+                "supportedReasoningEfforts": list(runtime.supported_reasoning_efforts),
                 "sourceId": runtime.source_id,
                 "sourceName": runtime.source_name or runtime.provider,
                 "contextWindow": runtime.context_window,
@@ -320,6 +319,7 @@ class RoleBoundProvider(LLMProvider):
         tool_choice: str | dict = "auto",
         extra_body: dict | None = None,
         disable_thinking: bool = False,
+        reasoning_effort: str | None = None,
         on_content_delta: Callable[[Any], Awaitable[None]] | None = None,
         cache_namespace: str = "",
     ) -> Any:
@@ -329,25 +329,54 @@ class RoleBoundProvider(LLMProvider):
                 honor_session_selection=self.honor_session_selection,
             )
             request_extra = dict(extra_body or {})
+            effective_effort = str(reasoning_effort or "").strip()
+            role_effort = runtime.reasoning_effort
             if binding is not None:
-                effort = (
+                role_effort = (
                     binding.reasoning_effort_for(self.role, runtime)
                     if self.honor_session_selection
                     else runtime.reasoning_effort
                 )
-                if effort and not self.force_disable_thinking and not disable_thinking:
-                    request_extra["reasoning_effort"] = effort
-            return await provider.chat(
-                messages=messages,
-                tools=tools,
+            if not effective_effort:
+                effective_effort = role_effort
+            if self.force_disable_thinking or disable_thinking:
+                effective_effort = ""
+                request_extra.pop("reasoning_effort", None)
+            trace = begin_model_call(
+                role=self.role,
+                runtime_id=runtime.runtime_id,
+                provider=runtime.provider,
                 model=runtime.model,
-                max_tokens=max_tokens,
-                tool_choice=tool_choice,
-                extra_body=request_extra,
-                disable_thinking=self.force_disable_thinking or disable_thinking,
-                on_content_delta=on_content_delta,
-                cache_namespace=cache_namespace,
+                reasoning_effort=(
+                    effective_effort
+                    if effective_effort
+                    else (
+                        "disabled"
+                        if self.force_disable_thinking or disable_thinking
+                        else "default"
+                    )
+                ),
+                max_output_tokens=max_tokens,
+                tool_count=len(tools),
             )
+            try:
+                response = await provider.chat(
+                    messages=messages,
+                    tools=tools,
+                    model=runtime.model,
+                    max_tokens=max_tokens,
+                    tool_choice=tool_choice,
+                    extra_body=request_extra,
+                    disable_thinking=self.force_disable_thinking or disable_thinking,
+                    reasoning_effort=effective_effort or None,
+                    on_content_delta=on_content_delta,
+                    cache_namespace=cache_namespace,
+                )
+            except BaseException as exc:
+                finish_model_call(trace, error=exc)
+                raise
+            finish_model_call(trace, response=response)
+            return response
 
     @property
     def context_window(self) -> int:

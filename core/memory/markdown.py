@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 from agent.llm_json import load_json_object_loose
 from agent.memory import MemoryStore
+from agent.model_runtime.call_trace import model_call_purpose
 from agent.prompting import is_context_frame
 from agent.provider import LLMProvider
 from core.memory.events import ConsolidationCommitted
@@ -256,11 +257,13 @@ class _MarkdownConsolidationWorker:
         provider: "LLMProvider",
         model: str,
         provider_input_budget: int | None,
+        reasoning_effort: str = "",
     ) -> None:
         self._profile_maint = profile_maint
         self._provider = provider
         self._model = model
         self._configured_provider_input_budget = provider_input_budget
+        self._reasoning_effort = reasoning_effort.strip()
 
     def _summary_output_tokens(self) -> int:
         """Resolve the current provider's bounded event-extraction output budget."""
@@ -294,16 +297,18 @@ class _MarkdownConsolidationWorker:
     ) -> tuple[str, int] | _ConsolidationFailure:
         started_at = time.perf_counter()
         try:
-            response = await asyncio.wait_for(
-                provider.chat(
-                    messages=messages,
-                    tools=[],
-                    model=model,
-                    max_tokens=max_tokens,
-                    disable_thinking=True,
-                ),
-                timeout=timeout_s,
-            )
+            with model_call_purpose("memory_event_extraction"):
+                response = await asyncio.wait_for(
+                    provider.chat(
+                        messages=messages,
+                        tools=[],
+                        model=model,
+                        max_tokens=max_tokens,
+                        disable_thinking=not bool(self._reasoning_effort),
+                        reasoning_effort=self._reasoning_effort or None,
+                    ),
+                    timeout=timeout_s,
+                )
         except Exception as exc:
             elapsed_ms = int((time.perf_counter() - started_at) * 1000)
             error = _format_consolidation_error(exc)
@@ -584,6 +589,7 @@ class MarkdownMemoryMaintenance:
         model: str,
         provider_input_budget: int | None = None,
         event_bus: "EventBus | None" = None,
+        reasoning_effort: str = "",
     ) -> None:
         self._store = store
         self._event_bus = event_bus
@@ -594,6 +600,7 @@ class MarkdownMemoryMaintenance:
             provider=provider,
             model=model,
             provider_input_budget=provider_input_budget,
+            reasoning_effort=reasoning_effort,
         )
         self._provider_input_budget = provider_input_budget
 
@@ -714,7 +721,7 @@ class MarkdownMemoryMaintenance:
                     scope_chat_id=draft.scope_chat_id,
                     conversation=draft.conversation,
                 )
-        )
+            )
 
 
 def build_markdown_memory_runtime(
@@ -724,6 +731,7 @@ def build_markdown_memory_runtime(
     model: str,
     provider_input_budget: int | None = None,
     event_bus: "EventBus | None" = None,
+    reasoning_effort: str = "",
 ) -> MarkdownMemoryRuntime:
     store = MarkdownMemoryStore(workspace)
     maintenance = MarkdownMemoryMaintenance(
@@ -732,5 +740,6 @@ def build_markdown_memory_runtime(
         model=model,
         provider_input_budget=provider_input_budget,
         event_bus=event_bus,
+        reasoning_effort=reasoning_effort,
     )
     return MarkdownMemoryRuntime(store=store, maintenance=maintenance)

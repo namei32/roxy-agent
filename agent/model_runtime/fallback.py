@@ -50,6 +50,7 @@ class ResilientLightProvider(LLMProvider):
         tool_choice: str | dict = "auto",
         extra_body: dict | None = None,
         disable_thinking: bool = False,
+        reasoning_effort: str | None = None,
         on_content_delta: Callable[[StreamDelta], Awaitable[None]] | None = None,
         cache_namespace: str = "",
     ) -> LLMResponse:
@@ -73,6 +74,7 @@ class ResilientLightProvider(LLMProvider):
             "tool_choice": tool_choice,
             "extra_body": extra_body,
             "disable_thinking": disable_thinking,
+            "reasoning_effort": reasoning_effort,
             "on_content_delta": callback,
             "cache_namespace": cache_namespace,
         }

@@ -18,6 +18,9 @@ def test_default_memory_config_reads_example_defaults(tmp_path: Path) -> None:
     assert cfg.retrieval.top_k_history == 8
     assert cfg.retrieval.thresholds.procedure == 0.66
     assert cfg.retrieval.inject.max_chars == 6000
+    assert cfg.gate.enabled is False
+    assert cfg.query_rewrite.enabled is True
+    assert cfg.hyde.enabled is True
 
 
 def test_default_memory_config_creates_workspace_data_dir(
@@ -55,6 +58,19 @@ event = 0.8
 
 [retrieval.inject]
 max_chars = 3000
+
+[gate]
+enabled = true
+llm_timeout_ms = 60000
+reasoning_effort = "low"
+
+[query_rewrite]
+timeout_ms = 60000
+reasoning_effort = "medium"
+
+[hyde]
+timeout_ms = 60000
+reasoning_effort = "medium"
 """,
         encoding="utf-8",
     )
@@ -66,6 +82,10 @@ max_chars = 3000
     assert cfg.retrieval.score_threshold == 0.7
     assert cfg.retrieval.thresholds.event == 0.8
     assert cfg.retrieval.inject.max_chars == 3000
+    assert cfg.gate.enabled is True
+    assert cfg.gate.reasoning_effort == "low"
+    assert cfg.query_rewrite.reasoning_effort == "medium"
+    assert cfg.hyde.reasoning_effort == "medium"
 
 
 def test_default_memory_config_preserves_legacy_numeric_strings(tmp_path: Path) -> None:
@@ -133,6 +153,7 @@ def test_root_config_example_does_not_expose_default_memory_private_config() -> 
     assert "[memory.embedding]" in text
     assert "[memory.retrieval]" not in text
     assert "[memory.gate]" not in text
+    assert "[memory.query_rewrite]" not in text
     assert "[memory.hyde]" not in text
     assert "output_dimensionality" not in text
     assert "[memory_v2]" not in text

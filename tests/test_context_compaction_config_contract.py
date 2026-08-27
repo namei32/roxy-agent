@@ -12,7 +12,9 @@ from agent.provider import LLMProvider
 from bootstrap.setup_wizard import WizardAnswers, _render_config
 
 
-def test_integrations_peer_agents_is_rejected_at_config_boundary(tmp_path: Path) -> None:
+def test_integrations_peer_agents_is_rejected_at_config_boundary(
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "config.toml"
     path.write_text(
         """
@@ -50,6 +52,7 @@ input_modalities = ["text"]
 {extra}
 [agent.context.compaction]
 keep_recent_tokens = 21000
+reasoning_effort = "none"
 """
 
 
@@ -74,6 +77,7 @@ def test_compaction_policy_is_loaded_once_at_agent_context_boundary(
     config = load_config(path, workspace=tmp_path)
 
     assert config.context_compaction.keep_recent_tokens == 21000
+    assert config.context_compaction.reasoning_effort == "none"
     assert not hasattr(config.context_compaction, "trigger_percent")
     assert not hasattr(config.model_runtimes["main"], "effective_context_percent")
 
@@ -85,7 +89,9 @@ def test_config_rejects_non_integer_compaction_tail_budget(
 ) -> None:
     path = tmp_path / "config.toml"
     path.write_text(
-        _runtime_config().replace("keep_recent_tokens = 21000", f"keep_recent_tokens = {raw}"),
+        _runtime_config().replace(
+            "keep_recent_tokens = 21000", f"keep_recent_tokens = {raw}"
+        ),
         encoding="utf-8",
     )
 
@@ -97,6 +103,11 @@ def test_config_rejects_non_integer_compaction_tail_budget(
 def test_compaction_config_rejects_invalid_direct_values(raw: object) -> None:
     with pytest.raises(ValueError, match="keep_recent_tokens.*正整数"):
         ContextCompactionConfig(keep_recent_tokens=raw)  # type: ignore[arg-type]
+
+
+def test_compaction_config_rejects_non_string_reasoning_effort() -> None:
+    with pytest.raises(ValueError, match="reasoning_effort.*字符串"):
+        ContextCompactionConfig(reasoning_effort=1)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(

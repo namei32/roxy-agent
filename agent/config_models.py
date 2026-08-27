@@ -110,6 +110,7 @@ class MemoryConfig:
     enabled: bool = False
     engine: str = ""
     embedding: MemoryEmbeddingConfig = field(default_factory=MemoryEmbeddingConfig)
+    consolidation_reasoning_effort: str = ""
 
 
 @dataclass(frozen=True)
@@ -117,6 +118,7 @@ class ContextCompactionConfig:
     """Session compaction policy independent from any model runtime."""
 
     keep_recent_tokens: int = 20_000
+    reasoning_effort: str = ""
 
     def __post_init__(self) -> None:
         if (
@@ -124,9 +126,9 @@ class ContextCompactionConfig:
             or isinstance(self.keep_recent_tokens, bool)
             or self.keep_recent_tokens <= 0
         ):
-            raise ValueError(
-                "agent.context.compaction.keep_recent_tokens 必须是正整数"
-            )
+            raise ValueError("agent.context.compaction.keep_recent_tokens 必须是正整数")
+        if not isinstance(self.reasoning_effort, str):
+            raise ValueError("agent.context.compaction.reasoning_effort 必须是字符串")
 
 
 @dataclass
@@ -255,6 +257,9 @@ class Config:
     model_registry_revision: int = 0
     config_path: Path = Path("config.toml")
     workspace_path: Path = Path(".")
+    # Benchmark/sandbox runtimes may share one read/write credential owner while
+    # keeping sessions and model registry state isolated per workspace.
+    credential_store_path: Path | None = None
 
     @classmethod
     def load(

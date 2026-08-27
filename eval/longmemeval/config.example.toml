@@ -1,117 +1,141 @@
-# ============================================================
-# LongMemEval Benchmark Config
-# ============================================================
-# Copy this file to eval/longmemeval/config.toml and fill in
-# your API keys, then run:
+# LongMemEval-S formal role-aware experiment.
 #
-#   python -m eval.longmemeval.run \
-#     --config eval/longmemeval/config.toml \
-#     --data eval/longmemeval/data/longmemeval_roxy.json \
-#     --workspace /tmp/lme_bench \
-#     --limit 1
-#
-# Three models are used. You can point them all at the same
-# provider, or mix providers to minimise cost:
-#
-#   main    — the agent that answers QA questions (1 call per question)
-#   fast    — consolidation + HyDE + query-rewrite + sufficiency gates
-#             (many small calls per instance; use the cheapest capable model)
-#   embed   — vector embedding (called for every memory write + recall)
-# ============================================================
+# Prerequisite: --credential-workspace must point to a workspace containing a
+# valid Codex credential named "codex_default". The embedding key is read from
+# BENCH_EMBED_API_KEY.
+
+[benchmark.longmemeval]
+variant = "role-aware-luna"
+require_full_dataset = true
+strict_role_policy = true
+expected_dataset_sha256 = "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442"
+expected_model = "gpt-5.6-luna"
+expected_embedding_model = "text-embedding-v3"
+qa_effort = "max"
+consolidation_effort = "medium"
+query_effort = "medium"
+history_gate_effort = "low"
+compaction_effort = "none"
+consolidation_sessions_per_batch = 16
+post_response_invalidation = false
+judge_effort = "xhigh"
+judge_max_output_tokens = 25000
+judge_audit_effort = "max"
+judge_audit_size = 50
 
 [llm]
-main = "main"
-fast = "fast"
-agent = "main"
+main = "luna_main"
+fast = "luna_fast"
+agent = "luna_agent"
 
-# ── Main model: agent reasoning during QA ───────────────────
-# One full tool-use turn per question. A mid-tier model is fine.
-# Suggestions: deepseek-chat, qwen-plus, gpt-4o-mini
-[llm.runtimes.main]
-provider  = "deepseek"
-model     = "deepseek-chat"
-api_key   = "${BENCH_API_KEY}"
-base_url  = "https://api.deepseek.com/v1"
-context_window = 128000
-max_output_tokens = 2048
+# Default role: memory consolidation and the local Judge provider. Judge uses
+# a per-call xhigh override; consolidation explicitly uses medium.
+[llm.runtimes.luna_main]
+provider = "codex"
+model = "gpt-5.6-luna"
+auth = "codex_default"
+reasoning_effort = "medium"
+supported_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
+context_window = 400000
+max_output_tokens = 0
 input_modalities = ["text"]
+reasoning_summary = "none"
 
-# ── Fast model: compaction summary + memory gates ────────────
-# Used for context compaction fallback and QA memory gates
-# (HyDE hypotheses, query rewrite, sufficiency check).
-# Suggestions: deepseek-chat (same), qwen-turbo, gpt-4o-mini
-[llm.runtimes.fast]
-provider  = "deepseek"
-model     = "deepseek-chat"
-api_key   = "${BENCH_API_KEY}"
-base_url  = "https://api.deepseek.com/v1"
-context_window = 128000
-max_output_tokens = 2048
+# Fast role: HyDE and retrieval helpers. History gate overrides this to low.
+[llm.runtimes.luna_fast]
+provider = "codex"
+model = "gpt-5.6-luna"
+auth = "codex_default"
+reasoning_effort = "medium"
+supported_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
+context_window = 400000
+max_output_tokens = 0
 input_modalities = ["text"]
+reasoning_summary = "none"
 
-# ── Agent settings ────────────────────────────────────────────
+# Agent role: final QA, temporal/multi-session reasoning, and tool planning.
+[llm.runtimes.luna_agent]
+provider = "codex"
+model = "gpt-5.6-luna"
+auth = "codex_default"
+reasoning_effort = "max"
+supported_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
+context_window = 400000
+max_output_tokens = 0
+input_modalities = ["text"]
+reasoning_summary = "none"
+
 [agent]
-system_prompt   = "You are a helpful personal assistant with long-term memory. When the user asks about past conversations or personal details, always use your memory tools to retrieve the relevant information before answering. Answer concisely in English in one sentence or less — no greetings, no follow-up questions, no emojis."
-max_tokens      = 2048
-max_iterations  = 12
+system_prompt = "You are a helpful personal assistant with long-term memory. Retrieve evidence before answering and respond concisely in English."
+max_iterations = 12
 
 [agent.context.compaction]
 keep_recent_tokens = 20000
+reasoning_effort = "none"
 
 [agent.tools]
-search_enabled = false   # tool_search adds latency; not needed for benchmark
+search_enabled = false
+spawn_enabled = false
 
 [agent.wiring]
-context  = "default"
-memory   = "default"
-# meta_common gives: recall_memory, search_messages, fetch_messages,
-#                    memorize, web_search, shell (noise), tool_search
-# No fitbit / spawn / schedule / mcp needed for benchmark.
+context = "default"
+memory = "default"
 toolsets = ["meta_common"]
 
-# ── Channels: disabled ───────────────────────────────────────
-[channels.telegram]
-token      = ""
-allow_from = []
+[channels.chat]
+enabled = false
 
-# ── Embedding model ──────────────────────────────────────────
-# Called once per memory write during consolidation, and once
-# per recall_memory call during QA. Use a cheap text-embedding API.
-# Suggestions: text-embedding-v3 (Qwen/Dashscope), text-embedding-3-small (OpenAI)
 [memory]
 enabled = true
 
+[memory.reasoning]
+consolidation_effort = "medium"
+
 [memory.embedding]
-model    = "text-embedding-v3"
-api_key  = "${BENCH_EMBED_API_KEY}"
+model = "text-embedding-v3"
+api_key = "${BENCH_EMBED_API_KEY}"
 base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
+# The benchmark runtime materialises these convenience tables into the default
+# memory plugin's workspace-local config before building production services.
 [memory.retrieval]
-top_k_history   = 8
-score_threshold = 0.40    # slightly lower than production; benchmark conversations
-relative_delta  = 0.2     # are English, embedding space may be noisier
-route_intention = false   # skip intent-routing gate to save LLM calls
+top_k_history = 8
+score_threshold = 0.40
+relative_delta = 0.20
+route_intention = true
+procedure_guard_enabled = true
 
 [memory.retrieval.thresholds]
 procedure = 0.60
 preference = 0.45
-event      = 0.45
-profile    = 0.45
+event = 0.45
+profile = 0.45
 
 [memory.retrieval.inject]
-max_chars      = 4000
-line_max       = 400
-event_profile  = 6     # allow more auto-injected facts for QA
+max_chars = 4000
+forced = 3
+procedure_preference = 4
+event_profile = 6
+line_max = 400
 
 [memory.gate]
-llm_timeout_ms = 2000
-max_tokens     = 150
+enabled = true
+llm_timeout_ms = 60000
+max_tokens = 150
+reasoning_effort = "low"
+
+[memory.query_rewrite]
+enabled = true
+timeout_ms = 60000
+max_tokens = 80
+reasoning_effort = "medium"
 
 [memory.hyde]
-enabled    = true
-timeout_ms = 3000
+enabled = true
+timeout_ms = 60000
+max_tokens = 80
+reasoning_effort = "medium"
 
-# ── Proactive: disabled ───────────────────────────────────────
 [proactive]
 enabled = false
 profile = "quiet"

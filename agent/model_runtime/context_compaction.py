@@ -9,12 +9,13 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Callable, Literal, Mapping, Sequence, cast
 
+from agent.model_runtime.call_trace import model_call_purpose
 from agent.model_runtime.execution_history import active_shell_execution_origins
 from agent.model_runtime.types import ModelUsage, UsageCoverage
-
-logger = logging.getLogger(__name__)
 from agent.model_runtime.usage import aggregate_usage
 from agent.prompting import is_context_frame
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from agent.provider import LLMProvider
@@ -35,6 +36,11 @@ SUMMARY_HEADINGS = (
 SUMMARY_MAX_TOKENS = 8192
 KEEP_RECENT_TOKENS = 20_000
 SOFT_LIMIT_RATIO = 0.74
+# Leave room for the generated summary and estimator/provider accounting
+# overhead when selecting the retained suffix.  The value is deliberately
+# conservative: a compaction that leaves a little unused context is safer than
+# one that reaches the provider hard edge and fails after paying for a summary.
+COMPACTION_BUDGET_MARGIN_TOKENS = 1_024
 _SUMMARY_PROMPT = """更新当前长任务的上下文压缩摘要。
 
 摘要只替代已经完成的旧 session 历史，完整 messages 和 tool results 仍由 SessionDB 保留。只记录输入中已经出现的事实，不补充猜测，不把计划写成已完成。
@@ -70,7 +76,10 @@ class CommittedContextUnit:
     message_refs: tuple[tuple[str, int], ...] = ()
 
     def __post_init__(self) -> None:
-        if self.source_from_seq < 0 or self.consolidated_through_seq < self.source_from_seq:
+        if (
+            self.source_from_seq < 0
+            or self.consolidated_through_seq < self.source_from_seq
+        ):
             raise ValueError("context unit seq boundary 无效")
         if not self.source_message_ids:
             raise ValueError("context unit 必须包含 source message ids")
@@ -250,6 +259,7 @@ class ContextCompactor:
         payload_segments: ContextPayloadSegments,
         max_output_tokens: int = 0,
         keep_recent_tokens: int = KEEP_RECENT_TOKENS,
+        reasoning_effort: str = "",
         ledger_parent_generation: int | None = None,
         next_generation: int | None = None,
         fallback_provider: "LLMProvider | None" = None,
@@ -264,6 +274,7 @@ class ContextCompactor:
             raise ValueError("scope_id 不能为空")
         self._max_output_tokens = _validate_output_budget(provider, max_output_tokens)
         self._keep_recent_tokens = _validate_keep_recent_tokens(keep_recent_tokens)
+        self._reasoning_effort = str(reasoning_effort or "").strip()
         if ledger_parent_generation is not None and (
             not isinstance(ledger_parent_generation, int)
             or isinstance(ledger_parent_generation, bool)
@@ -300,7 +311,9 @@ class ContextCompactor:
             if current_query is not None
             else _find_current_query(self._segments.current_anchor)
         )
-        self._persistent_summary = active_compaction.summary if active_compaction else ""
+        self._persistent_summary = (
+            active_compaction.summary if active_compaction else ""
+        )
         self._temporary_summary = ""
         self._committed_checkpoint: ContextCompaction | None = None
         self._compaction: ContextCompaction | None = None
@@ -342,7 +355,11 @@ class ContextCompactor:
     def acknowledge_committed_checkpoint(self, generation: int) -> None:
         """Advance the in-turn Store head after a committed checkpoint."""
 
-        if not isinstance(generation, int) or isinstance(generation, bool) or generation <= 0:
+        if (
+            not isinstance(generation, int)
+            or isinstance(generation, bool)
+            or generation <= 0
+        ):
             raise ValueError("compaction generation 必须是正整数")
         self._ledger_parent_generation = generation
         self._next_generation = generation + 1
@@ -374,7 +391,9 @@ class ContextCompactor:
             raise ValueError("完整工具批次缺少可记录消息")
         batch = tuple(_copy_message(message) for message in messages[batch_start:])
         if not _is_closed_tool_batch(batch):
-            raise ValueError("工具批次必须在 assistant tool call 与全部 result 闭合后记录")
+            raise ValueError(
+                "工具批次必须在 assistant tool call 与全部 result 闭合后记录"
+            )
         self._completed_batches.append(batch)
         self._segments = ContextPayloadSegments(
             prefix=self._segments.prefix,
@@ -434,7 +453,31 @@ class ContextCompactor:
         candidates = self._candidate_units()
         if not candidates:
             raise ContextCompactionError("context_compaction_no_closed_prefix")
-        selected_all, retained_all = self._select_units(candidates)
+        prefix, current_anchor, previous_temp, pending = self._split_segments()
+        retained_token_budget: int | None = None
+        fallback_retained_token_budget: int | None = None
+        # Forced compaction is also used by tests and by callers that want a
+        # checkpoint even when the payload is small.  Apply the stricter budget
+        # only when a real provider boundary (or an overflow retry) caused the
+        # gate; this preserves the explicit force semantics for small payloads.
+        if trigger == "context_overflow" or (
+            not force and (estimated >= soft_limit or estimated >= hard_limit)
+        ):
+            (
+                retained_token_budget,
+                fallback_retained_token_budget,
+            ) = self._retained_token_budgets(
+                prefix=prefix,
+                current_anchor=current_anchor,
+                pending=pending,
+                tools=tools,
+                target_tokens=min(soft_limit, hard_limit),
+            )
+        selected_all, retained_all = self._select_units(
+            candidates,
+            retained_token_budget=retained_token_budget,
+            fallback_retained_token_budget=fallback_retained_token_budget,
+        )
         selected_committed = [
             unit for unit in selected_all if _is_persistable_unit(unit)
         ]
@@ -447,11 +490,8 @@ class ContextCompactor:
         retained_active = [
             unit for unit in retained_all if not _is_persistable_unit(unit)
         ]
-        prefix, current_anchor, previous_temp, pending = self._split_segments()
         current_prefix = [_copy_message(message) for message in prefix]
-        temporary_summary = [
-            _copy_message(message) for message in previous_temp
-        ]
+        temporary_summary = [_copy_message(message) for message in previous_temp]
         committed_checkpoint: ContextCompaction | None = None
         committed_summary_usage: ModelUsage | None = None
         active_summary_usage: ModelUsage | None = None
@@ -622,16 +662,28 @@ class ContextCompactor:
         checkpoint = committed_checkpoint or temporary_checkpoint
         if checkpoint is None:
             raise ContextCompactionError("context_compaction_no_closed_prefix")
-        retained_active_batches = [tuple(unit.messages) for unit in retained_active]
+        # ``rebuilt`` is a provider-facing projection and deliberately removes
+        # opaque continuation state (for example Responses ``model_state``) from
+        # retained committed/active messages.  Keep the assembler's segments in
+        # that same canonical form; otherwise the next ``set_pending`` compares
+        # the projected live payload with stale, unprojected copies and raises a
+        # false prefix-mismatch error.
+        projected_retained_committed = [
+            _project_unit(unit) for unit in retained_committed
+        ]
+        projected_retained_active = [_project_unit(unit) for unit in retained_active]
+        retained_active_batches = [
+            tuple(unit.messages) for unit in projected_retained_active
+        ]
         self._segments = ContextPayloadSegments(
             prefix=tuple(current_prefix),
-            committed_units=tuple(retained_committed),
+            committed_units=tuple(projected_retained_committed),
             current_anchor=tuple(current_anchor),
             temporary_summary=tuple(temporary_summary),
             active_batches=tuple(retained_active_batches),
             pending=tuple(pending),
         )
-        self._committed_units = list(retained_committed)
+        self._committed_units = list(projected_retained_committed)
         self._completed_batches = retained_active_batches
         self._compaction = checkpoint
         messages[:] = rebuilt
@@ -691,16 +743,173 @@ class ContextCompactor:
             )
         return units
 
+    def _retained_token_budgets(
+        self,
+        *,
+        prefix: Sequence[dict[str, Any]],
+        current_anchor: Sequence[dict[str, Any]],
+        pending: Sequence[dict[str, Any]],
+        tools: list[dict],
+        target_tokens: int,
+    ) -> tuple[int, int]:
+        """Return conservative and absolute budgets for the retained suffix.
+
+        The suffix is only one part of the request.  System/prefix messages,
+        the current request, pending tool protocol messages and tool schemas
+        are fixed for this gate.  Reserve the maximum configured summary size
+        as well, because the summary is produced before the final payload is
+        known.  A negative result intentionally becomes zero: closed units can
+        still be summarized, while an oversized fixed/in-flight section will
+        produce an explicit ``context_compaction_insufficient`` error.  The
+        second budget is a last-resort allowance for one newest atomic unit: it
+        uses a one-token summary floor and avoids discarding a useful small
+        closed batch solely because the conservative reserve is larger than a
+        small provider context window.
+        """
+
+        if not isinstance(target_tokens, int) or isinstance(target_tokens, bool):
+            raise ValueError("context compaction target_tokens 必须是整数")
+        base_prefix = _without_previous_compaction(prefix)
+        fixed = _flatten_projection(
+            prefix=base_prefix,
+            committed=(),
+            current_anchor=current_anchor,
+            temporary_summary=(),
+            active=(),
+            pending=pending,
+        )
+        fixed_tokens = self._provider.estimate_context_tokens(fixed, tools)
+        reserve = SUMMARY_MAX_TOKENS + COMPACTION_BUDGET_MARGIN_TOKENS
+        budget = max(0, target_tokens - fixed_tokens - reserve)
+        absolute_budget = max(0, target_tokens - fixed_tokens - 1)
+        logger.info(
+            "context_compaction budget scope=%s target=%d fixed=%d "
+            "summary_reserve=%d retained_budget=%d absolute_budget=%d",
+            self._scope_id,
+            target_tokens,
+            fixed_tokens,
+            reserve,
+            budget,
+            absolute_budget,
+        )
+        return budget, absolute_budget
+
     def _select_units(
         self,
         candidates: list[CommittedContextUnit],
+        *,
+        retained_token_budget: int | None = None,
+        fallback_retained_token_budget: int | None = None,
     ) -> tuple[list[CommittedContextUnit], list[CommittedContextUnit]]:
         if len(candidates) < 2:
             raise ContextCompactionError("context_compaction_no_closed_prefix")
+        if retained_token_budget is not None and (
+            not isinstance(retained_token_budget, int)
+            or isinstance(retained_token_budget, bool)
+            or retained_token_budget < 0
+        ):
+            raise ValueError("retained_token_budget 必须是非负整数")
+        if fallback_retained_token_budget is not None and (
+            not isinstance(fallback_retained_token_budget, int)
+            or isinstance(fallback_retained_token_budget, bool)
+            or fallback_retained_token_budget < 0
+        ):
+            raise ValueError("fallback_retained_token_budget 必须是非负整数")
+        if (
+            retained_token_budget is not None
+            and fallback_retained_token_budget is not None
+            and fallback_retained_token_budget < retained_token_budget
+        ):
+            raise ValueError(
+                "fallback_retained_token_budget 不能小于 retained_token_budget"
+            )
+        selection_budget = retained_token_budget
+        unit_tokens = [
+            self._provider.estimate_appended_message_tokens(list(unit.messages))
+            for unit in candidates
+        ]
+        active_index = _active_execution_unit_index(candidates)
+        if selection_budget is not None:
+            # Start with the established raw-tail policy (the shortest suffix
+            # that reaches ``keep_recent_tokens``).  The budget is a safety
+            # ceiling, not a reason to retain every unit that happens to fit:
+            # keeping the longest fitting suffix would silently change the
+            # ledger/source-plan contract and can make ordinary tails much
+            # larger than the configured recent window.
+            kept_tokens = 0
+            cut = len(candidates)
+            for index in range(len(candidates) - 1, -1, -1):
+                kept_tokens += unit_tokens[index]
+                cut = index
+                if kept_tokens >= self._keep_recent_tokens:
+                    break
+            if kept_tokens < self._keep_recent_tokens:
+                raise ContextCompactionError(
+                    "context_compaction_no_valid_cut_before_keep_recent_target"
+                )
+            cut = min(cut, len(candidates) - 1)
+            if active_index is not None and cut > active_index:
+                cut = active_index
+            retained_tokens = sum(unit_tokens[cut:])
+            if retained_tokens <= selection_budget:
+                selected = candidates[:cut]
+                retained = candidates[cut:]
+                if not selected:
+                    raise ContextCompactionError("context_compaction_no_closed_prefix")
+                return selected, retained
+
+            # The normal tail would still overflow the post-summary budget.
+            # Reduce it only at complete-unit boundaries, preferring the
+            # newest units.  A live execution is a hard lower bound: it may
+            # use the absolute fallback budget, but it can never be dropped.
+            if active_index is None:
+                start = len(candidates)
+                retained_tokens = 0
+            else:
+                start = active_index
+                retained_tokens = sum(unit_tokens[active_index:])
+                if retained_tokens > selection_budget:
+                    if (
+                        fallback_retained_token_budget is None
+                        or retained_tokens > fallback_retained_token_budget
+                    ):
+                        raise ContextCompactionError(
+                            "context_compaction_active_tail_exceeds_budget "
+                            f"estimated={retained_tokens} budget={selection_budget}"
+                        )
+                    selection_budget = fallback_retained_token_budget
+            if (
+                start == len(candidates)
+                and fallback_retained_token_budget is not None
+                and unit_tokens[-1] <= fallback_retained_token_budget
+            ):
+                # The summary reserve is intentionally conservative.  If the
+                # newest complete unit still fits the absolute boundary, keep
+                # that unit as a useful fallback instead of promoting the
+                # entire history into one summary request.
+                start = len(candidates) - 1
+                retained_tokens = unit_tokens[-1]
+            while start > 0 and (
+                retained_tokens + unit_tokens[start - 1] <= selection_budget
+            ):
+                start -= 1
+                retained_tokens += unit_tokens[start]
+            if start == 0 and active_index is not None:
+                raise ContextCompactionError("context_compaction_no_closed_prefix")
+            selected = candidates[:start]
+            retained = candidates[start:]
+            if not selected:
+                # No complete recent unit fits.  Summarize the entire closed
+                # prefix rather than sending a known-over-budget payload.
+                selected = candidates
+                retained = []
+            return selected, retained
         kept: list[CommittedContextUnit] = []
         kept_tokens = 0
         for unit in reversed(candidates):
-            tokens = self._provider.estimate_appended_message_tokens(list(unit.messages))
+            tokens = self._provider.estimate_appended_message_tokens(
+                list(unit.messages)
+            )
             kept.insert(0, unit)
             kept_tokens += tokens
             if kept_tokens >= self._keep_recent_tokens:
@@ -751,9 +960,7 @@ class ContextCompactor:
                 else self._temporary_summary
             )
         if previous_summary:
-            sections.extend(
-                ["\n[Previous compaction summary]\n", previous_summary]
-            )
+            sections.extend(["\n[Previous compaction summary]\n", previous_summary])
         sections.append("\n[Closed history to consolidate]\n")
         sections.extend(
             _serialize_message(message)
@@ -774,12 +981,15 @@ class ContextCompactor:
                     "tools": [],
                     "model": _provider_model(provider, model),
                     "max_tokens": _summary_output_limit(provider, summary_input),
-                    "disable_thinking": True,
+                    "disable_thinking": not bool(self._reasoning_effort),
                 }
-                if self._chat_call is not None:
-                    response = await self._chat_call(provider=provider, **request)
-                else:
-                    response = await provider.chat(**request)
+                if self._reasoning_effort:
+                    request["reasoning_effort"] = self._reasoning_effort
+                with model_call_purpose("context_compaction"):
+                    if self._chat_call is not None:
+                        response = await self._chat_call(provider=provider, **request)
+                    else:
+                        response = await provider.chat(**request)
             except Exception as exc:
                 failures.append(f"{type(exc).__name__}: {exc}")
                 continue
@@ -916,7 +1126,9 @@ def _copy_segments(segments: ContextPayloadSegments) -> ContextPayloadSegments:
             )
             for unit in segments.committed_units
         ),
-        current_anchor=tuple(_copy_message(message) for message in segments.current_anchor),
+        current_anchor=tuple(
+            _copy_message(message) for message in segments.current_anchor
+        ),
         temporary_summary=tuple(
             _copy_message(message) for message in segments.temporary_summary
         ),
@@ -929,10 +1141,12 @@ def _copy_segments(segments: ContextPayloadSegments) -> ContextPayloadSegments:
 
 
 def _pending_start(segments: ContextPayloadSegments) -> int:
-    return len(segments.prefix) + sum(
-        len(unit.messages) for unit in segments.committed_units
-    ) + len(segments.current_anchor) + len(segments.temporary_summary) + sum(
-        len(batch) for batch in segments.active_batches
+    return (
+        len(segments.prefix)
+        + sum(len(unit.messages) for unit in segments.committed_units)
+        + len(segments.current_anchor)
+        + len(segments.temporary_summary)
+        + sum(len(batch) for batch in segments.active_batches)
     )
 
 
@@ -956,11 +1170,7 @@ def _flatten_projection(
         ],
         *[_copy_message(message) for message in current_anchor],
         *[_copy_message(message) for message in temporary_summary],
-        *[
-            _strip_opaque_state(message)
-            for unit in active
-            for message in unit.messages
-        ],
+        *[_strip_opaque_state(message) for unit in active for message in unit.messages],
         *[_copy_message(message) for message in pending],
     ]
 
@@ -1055,7 +1265,9 @@ def _active_execution_unit_index(units: Sequence[CommittedContextUnit]) -> int |
                 if isinstance(call, dict) and isinstance(call.get("id"), str):
                     call_units[str(call["id"])] = index
     origins = active_shell_execution_origins(messages)
-    active = [call_units[call_id] for call_id in origins.values() if call_id in call_units]
+    active = [
+        call_units[call_id] for call_id in origins.values() if call_id in call_units
+    ]
     return min(active) if active else None
 
 
@@ -1099,7 +1311,9 @@ def _is_closed_tool_batch(messages: Sequence[dict[str, Any]]) -> bool:
                     for call in raw_calls
                     if isinstance(call, dict) and isinstance(call.get("id"), str)
                 )
-        elif message.get("role") == "tool" and isinstance(message.get("tool_call_id"), str):
+        elif message.get("role") == "tool" and isinstance(
+            message.get("tool_call_id"), str
+        ):
             results.add(str(message["tool_call_id"]))
     return bool(calls) and calls == results
 
@@ -1169,6 +1383,15 @@ def _strip_opaque_state(message: Mapping[str, Any]) -> dict[str, Any]:
     return clean
 
 
+def _project_unit(unit: CommittedContextUnit) -> CommittedContextUnit:
+    """Use the same opaque-state-free representation as the live projection."""
+
+    return replace(
+        unit,
+        messages=tuple(_strip_opaque_state(message) for message in unit.messages),
+    )
+
+
 def canonical_source_plan(
     selected_source_messages: Sequence[Mapping[str, Any]],
 ) -> tuple[dict[str, Any], ...]:
@@ -1179,7 +1402,9 @@ def canonical_source_plan(
         if not isinstance(item, Mapping):
             raise ContextCompactionError("context_compaction_source_plan_item_invalid")
         if set(item) != {"id", "seq", "unit_ref", "message"}:
-            raise ContextCompactionError("context_compaction_source_plan_fields_invalid")
+            raise ContextCompactionError(
+                "context_compaction_source_plan_fields_invalid"
+            )
         message_id = item.get("id")
         raw_seq = item.get("seq")
         unit_ref = item.get("unit_ref")
@@ -1221,7 +1446,9 @@ def source_plan_digest(
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _without_previous_compaction(messages: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+def _without_previous_compaction(
+    messages: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
     return [
         message
         for message in messages
@@ -1266,9 +1493,7 @@ def _text_value(value: object) -> str:
 
 def _valid_summary(summary: str) -> bool:
     headings = [
-        line.strip()
-        for line in summary.splitlines()
-        if line.lstrip().startswith("#")
+        line.strip() for line in summary.splitlines() if line.lstrip().startswith("#")
     ]
     return headings == list(SUMMARY_HEADINGS)
 
@@ -1336,15 +1561,14 @@ def _selection_digest(
         "selected": [_unit_identity(unit) for unit in selected],
         "retained": [_unit_identity(unit) for unit in retained],
     }
-    encoded = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    encoded = json.dumps(
+        identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _unit_identity(unit: CommittedContextUnit) -> dict[str, object]:
-    content = [
-        _strip_opaque_state(message)
-        for message in unit.messages
-    ]
+    content = [_strip_opaque_state(message) for message in unit.messages]
     encoded = json.dumps(
         content,
         ensure_ascii=False,
@@ -1370,7 +1594,9 @@ def _checkpoint_from_receipt(
     if receipt.get("version") not in (2, 3):
         raise ContextCompactionError("context_compaction_receipt_version_unsupported")
     if not isinstance(receipt.get("session_created_at"), str):
-        raise ContextCompactionError("context_compaction_receipt_session_incarnation_invalid")
+        raise ContextCompactionError(
+            "context_compaction_receipt_session_incarnation_invalid"
+        )
     raw_digest = receipt.get("selection_digest")
     if raw_digest != selection_digest:
         raise ContextCompactionError("context_compaction_receipt_selection_conflict")
@@ -1386,19 +1612,24 @@ def _checkpoint_from_receipt(
     source_ids = checkpoint.get("source_message_ids")
     retained_tail = checkpoint.get("retained_tail")
     selected_source_messages = checkpoint.get("selected_source_messages")
-    if not isinstance(source_ids, list) or not all(isinstance(item, str) for item in source_ids):
+    if not isinstance(source_ids, list) or not all(
+        isinstance(item, str) for item in source_ids
+    ):
         raise ContextCompactionError("context_compaction_receipt_source_ids_invalid")
-    if not isinstance(retained_tail, list) or not all(isinstance(item, dict) for item in retained_tail):
+    if not isinstance(retained_tail, list) or not all(
+        isinstance(item, dict) for item in retained_tail
+    ):
         raise ContextCompactionError("context_compaction_receipt_retained_tail_invalid")
     if not isinstance(selected_source_messages, list):
         raise ContextCompactionError("context_compaction_receipt_source_plan_invalid")
     canonical_source_messages = canonical_source_plan(selected_source_messages)
     raw_source_plan_digest = receipt.get("source_plan_digest")
-    if (
-        not isinstance(raw_source_plan_digest, str)
-        or raw_source_plan_digest != source_plan_digest(canonical_source_messages)
-    ):
-        raise ContextCompactionError("context_compaction_receipt_source_plan_digest_invalid")
+    if not isinstance(
+        raw_source_plan_digest, str
+    ) or raw_source_plan_digest != source_plan_digest(canonical_source_messages):
+        raise ContextCompactionError(
+            "context_compaction_receipt_source_plan_digest_invalid"
+        )
     usage = _usage_from_payload(checkpoint.get("summary_usage"))
     value = ContextCompaction(
         summary=summary,
@@ -1455,7 +1686,9 @@ def _usage_from_payload(raw: object) -> ModelUsage | None:
     try:
         parsed_coverage = UsageCoverage(str(coverage))
     except ValueError as exc:
-        raise ContextCompactionError("context_compaction_receipt_usage_coverage_invalid") from exc
+        raise ContextCompactionError(
+            "context_compaction_receipt_usage_coverage_invalid"
+        ) from exc
     return ModelUsage(
         input_tokens=_optional_int(raw.get("input_tokens")),
         cached_input_tokens=_optional_int(raw.get("cached_input_tokens")),
