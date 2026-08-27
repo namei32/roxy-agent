@@ -72,7 +72,9 @@ class CodexResponsesTransport:
     async def _send_once(
         self, request: ModelRequest, *, force_refresh: bool
     ) -> LLMResponse:
-        headers = await asyncio.to_thread(self.auth.headers, force_refresh=force_refresh)
+        headers = await asyncio.to_thread(
+            self.auth.headers, force_refresh=force_refresh
+        )
         default_headers = {
             "ChatGPT-Account-ID": headers.get("ChatGPT-Account-ID", ""),
             "originator": "codex_cli_rs",
@@ -149,6 +151,9 @@ class CodexResponsesTransport:
             "stream": True,
             "include": ["reasoning.encrypted_content"],
         }
+        # The ChatGPT Codex backend rejects the public Responses API
+        # ``max_output_tokens`` field. Keep the request-side value for local
+        # context budgeting, but do not serialize it onto this transport.
         reasoning: dict[str, str] = {}
         if request.reasoning_effort:
             reasoning["effort"] = _normalize_effort(request.reasoning_effort)
@@ -194,11 +199,15 @@ class CodexResponsesTransport:
                         content.append(suffix)
                         if request.on_delta:
                             await request.on_delta({"content_delta": suffix})
-            elif event_type == "response.reasoning_summary_text.delta" and isinstance(delta, str):
+            elif event_type == "response.reasoning_summary_text.delta" and isinstance(
+                delta, str
+            ):
                 thinking.append(delta)
                 if request.on_delta:
                     await request.on_delta({"thinking_delta": delta})
-            elif event_type == "response.reasoning_text.delta" and isinstance(delta, str):
+            elif event_type == "response.reasoning_text.delta" and isinstance(
+                delta, str
+            ):
                 thinking.append(delta)
                 if request.on_delta:
                     await request.on_delta({"thinking_delta": delta})
@@ -212,7 +221,9 @@ class CodexResponsesTransport:
                         if request.on_delta:
                             await request.on_delta({"thinking_delta": suffix})
             elif event_type == "response.function_call_arguments.delta":
-                item_id = str(_field(event, "item_id") or _field(event, "output_index") or "")
+                item_id = str(
+                    _field(event, "item_id") or _field(event, "output_index") or ""
+                )
                 slot = tool_args.setdefault(item_id, {"arguments": ""})
                 slot["arguments"] += str(delta or "")
             elif event_type == "response.output_item.done":
@@ -234,7 +245,9 @@ class CodexResponsesTransport:
                 break
             elif event_type in {"response.failed", "response.incomplete"}:
                 response = _field(event, "response")
-                error = _field(response, "error") or _field(response, "incomplete_details")
+                error = _field(response, "error") or _field(
+                    response, "incomplete_details"
+                )
                 _raise_stream_error(error)
         if not completed:
             raise RetryableTransportError("Codex Responses 在 completed 事件前断流")
@@ -360,7 +373,9 @@ def _responses_tools(tools: list[dict]) -> list[dict]:
                 "type": "function",
                 "name": function["name"],
                 "description": function.get("description", ""),
-                "parameters": function.get("parameters", {"type": "object", "properties": {}}),
+                "parameters": function.get(
+                    "parameters", {"type": "object", "properties": {}}
+                ),
                 "strict": bool(function.get("strict", False)),
             }
         )
@@ -376,7 +391,9 @@ def _normalize_tool_choice(
             raise TransportError(f"Responses 不支持的 tool_choice: {tool_choice}")
         return tool_choice, tools
     function = tool_choice.get("function")
-    name = function.get("name") if isinstance(function, dict) else tool_choice.get("name")
+    name = (
+        function.get("name") if isinstance(function, dict) else tool_choice.get("name")
+    )
     if tool_choice.get("type") != "function" or not isinstance(name, str) or not name:
         raise TransportError("Responses 命名 tool_choice 结构无效")
     selected = [tool for tool in tools if tool.get("name") == name]
@@ -419,7 +436,9 @@ def _strip_image_details(items: list[dict]) -> list[dict]:
 def _sanitize_replay_item(item: dict[str, Any]) -> dict[str, Any]:
     """只保留 reasoning 重放契约允许的字段。"""
     if item.get("type") != "reasoning":
-        raise TransportError(f"Responses continuation 包含不支持的 item: {item.get('type')}")
+        raise TransportError(
+            f"Responses continuation 包含不支持的 item: {item.get('type')}"
+        )
     allowed = {"type", "summary", "content", "encrypted_content"}
     return {key: value for key, value in item.items() if key in allowed}
 
@@ -481,14 +500,20 @@ def _parse_usage(raw: Any) -> ModelUsage | None:
         ),
         cached_input_tokens=_optional_int(_field(input_details, "cached_tokens")),
         output_tokens=int(output_tokens) if output_tokens is not None else None,
-        reasoning_output_tokens=_optional_int(_field(output_details, "reasoning_tokens")),
-        covered_request_count=1 if input_tokens is not None and output_tokens is not None else 0,
+        reasoning_output_tokens=_optional_int(
+            _field(output_details, "reasoning_tokens")
+        ),
+        covered_request_count=(
+            1 if input_tokens is not None and output_tokens is not None else 0
+        ),
         coverage=(
             UsageCoverage.EXACT
             if input_tokens is not None and output_tokens is not None
-            else UsageCoverage.PARTIAL
-            if input_tokens is not None or output_tokens is not None
-            else UsageCoverage.UNAVAILABLE
+            else (
+                UsageCoverage.PARTIAL
+                if input_tokens is not None or output_tokens is not None
+                else UsageCoverage.UNAVAILABLE
+            )
         ),
     )
     normalized = normalize_provider_usage(
@@ -533,7 +558,10 @@ def _parse_usage(raw: Any) -> ModelUsage | None:
         coverage=(
             UsageCoverage.EXACT
             if (
-                (normalized.input_tokens is not None or fallback.input_tokens is not None)
+                (
+                    normalized.input_tokens is not None
+                    or fallback.input_tokens is not None
+                )
                 and (
                     normalized.output_tokens is not None
                     or fallback.output_tokens is not None

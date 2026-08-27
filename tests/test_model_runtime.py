@@ -34,7 +34,11 @@ from agent.model_runtime.transports.responses import (
 from agent.model_runtime.types import ModelRequest, ModelUsage, UsageCoverage
 from agent.model_runtime.usage import aggregate_usage
 from agent.provider import LLMProvider, _assemble_chat_messages
-from bootstrap.setup_wizard import WizardAnswers, _persist_answer_credentials, _render_config
+from bootstrap.setup_wizard import (
+    WizardAnswers,
+    _persist_answer_credentials,
+    _render_config,
+)
 from session.store import _decode_message_extra
 
 
@@ -59,19 +63,25 @@ def _request(**kwargs: object) -> ModelRequest:
 
 
 def test_runtime_config_max_output_tokens_defaults() -> None:
-    assert ModelRuntimeConfig(
-        runtime_id="uncapped",
-        provider="openai",
-        model="model",
-        context_window=10_000,
-        max_output_tokens=0,
-    ).max_output_tokens == 0
-    assert ModelRuntimeConfig(
-        runtime_id="default",
-        provider="openai",
-        model="model",
-        context_window=10_000,
-    ).max_output_tokens == 0
+    assert (
+        ModelRuntimeConfig(
+            runtime_id="uncapped",
+            provider="openai",
+            model="model",
+            context_window=10_000,
+            max_output_tokens=0,
+        ).max_output_tokens
+        == 0
+    )
+    assert (
+        ModelRuntimeConfig(
+            runtime_id="default",
+            provider="openai",
+            model="model",
+            context_window=10_000,
+        ).max_output_tokens
+        == 0
+    )
     with pytest.raises(ValueError, match="不能小于 0"):
         ModelRuntimeConfig(
             runtime_id="negative",
@@ -141,7 +151,9 @@ def test_provider_estimator_matches_chat_system_message_assembly() -> None:
     assert provider.estimate_context_tokens([user_message], []) < without_system
 
 
-def test_opencode_go_profile_allows_verified_qwen_multimodal_and_rejects_wrong_wire() -> None:
+def test_opencode_go_profile_allows_verified_qwen_multimodal_and_rejects_wrong_wire() -> (
+    None
+):
     runtime = ModelRuntimeConfig(
         runtime_id="main",
         provider="opencode-go",
@@ -325,7 +337,9 @@ async def test_opencode_go_catalog_uses_local_registry_when_cli_is_unavailable(
 def test_credential_store_is_atomic_private_and_fail_loud(tmp_path: Path) -> None:
     path = tmp_path / "auth" / "auth.json"
     store = CredentialStore(path)
-    credential = Credential(driver="codex", access_token="secret", refresh_token="rotation")
+    credential = Credential(
+        driver="codex", access_token="secret", refresh_token="rotation"
+    )
 
     store.put("codex_default", credential)
     assert store.get("codex_default") == credential
@@ -344,33 +358,40 @@ def test_persisted_api_key_environment_reference_is_resolved(
     store.put("provider", Credential(driver="api_key", access_token="${MODEL_TOKEN}"))
     monkeypatch.setenv("MODEL_TOKEN", "resolved-secret")
 
-    assert _load_api_key(
-        auth_id="provider",
-        inline_value="",
-        workspace=tmp_path,
-        credential_store=store,
-    ) == "resolved-secret"
+    assert (
+        _load_api_key(
+            auth_id="provider",
+            inline_value="",
+            workspace=tmp_path,
+            credential_store=store,
+        )
+        == "resolved-secret"
+    )
 
 
 def test_codex_token_and_catalog_metadata_are_resolved_once() -> None:
     claims = {"https://api.openai.com/auth": {"chatgpt_account_id": "account"}}
     payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
-    credential = CodexAuthDriver._credential_from_token({
-        "id_token": f"header.{payload}.signature",
-        "access_token": "access",
-        "refresh_token": "refresh",
-    })
-    model = CodexModelCatalog._parse_model({
-        "slug": "gpt-test",
-        "context_window": 272_000,
-        "max_context_window": 1_000_000,
-        "effective_context_window_percent": 90,
-        "default_reasoning_level": "high",
-        "supported_reasoning_levels": [{"effort": "medium"}, {"effort": "high"}],
-        "input_modalities": ["text", "image"],
-        "supports_parallel_tool_calls": True,
-        "supports_reasoning_summary_parameter": True,
-    })
+    credential = CodexAuthDriver._credential_from_token(
+        {
+            "id_token": f"header.{payload}.signature",
+            "access_token": "access",
+            "refresh_token": "refresh",
+        }
+    )
+    model = CodexModelCatalog._parse_model(
+        {
+            "slug": "gpt-test",
+            "context_window": 272_000,
+            "max_context_window": 1_000_000,
+            "effective_context_window_percent": 90,
+            "default_reasoning_level": "high",
+            "supported_reasoning_levels": [{"effort": "medium"}, {"effort": "high"}],
+            "input_modalities": ["text", "image"],
+            "supports_parallel_tool_calls": True,
+            "supports_reasoning_summary_parameter": True,
+        }
+    )
 
     assert credential.account_id == "account"
     assert model.capabilities.context_window == 272_000
@@ -399,12 +420,15 @@ def test_codex_refresh_uses_json_and_preserves_rotation_token(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = CredentialStore(tmp_path / "auth.json")
-    store.put("codex_default", Credential(
-        driver="codex",
-        access_token="old",
-        refresh_token="rotation",
-        account_id="account",
-    ))
+    store.put(
+        "codex_default",
+        Credential(
+            driver="codex",
+            access_token="old",
+            refresh_token="rotation",
+            account_id="account",
+        ),
+    )
     captured: dict[str, object] = {}
 
     class Response:
@@ -431,19 +455,23 @@ def test_codex_refresh_uses_json_and_preserves_rotation_token(
 
 def test_responses_payload_variants_keep_one_internal_contract() -> None:
     standard = _transport(reasoning_summary="auto")
-    payload = standard._build_payload(_request(
-        tools=[
-            {"type": "function", "function": {"name": "first"}},
-            {"type": "function", "function": {"name": "finish"}},
-        ],
-        tool_choice={"type": "function", "function": {"name": "finish"}},
-        reasoning_effort="xhigh",
-    ))
+    payload = standard._build_payload(
+        _request(
+            tools=[
+                {"type": "function", "function": {"name": "first"}},
+                {"type": "function", "function": {"name": "finish"}},
+            ],
+            tool_choice={"type": "function", "function": {"name": "finish"}},
+            reasoning_effort="xhigh",
+        )
+    )
     lite = _transport(use_responses_lite=True, reasoning_summary="auto")
-    lite_payload = lite._build_payload(_request(
-        tools=[{"type": "function", "function": {"name": "lookup"}}],
-        system_prompt="system",
-    ))
+    lite_payload = lite._build_payload(
+        _request(
+            tools=[{"type": "function", "function": {"name": "lookup"}}],
+            system_prompt="system",
+        )
+    )
 
     assert "max_output_tokens" not in payload
     assert payload["tool_choice"] == "required"
@@ -454,6 +482,12 @@ def test_responses_payload_variants_keep_one_internal_contract() -> None:
     assert "tools" not in lite_payload
     assert lite_payload["input"][0]["type"] == "additional_tools"
     assert lite_payload["reasoning"] == {"summary": "auto", "context": "all_turns"}
+
+
+def test_responses_payload_omits_codex_unsupported_output_budget() -> None:
+    payload = _transport()._build_payload(_request(max_output_tokens=8192))
+
+    assert "max_output_tokens" not in payload
 
 
 def _state(runtime: str, model: str, item_id: str) -> dict[str, object]:
@@ -467,19 +501,35 @@ def _state(runtime: str, model: str, item_id: str) -> dict[str, object]:
 
 
 def test_responses_input_preserves_matching_state_tools_and_multimodal() -> None:
-    converted, instructions = _responses_input([
-        {"role": "system", "content": "rules"},
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "看图"},
-                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA"}},
-            ],
-        },
-        {"role": "assistant", "content": "one", "model_state": _state("main", "gpt-test", "keep")},
-        {"role": "assistant", "content": "two", "model_state": _state("other", "gpt-test", "drop")},
-        {"role": "tool", "tool_call_id": "c1", "content": "done"},
-    ], "identity", runtime_id="main", model="gpt-test")
+    converted, instructions = _responses_input(
+        [
+            {"role": "system", "content": "rules"},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "看图"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,AA"},
+                    },
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": "one",
+                "model_state": _state("main", "gpt-test", "keep"),
+            },
+            {
+                "role": "assistant",
+                "content": "two",
+                "model_state": _state("other", "gpt-test", "drop"),
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "done"},
+        ],
+        "identity",
+        runtime_id="main",
+        model="gpt-test",
+    )
 
     assert instructions == "identity\n\nrules"
     assert converted[0]["content"][1]["type"] == "input_image"
@@ -501,19 +551,34 @@ async def test_responses_stream_builds_text_tools_usage_and_state() -> None:
         yield {"type": "response.reasoning_summary_text.delta", "delta": "分析"}
         yield {"type": "response.output_text.delta", "delta": "结"}
         yield {"type": "response.output_text.done", "text": "结果"}
-        yield {"type": "response.output_item.done", "item": {
-            "type": "reasoning", "status": "completed", "summary": [],
-            "encrypted_content": "opaque",
-        }}
-        yield {"type": "response.output_item.done", "item": {
-            "type": "function_call", "call_id": "c1", "name": "lookup",
-            "arguments": '{"q":"x"}',
-        }}
-        yield {"type": "response.completed", "response": {"usage": {
-            "input_tokens": 50,
-            "input_tokens_details": {"cached_tokens": 20},
-            "output_tokens": 10,
-        }}}
+        yield {
+            "type": "response.output_item.done",
+            "item": {
+                "type": "reasoning",
+                "status": "completed",
+                "summary": [],
+                "encrypted_content": "opaque",
+            },
+        }
+        yield {
+            "type": "response.output_item.done",
+            "item": {
+                "type": "function_call",
+                "call_id": "c1",
+                "name": "lookup",
+                "arguments": '{"q":"x"}',
+            },
+        }
+        yield {
+            "type": "response.completed",
+            "response": {
+                "usage": {
+                    "input_tokens": 50,
+                    "input_tokens_details": {"cached_tokens": 20},
+                    "output_tokens": 10,
+                }
+            },
+        }
 
     async def on_delta(delta: dict[str, str]) -> None:
         deltas.append(delta)
@@ -548,9 +613,10 @@ async def test_responses_stream_classifies_terminal_errors(
     code: str, error: type[Exception]
 ) -> None:
     async def events():
-        yield {"type": "response.failed", "response": {
-            "error": {"code": code, "message": "failed"}
-        }}
+        yield {
+            "type": "response.failed",
+            "response": {"error": {"code": code, "message": "failed"}},
+        }
 
     with pytest.raises(error):
         await _transport()._consume_stream(events(), _request())
@@ -566,13 +632,17 @@ async def test_responses_stream_fails_on_incomplete_eof() -> None:
 
 
 def test_session_boundary_owns_model_state_validation() -> None:
-    payload = json.dumps({"model_state": {
-        "schema_version": 2,
-        "runtime_id": "main",
-        "transport": "responses",
-        "model": "gpt-test",
-        "items": [],
-    }})
+    payload = json.dumps(
+        {
+            "model_state": {
+                "schema_version": 2,
+                "runtime_id": "main",
+                "transport": "responses",
+                "model": "gpt-test",
+                "items": [],
+            }
+        }
+    )
     with pytest.raises(ValueError, match="schema_version"):
         _decode_message_extra(payload, "session:1")
 
@@ -840,29 +910,38 @@ max_output_tokens = 4096
 reasoning_summary = "{summary}"
 """
     path = tmp_path / "config.toml"
-    path.write_text(template.format(provider="CustomAPI", summary="none"), encoding="utf-8")
-    assert load_config(path, workspace=tmp_path).model_runtimes["main"].provider == "customapi"
+    path.write_text(
+        template.format(provider="CustomAPI", summary="none"), encoding="utf-8"
+    )
+    assert (
+        load_config(path, workspace=tmp_path).model_runtimes["main"].provider
+        == "customapi"
+    )
 
 
 def test_usage_keeps_partial_coverage_unknown() -> None:
-    usage = aggregate_usage([
-        ModelUsage(
-            input_tokens=100,
-            output_tokens=20,
-            covered_request_count=1,
-            coverage=UsageCoverage.EXACT,
-        ),
-        ModelUsage(),
-    ])
-    parsed = _parse_usage({
-        "input_tokens": 100,
-        "input_tokens_details": {
-            "cache_write_tokens": 0,
-            "cached_tokens": 70,
-        },
-        "output_tokens": 20,
-        "output_tokens_details": {"reasoning_tokens": 8},
-    })
+    usage = aggregate_usage(
+        [
+            ModelUsage(
+                input_tokens=100,
+                output_tokens=20,
+                covered_request_count=1,
+                coverage=UsageCoverage.EXACT,
+            ),
+            ModelUsage(),
+        ]
+    )
+    parsed = _parse_usage(
+        {
+            "input_tokens": 100,
+            "input_tokens_details": {
+                "cache_write_tokens": 0,
+                "cached_tokens": 70,
+            },
+            "output_tokens": 20,
+            "output_tokens_details": {"reasoning_tokens": 8},
+        }
+    )
 
     assert usage.coverage is UsageCoverage.PARTIAL
     assert (usage.input_tokens, usage.output_tokens) == (100, 20)

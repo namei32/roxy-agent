@@ -14,11 +14,18 @@ from agent.model_runtime.errors import (
     TransportError,
 )
 from agent.model_runtime.fallback import ResilientLightProvider
-from agent.provider import ContentSafetyError, ContextLengthError, LLMProvider, LLMResponse
+from agent.provider import (
+    ContentSafetyError,
+    ContextLengthError,
+    LLMProvider,
+    LLMResponse,
+)
 
 
 class _Provider:
-    def __init__(self, outcome: LLMResponse | BaseException, *, emit: bool = False) -> None:
+    def __init__(
+        self, outcome: LLMResponse | BaseException, *, emit: bool = False
+    ) -> None:
         self.outcome = outcome
         self.emit = emit
         self.calls: list[dict] = []
@@ -64,6 +71,7 @@ async def _chat(provider: ResilientLightProvider, **kwargs) -> LLMResponse:
         max_tokens=321,
         tool_choice="required",
         disable_thinking=True,
+        reasoning_effort=kwargs.get("reasoning_effort"),
         on_content_delta=kwargs.get("on_content_delta"),
         cache_namespace="session",
     )
@@ -82,6 +90,17 @@ async def test_light_success_does_not_call_main() -> None:
 
 
 @pytest.mark.asyncio
+async def test_light_effort_is_preserved_for_primary_and_fallback() -> None:
+    fallback = _Provider(LLMResponse(content="main"))
+    primary = _Provider(TimeoutError("timeout"))
+
+    await _chat(_resilient(primary, fallback), reasoning_effort="medium")
+
+    assert primary.calls[0]["reasoning_effort"] == "medium"
+    assert fallback.calls[0]["reasoning_effort"] == "medium"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "error",
     [
@@ -93,7 +112,9 @@ async def test_light_success_does_not_call_main() -> None:
         RetryableTransportError("disconnected"),
     ],
 )
-async def test_light_recoverable_failure_replays_same_request(error: BaseException) -> None:
+async def test_light_recoverable_failure_replays_same_request(
+    error: BaseException,
+) -> None:
     fallback = _Provider(LLMResponse(content="main"))
     messages = [{"role": "user", "content": "same"}]
     tools = [{"type": "function", "function": {"name": "x"}}]
@@ -128,7 +149,9 @@ async def test_light_recoverable_failure_replays_same_request(error: BaseExcepti
         TransportError("invalid protocol"),
     ],
 )
-async def test_light_nonrecoverable_failure_stays_fail_loud(error: BaseException) -> None:
+async def test_light_nonrecoverable_failure_stays_fail_loud(
+    error: BaseException,
+) -> None:
     fallback = _Provider(LLMResponse(content="main"))
 
     with pytest.raises(type(error)):

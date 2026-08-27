@@ -9,12 +9,13 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Callable, Literal, Mapping, Sequence, cast
 
+from agent.model_runtime.call_trace import model_call_purpose
 from agent.model_runtime.execution_history import active_shell_execution_origins
 from agent.model_runtime.types import ModelUsage, UsageCoverage
-
-logger = logging.getLogger(__name__)
 from agent.model_runtime.usage import aggregate_usage
 from agent.prompting import is_context_frame
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from agent.provider import LLMProvider
@@ -70,7 +71,10 @@ class CommittedContextUnit:
     message_refs: tuple[tuple[str, int], ...] = ()
 
     def __post_init__(self) -> None:
-        if self.source_from_seq < 0 or self.consolidated_through_seq < self.source_from_seq:
+        if (
+            self.source_from_seq < 0
+            or self.consolidated_through_seq < self.source_from_seq
+        ):
             raise ValueError("context unit seq boundary 无效")
         if not self.source_message_ids:
             raise ValueError("context unit 必须包含 source message ids")
@@ -250,6 +254,7 @@ class ContextCompactor:
         payload_segments: ContextPayloadSegments,
         max_output_tokens: int = 0,
         keep_recent_tokens: int = KEEP_RECENT_TOKENS,
+        reasoning_effort: str = "",
         ledger_parent_generation: int | None = None,
         next_generation: int | None = None,
         fallback_provider: "LLMProvider | None" = None,
@@ -264,6 +269,7 @@ class ContextCompactor:
             raise ValueError("scope_id 不能为空")
         self._max_output_tokens = _validate_output_budget(provider, max_output_tokens)
         self._keep_recent_tokens = _validate_keep_recent_tokens(keep_recent_tokens)
+        self._reasoning_effort = str(reasoning_effort or "").strip()
         if ledger_parent_generation is not None and (
             not isinstance(ledger_parent_generation, int)
             or isinstance(ledger_parent_generation, bool)
@@ -300,7 +306,9 @@ class ContextCompactor:
             if current_query is not None
             else _find_current_query(self._segments.current_anchor)
         )
-        self._persistent_summary = active_compaction.summary if active_compaction else ""
+        self._persistent_summary = (
+            active_compaction.summary if active_compaction else ""
+        )
         self._temporary_summary = ""
         self._committed_checkpoint: ContextCompaction | None = None
         self._compaction: ContextCompaction | None = None
@@ -342,7 +350,11 @@ class ContextCompactor:
     def acknowledge_committed_checkpoint(self, generation: int) -> None:
         """Advance the in-turn Store head after a committed checkpoint."""
 
-        if not isinstance(generation, int) or isinstance(generation, bool) or generation <= 0:
+        if (
+            not isinstance(generation, int)
+            or isinstance(generation, bool)
+            or generation <= 0
+        ):
             raise ValueError("compaction generation 必须是正整数")
         self._ledger_parent_generation = generation
         self._next_generation = generation + 1
@@ -374,7 +386,9 @@ class ContextCompactor:
             raise ValueError("完整工具批次缺少可记录消息")
         batch = tuple(_copy_message(message) for message in messages[batch_start:])
         if not _is_closed_tool_batch(batch):
-            raise ValueError("工具批次必须在 assistant tool call 与全部 result 闭合后记录")
+            raise ValueError(
+                "工具批次必须在 assistant tool call 与全部 result 闭合后记录"
+            )
         self._completed_batches.append(batch)
         self._segments = ContextPayloadSegments(
             prefix=self._segments.prefix,
@@ -449,9 +463,7 @@ class ContextCompactor:
         ]
         prefix, current_anchor, previous_temp, pending = self._split_segments()
         current_prefix = [_copy_message(message) for message in prefix]
-        temporary_summary = [
-            _copy_message(message) for message in previous_temp
-        ]
+        temporary_summary = [_copy_message(message) for message in previous_temp]
         committed_checkpoint: ContextCompaction | None = None
         committed_summary_usage: ModelUsage | None = None
         active_summary_usage: ModelUsage | None = None
@@ -700,7 +712,9 @@ class ContextCompactor:
         kept: list[CommittedContextUnit] = []
         kept_tokens = 0
         for unit in reversed(candidates):
-            tokens = self._provider.estimate_appended_message_tokens(list(unit.messages))
+            tokens = self._provider.estimate_appended_message_tokens(
+                list(unit.messages)
+            )
             kept.insert(0, unit)
             kept_tokens += tokens
             if kept_tokens >= self._keep_recent_tokens:
@@ -751,9 +765,7 @@ class ContextCompactor:
                 else self._temporary_summary
             )
         if previous_summary:
-            sections.extend(
-                ["\n[Previous compaction summary]\n", previous_summary]
-            )
+            sections.extend(["\n[Previous compaction summary]\n", previous_summary])
         sections.append("\n[Closed history to consolidate]\n")
         sections.extend(
             _serialize_message(message)
@@ -774,12 +786,15 @@ class ContextCompactor:
                     "tools": [],
                     "model": _provider_model(provider, model),
                     "max_tokens": _summary_output_limit(provider, summary_input),
-                    "disable_thinking": True,
+                    "disable_thinking": not bool(self._reasoning_effort),
                 }
-                if self._chat_call is not None:
-                    response = await self._chat_call(provider=provider, **request)
-                else:
-                    response = await provider.chat(**request)
+                if self._reasoning_effort:
+                    request["reasoning_effort"] = self._reasoning_effort
+                with model_call_purpose("context_compaction"):
+                    if self._chat_call is not None:
+                        response = await self._chat_call(provider=provider, **request)
+                    else:
+                        response = await provider.chat(**request)
             except Exception as exc:
                 failures.append(f"{type(exc).__name__}: {exc}")
                 continue
@@ -916,7 +931,9 @@ def _copy_segments(segments: ContextPayloadSegments) -> ContextPayloadSegments:
             )
             for unit in segments.committed_units
         ),
-        current_anchor=tuple(_copy_message(message) for message in segments.current_anchor),
+        current_anchor=tuple(
+            _copy_message(message) for message in segments.current_anchor
+        ),
         temporary_summary=tuple(
             _copy_message(message) for message in segments.temporary_summary
         ),
@@ -929,10 +946,12 @@ def _copy_segments(segments: ContextPayloadSegments) -> ContextPayloadSegments:
 
 
 def _pending_start(segments: ContextPayloadSegments) -> int:
-    return len(segments.prefix) + sum(
-        len(unit.messages) for unit in segments.committed_units
-    ) + len(segments.current_anchor) + len(segments.temporary_summary) + sum(
-        len(batch) for batch in segments.active_batches
+    return (
+        len(segments.prefix)
+        + sum(len(unit.messages) for unit in segments.committed_units)
+        + len(segments.current_anchor)
+        + len(segments.temporary_summary)
+        + sum(len(batch) for batch in segments.active_batches)
     )
 
 
@@ -956,11 +975,7 @@ def _flatten_projection(
         ],
         *[_copy_message(message) for message in current_anchor],
         *[_copy_message(message) for message in temporary_summary],
-        *[
-            _strip_opaque_state(message)
-            for unit in active
-            for message in unit.messages
-        ],
+        *[_strip_opaque_state(message) for unit in active for message in unit.messages],
         *[_copy_message(message) for message in pending],
     ]
 
@@ -1055,7 +1070,9 @@ def _active_execution_unit_index(units: Sequence[CommittedContextUnit]) -> int |
                 if isinstance(call, dict) and isinstance(call.get("id"), str):
                     call_units[str(call["id"])] = index
     origins = active_shell_execution_origins(messages)
-    active = [call_units[call_id] for call_id in origins.values() if call_id in call_units]
+    active = [
+        call_units[call_id] for call_id in origins.values() if call_id in call_units
+    ]
     return min(active) if active else None
 
 
@@ -1099,7 +1116,9 @@ def _is_closed_tool_batch(messages: Sequence[dict[str, Any]]) -> bool:
                     for call in raw_calls
                     if isinstance(call, dict) and isinstance(call.get("id"), str)
                 )
-        elif message.get("role") == "tool" and isinstance(message.get("tool_call_id"), str):
+        elif message.get("role") == "tool" and isinstance(
+            message.get("tool_call_id"), str
+        ):
             results.add(str(message["tool_call_id"]))
     return bool(calls) and calls == results
 
@@ -1179,7 +1198,9 @@ def canonical_source_plan(
         if not isinstance(item, Mapping):
             raise ContextCompactionError("context_compaction_source_plan_item_invalid")
         if set(item) != {"id", "seq", "unit_ref", "message"}:
-            raise ContextCompactionError("context_compaction_source_plan_fields_invalid")
+            raise ContextCompactionError(
+                "context_compaction_source_plan_fields_invalid"
+            )
         message_id = item.get("id")
         raw_seq = item.get("seq")
         unit_ref = item.get("unit_ref")
@@ -1221,7 +1242,9 @@ def source_plan_digest(
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _without_previous_compaction(messages: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+def _without_previous_compaction(
+    messages: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
     return [
         message
         for message in messages
@@ -1266,9 +1289,7 @@ def _text_value(value: object) -> str:
 
 def _valid_summary(summary: str) -> bool:
     headings = [
-        line.strip()
-        for line in summary.splitlines()
-        if line.lstrip().startswith("#")
+        line.strip() for line in summary.splitlines() if line.lstrip().startswith("#")
     ]
     return headings == list(SUMMARY_HEADINGS)
 
@@ -1336,15 +1357,14 @@ def _selection_digest(
         "selected": [_unit_identity(unit) for unit in selected],
         "retained": [_unit_identity(unit) for unit in retained],
     }
-    encoded = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    encoded = json.dumps(
+        identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _unit_identity(unit: CommittedContextUnit) -> dict[str, object]:
-    content = [
-        _strip_opaque_state(message)
-        for message in unit.messages
-    ]
+    content = [_strip_opaque_state(message) for message in unit.messages]
     encoded = json.dumps(
         content,
         ensure_ascii=False,
@@ -1370,7 +1390,9 @@ def _checkpoint_from_receipt(
     if receipt.get("version") not in (2, 3):
         raise ContextCompactionError("context_compaction_receipt_version_unsupported")
     if not isinstance(receipt.get("session_created_at"), str):
-        raise ContextCompactionError("context_compaction_receipt_session_incarnation_invalid")
+        raise ContextCompactionError(
+            "context_compaction_receipt_session_incarnation_invalid"
+        )
     raw_digest = receipt.get("selection_digest")
     if raw_digest != selection_digest:
         raise ContextCompactionError("context_compaction_receipt_selection_conflict")
@@ -1386,19 +1408,24 @@ def _checkpoint_from_receipt(
     source_ids = checkpoint.get("source_message_ids")
     retained_tail = checkpoint.get("retained_tail")
     selected_source_messages = checkpoint.get("selected_source_messages")
-    if not isinstance(source_ids, list) or not all(isinstance(item, str) for item in source_ids):
+    if not isinstance(source_ids, list) or not all(
+        isinstance(item, str) for item in source_ids
+    ):
         raise ContextCompactionError("context_compaction_receipt_source_ids_invalid")
-    if not isinstance(retained_tail, list) or not all(isinstance(item, dict) for item in retained_tail):
+    if not isinstance(retained_tail, list) or not all(
+        isinstance(item, dict) for item in retained_tail
+    ):
         raise ContextCompactionError("context_compaction_receipt_retained_tail_invalid")
     if not isinstance(selected_source_messages, list):
         raise ContextCompactionError("context_compaction_receipt_source_plan_invalid")
     canonical_source_messages = canonical_source_plan(selected_source_messages)
     raw_source_plan_digest = receipt.get("source_plan_digest")
-    if (
-        not isinstance(raw_source_plan_digest, str)
-        or raw_source_plan_digest != source_plan_digest(canonical_source_messages)
-    ):
-        raise ContextCompactionError("context_compaction_receipt_source_plan_digest_invalid")
+    if not isinstance(
+        raw_source_plan_digest, str
+    ) or raw_source_plan_digest != source_plan_digest(canonical_source_messages):
+        raise ContextCompactionError(
+            "context_compaction_receipt_source_plan_digest_invalid"
+        )
     usage = _usage_from_payload(checkpoint.get("summary_usage"))
     value = ContextCompaction(
         summary=summary,
@@ -1455,7 +1482,9 @@ def _usage_from_payload(raw: object) -> ModelUsage | None:
     try:
         parsed_coverage = UsageCoverage(str(coverage))
     except ValueError as exc:
-        raise ContextCompactionError("context_compaction_receipt_usage_coverage_invalid") from exc
+        raise ContextCompactionError(
+            "context_compaction_receipt_usage_coverage_invalid"
+        ) from exc
     return ModelUsage(
         input_tokens=_optional_int(raw.get("input_tokens")),
         cached_input_tokens=_optional_int(raw.get("cached_input_tokens")),

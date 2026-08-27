@@ -36,6 +36,7 @@ class RetrievalConfig:
     score_threshold: float = 0.45
     relative_delta: float = 0.2
     procedure_guard_enabled: bool = True
+    route_intention: bool = False
     thresholds: RetrievalThresholdsConfig = field(
         default_factory=RetrievalThresholdsConfig
     )
@@ -43,9 +44,36 @@ class RetrievalConfig:
 
 
 @dataclass(frozen=True)
+class HistoryGateConfig:
+    enabled: bool = False
+    llm_timeout_ms: int = 3_000
+    max_tokens: int = 150
+    reasoning_effort: str = ""
+
+
+@dataclass(frozen=True)
+class QueryRewriteConfig:
+    enabled: bool = True
+    timeout_ms: int = 3_000
+    max_tokens: int = 80
+    reasoning_effort: str = ""
+
+
+@dataclass(frozen=True)
+class HydeConfig:
+    enabled: bool = True
+    timeout_ms: int = 3_000
+    max_tokens: int = 80
+    reasoning_effort: str = ""
+
+
+@dataclass(frozen=True)
 class DefaultMemoryConfig:
     db_path: str = ""
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
+    gate: HistoryGateConfig = field(default_factory=HistoryGateConfig)
+    query_rewrite: QueryRewriteConfig = field(default_factory=QueryRewriteConfig)
+    hyde: HydeConfig = field(default_factory=HydeConfig)
 
 
 def load_default_memory_config(
@@ -61,29 +89,50 @@ def load_default_memory_config(
 def render_default_memory_config(config: DefaultMemoryConfig | None = None) -> str:
     cfg = config or DefaultMemoryConfig()
     retrieval = cfg.retrieval
-    return "\n".join([
-        f'db_path = "{cfg.db_path}"',
-        "",
-        "[retrieval]",
-        f"top_k_history = {retrieval.top_k_history}",
-        f"score_threshold = {retrieval.score_threshold}",
-        f"relative_delta = {retrieval.relative_delta}",
-        f"procedure_guard_enabled = {str(retrieval.procedure_guard_enabled).lower()}",
-        "",
-        "[retrieval.thresholds]",
-        f"procedure = {retrieval.thresholds.procedure}",
-        f"preference = {retrieval.thresholds.preference}",
-        f"event = {retrieval.thresholds.event}",
-        f"profile = {retrieval.thresholds.profile}",
-        "",
-        "[retrieval.inject]",
-        f"max_chars = {retrieval.inject.max_chars}",
-        f"forced = {retrieval.inject.forced}",
-        f"procedure_preference = {retrieval.inject.procedure_preference}",
-        f"event_profile = {retrieval.inject.event_profile}",
-        f"line_max = {retrieval.inject.line_max}",
-        "",
-    ])
+    return "\n".join(
+        [
+            f'db_path = "{cfg.db_path}"',
+            "",
+            "[retrieval]",
+            f"top_k_history = {retrieval.top_k_history}",
+            f"score_threshold = {retrieval.score_threshold}",
+            f"relative_delta = {retrieval.relative_delta}",
+            f"procedure_guard_enabled = {str(retrieval.procedure_guard_enabled).lower()}",
+            f"route_intention = {str(retrieval.route_intention).lower()}",
+            "",
+            "[retrieval.thresholds]",
+            f"procedure = {retrieval.thresholds.procedure}",
+            f"preference = {retrieval.thresholds.preference}",
+            f"event = {retrieval.thresholds.event}",
+            f"profile = {retrieval.thresholds.profile}",
+            "",
+            "[retrieval.inject]",
+            f"max_chars = {retrieval.inject.max_chars}",
+            f"forced = {retrieval.inject.forced}",
+            f"procedure_preference = {retrieval.inject.procedure_preference}",
+            f"event_profile = {retrieval.inject.event_profile}",
+            f"line_max = {retrieval.inject.line_max}",
+            "",
+            "[gate]",
+            f"enabled = {str(cfg.gate.enabled).lower()}",
+            f"llm_timeout_ms = {cfg.gate.llm_timeout_ms}",
+            f"max_tokens = {cfg.gate.max_tokens}",
+            f'reasoning_effort = "{cfg.gate.reasoning_effort}"',
+            "",
+            "[query_rewrite]",
+            f"enabled = {str(cfg.query_rewrite.enabled).lower()}",
+            f"timeout_ms = {cfg.query_rewrite.timeout_ms}",
+            f"max_tokens = {cfg.query_rewrite.max_tokens}",
+            f'reasoning_effort = "{cfg.query_rewrite.reasoning_effort}"',
+            "",
+            "[hyde]",
+            f"enabled = {str(cfg.hyde.enabled).lower()}",
+            f"timeout_ms = {cfg.hyde.timeout_ms}",
+            f"max_tokens = {cfg.hyde.max_tokens}",
+            f'reasoning_effort = "{cfg.hyde.reasoning_effort}"',
+            "",
+        ]
+    )
 
 
 def ensure_default_memory_config_file(
@@ -137,17 +186,19 @@ def _build_config(payload: dict[str, object]) -> DefaultMemoryConfig:
     retrieval = _section(payload, "retrieval")
     thresholds = _section(retrieval, "retrieval.thresholds")
     inject = _section(retrieval, "retrieval.inject")
+    gate = _section(payload, "gate")
+    query_rewrite = _section(payload, "query_rewrite")
+    hyde = _section(payload, "hyde")
     return DefaultMemoryConfig(
         db_path=_string_value(payload, "db_path", ""),
         retrieval=RetrievalConfig(
             top_k_history=_int_value(retrieval, "retrieval.top_k_history", 8),
-            score_threshold=_float_value(
-                retrieval, "retrieval.score_threshold", 0.45
-            ),
+            score_threshold=_float_value(retrieval, "retrieval.score_threshold", 0.45),
             relative_delta=_float_value(retrieval, "retrieval.relative_delta", 0.2),
             procedure_guard_enabled=_bool_value(
                 retrieval, "retrieval.procedure_guard_enabled", True
             ),
+            route_intention=_bool_value(retrieval, "retrieval.route_intention", False),
             thresholds=RetrievalThresholdsConfig(
                 procedure=_float_value(
                     thresholds, "retrieval.thresholds.procedure", 0.66
@@ -156,9 +207,7 @@ def _build_config(payload: dict[str, object]) -> DefaultMemoryConfig:
                     thresholds, "retrieval.thresholds.preference", 0.5
                 ),
                 event=_float_value(thresholds, "retrieval.thresholds.event", 0.5),
-                profile=_float_value(
-                    thresholds, "retrieval.thresholds.profile", 0.5
-                ),
+                profile=_float_value(thresholds, "retrieval.thresholds.profile", 0.5),
             ),
             inject=RetrievalInjectConfig(
                 max_chars=_int_value(inject, "retrieval.inject.max_chars", 6000),
@@ -172,7 +221,49 @@ def _build_config(payload: dict[str, object]) -> DefaultMemoryConfig:
                 line_max=_int_value(inject, "retrieval.inject.line_max", 600),
             ),
         ),
+        gate=HistoryGateConfig(
+            enabled=_bool_value(
+                gate,
+                "gate.enabled",
+                _bool_value(retrieval, "retrieval.route_intention", False),
+            ),
+            llm_timeout_ms=_int_value(gate, "gate.llm_timeout_ms", 3_000),
+            max_tokens=_int_value(gate, "gate.max_tokens", 150),
+            reasoning_effort=_string_value(gate, "gate.reasoning_effort", "").strip(),
+        ),
+        query_rewrite=QueryRewriteConfig(
+            enabled=_bool_value(query_rewrite, "query_rewrite.enabled", True),
+            timeout_ms=_int_value(
+                query_rewrite,
+                "query_rewrite.timeout_ms",
+                3_000,
+            ),
+            max_tokens=_int_value(
+                query_rewrite,
+                "query_rewrite.max_tokens",
+                80,
+            ),
+            reasoning_effort=_string_value(
+                query_rewrite,
+                "query_rewrite.reasoning_effort",
+                "",
+            ).strip(),
+        ),
+        hyde=HydeConfig(
+            enabled=_bool_value(hyde, "hyde.enabled", True),
+            timeout_ms=_int_value(hyde, "hyde.timeout_ms", 3_000),
+            max_tokens=_int_value(hyde, "hyde.max_tokens", 80),
+            reasoning_effort=_string_value(hyde, "hyde.reasoning_effort", "").strip(),
+        ),
     )
+
+
+def default_memory_config_from_mapping(
+    payload: dict[str, object],
+) -> DefaultMemoryConfig:
+    """Parse the same schema used by ``config.local.toml`` from a mapping."""
+
+    return _build_config(payload)
 
 
 def _read_toml(path: Path) -> dict[str, object]:

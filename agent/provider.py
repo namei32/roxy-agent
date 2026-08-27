@@ -1114,11 +1114,16 @@ class LLMProvider:
         tool_choice: str | dict = "auto",
         extra_body: dict | None = None,
         disable_thinking: bool = False,
+        reasoning_effort: str | None = None,
         on_content_delta: Callable[[StreamDelta], Awaitable[None]] | None = None,
         cache_namespace: str = "",
     ) -> LLMResponse:
         merged_extra = {**self._extra_body, **(extra_body or {})}
-        effort = merged_extra.get("reasoning_effort")
+        effort = (
+            str(reasoning_effort).strip()
+            if reasoning_effort is not None
+            else merged_extra.get("reasoning_effort")
+        )
         request = ModelRequest(
             messages=messages,
             tools=tools,

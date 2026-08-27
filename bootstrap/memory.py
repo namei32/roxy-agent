@@ -100,6 +100,7 @@ def build_memory_runtime(
         provider=provider,
         model=config.model,
         event_bus=event_publisher,
+        reasoning_effort=config.memory.consolidation_reasoning_effort,
     )
 
     closeables: list[object] = []
@@ -131,6 +132,7 @@ def build_memory_runtime(
         embedding_api=embedding_api,
     )
 
+
 def build_memory_admin_runtime(
     config: Config,
     workspace: Path,
@@ -145,6 +147,7 @@ def build_memory_admin_runtime(
         provider=provider,
         model=config.model,
         event_bus=event_publisher,
+        reasoning_effort=config.memory.consolidation_reasoning_effort,
     )
     closeables: list[object] = [http_resources]
     embedding_api: EmbeddingApi | None = None

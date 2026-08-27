@@ -1253,6 +1253,7 @@ class DefaultReasoner(Reasoner):
             payload_segments=segments,
             max_output_tokens=self._llm_config.max_tokens,
             keep_recent_tokens=self._context_compaction.keep_recent_tokens,
+            reasoning_effort=self._context_compaction.reasoning_effort,
             ledger_parent_generation=projection.head.parent_generation,
             next_generation=projection.head.next_generation,
             fallback_provider=self._llm.fallback_provider,
@@ -1560,6 +1561,7 @@ class DefaultReasoner(Reasoner):
                 reply="模型流响应中断，请刷新对话重试。",
                 context_retry=retry_trace,
             )
+
     async def run(
         self,
         initial_messages: list[dict],
@@ -2875,6 +2877,7 @@ class DefaultReasoner(Reasoner):
         model: str,
         max_tokens: int,
         disable_thinking: bool = True,
+        reasoning_effort: str | None = None,
     ) -> LLMResponse:
         """Call a compaction summary provider without re-entering the business gate."""
 
@@ -2897,6 +2900,7 @@ class DefaultReasoner(Reasoner):
                 model=model,
                 max_tokens=max_tokens,
                 disable_thinking=disable_thinking,
+                reasoning_effort=reasoning_effort,
             )
         finally:
             current_provider_attempt.reset(attempt_token)

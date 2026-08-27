@@ -67,16 +67,12 @@ def _parse_embedding_response(
         if response_dimension is None:
             response_dimension = dimension
         elif dimension != response_dimension:
-            raise ValueError(
-                "embedding provider response.data 向量维度不一致"
-            )
+            raise ValueError("embedding provider response.data 向量维度不一致")
         by_index[raw_index] = embedding
 
     expected_indexes = set(range(expected_count))
     if set(by_index) != expected_indexes:
-        raise ValueError(
-            "embedding provider response.data 缺少结果或包含多余结果"
-        )
+        raise ValueError("embedding provider response.data 缺少结果或包含多余结果")
     return [by_index[index] for index in range(expected_count)]
 
 
@@ -97,6 +93,11 @@ class Embedder:
         self._model = model
         self._output_dimensionality = output_dimensionality
         self._requester = requester or get_default_http_requester("external_default")
+        self._request_count = 0
+        self._text_count = 0
+        self._input_chars = 0
+        self._truncated_chars = 0
+        self._provider_tokens = 0
 
     @property
     def model_id(self) -> str:
@@ -118,6 +119,19 @@ class Embedder:
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
+    @property
+    def stats(self) -> dict[str, int | str]:
+        """Return secret-free cumulative usage for benchmark observability."""
+
+        return {
+            "model": self._model,
+            "request_count": self._request_count,
+            "text_count": self._text_count,
+            "input_chars": self._input_chars,
+            "truncated_chars": self._truncated_chars,
+            "provider_tokens": self._provider_tokens,
+        }
+
     async def embed(self, text: str) -> list[float]:
         """单条 embed"""
         results = await self.embed_batch([text])
@@ -127,6 +141,9 @@ class Embedder:
         """分批 embed，每批 ≤ MAX_BATCH，批间 sleep 0.3s"""
         results: list[list[float]] = []
         truncated = [t[: self.MAX_TEXT_LEN] for t in texts]
+        self._text_count += len(texts)
+        self._input_chars += sum(len(text) for text in texts)
+        self._truncated_chars += sum(len(text) for text in truncated)
 
         for i in range(0, len(truncated), self.MAX_BATCH):
             batch = truncated[i : i + self.MAX_BATCH]
@@ -144,9 +161,18 @@ class Embedder:
                 budget=RequestBudget(total_timeout_s=40.0),
             )
             resp.raise_for_status()
+            raw_response = resp.json()
+            self._request_count += 1
+            usage = (
+                raw_response.get("usage") if isinstance(raw_response, dict) else None
+            )
+            if isinstance(usage, dict):
+                raw_tokens = usage.get("total_tokens", usage.get("prompt_tokens", 0))
+                if isinstance(raw_tokens, int) and not isinstance(raw_tokens, bool):
+                    self._provider_tokens += max(0, raw_tokens)
             results.extend(
                 _parse_embedding_response(
-                    resp.json(),
+                    raw_response,
                     expected_count=len(batch),
                     expected_dimension=self._output_dimensionality,
                 )

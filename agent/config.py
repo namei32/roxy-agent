@@ -96,11 +96,7 @@ def resolve_app_server_endpoint(value: str, workspace: Path) -> str:
 
 def _short_workspace_socket(workspace: Path) -> str:
     digest = hashlib.sha256(str(workspace.resolve()).encode("utf-8")).hexdigest()
-    return str(
-        Path("/tmp")
-        / "roxy-sockets"
-        / f"{os.getuid()}-{digest[:24]}.sock"
-    )
+    return str(Path("/tmp") / "roxy-sockets" / f"{os.getuid()}-{digest[:24]}.sock")
 
 
 def _validated_timezone(tz_name: str, *, enabled: bool) -> str:
@@ -234,19 +230,27 @@ def load_config(
             )
         ),
         light_model=str(llm_fast.get("model") or ""),
-        light_api_key=_load_api_key(
-            auth_id=str(llm_fast.get("auth") or ""),
-            inline_value=str(llm_fast.get("api_key") or ""),
-            workspace=workspace_path,
-            credential_store=model_credential_store,
+        light_api_key=(
+            ""
+            if str(llm_fast.get("provider") or "").lower() == "codex"
+            else _load_api_key(
+                auth_id=str(llm_fast.get("auth") or ""),
+                inline_value=str(llm_fast.get("api_key") or ""),
+                workspace=workspace_path,
+                credential_store=model_credential_store,
+            )
         ),
         light_base_url=str(llm_fast.get("base_url") or ""),
         agent_model=str(llm_agent.get("model") or ""),
-        agent_api_key=_load_api_key(
-            auth_id=str(llm_agent.get("auth") or ""),
-            inline_value=str(llm_agent.get("api_key") or ""),
-            workspace=workspace_path,
-            credential_store=model_credential_store,
+        agent_api_key=(
+            ""
+            if str(llm_agent.get("provider") or "").lower() == "codex"
+            else _load_api_key(
+                auth_id=str(llm_agent.get("auth") or ""),
+                inline_value=str(llm_agent.get("api_key") or ""),
+                workspace=workspace_path,
+                credential_store=model_credential_store,
+            )
         ),
         agent_base_url=str(llm_agent.get("base_url") or ""),
         memory=memory,
@@ -270,11 +274,15 @@ def load_config(
         ),
         multimodal="image" in model_runtimes[runtime_id].input_modalities,
         vl_model=str(llm_vl.get("model") or ""),
-        vl_api_key=_load_api_key(
-            auth_id=str(llm_vl.get("auth") or ""),
-            inline_value=str(llm_vl.get("api_key") or ""),
-            workspace=workspace_path,
-            credential_store=model_credential_store,
+        vl_api_key=(
+            ""
+            if str(llm_vl.get("provider") or "").lower() == "codex"
+            else _load_api_key(
+                auth_id=str(llm_vl.get("auth") or ""),
+                inline_value=str(llm_vl.get("api_key") or ""),
+                workspace=workspace_path,
+                credential_store=model_credential_store,
+            )
         ),
         vl_base_url=str(llm_vl.get("base_url") or ""),
         wiring=wiring,
@@ -582,6 +590,7 @@ def _load_memory_config(
 ) -> MemoryConfig:
     memory = _as_dict(data.get("memory"), field="memory")
     embedding = _as_dict(memory.get("embedding"), field="memory.embedding")
+    reasoning = _as_dict(memory.get("reasoning"), field="memory.reasoning")
     enabled = _as_bool(memory.get("enabled", False), field="memory.enabled")
     model_ref = str(embedding.get("model_ref") or "").strip()
     explicit_model = str(embedding.get("model") or "").strip()
@@ -614,6 +623,9 @@ def _load_memory_config(
     return MemoryConfig(
         enabled=enabled,
         engine=str(memory.get("engine", "") or ""),
+        consolidation_reasoning_effort=str(
+            reasoning.get("consolidation_effort") or ""
+        ).strip(),
         embedding=MemoryEmbeddingConfig(
             model_ref=model_ref,
             model=(
@@ -687,9 +699,14 @@ def _reject_removed_context_configuration(
         )
     for location, raw in (
         ("llm", llm),
-        ("llm.main", _as_dict(llm.get("main"), field="llm.main")
-         if isinstance(llm.get("main"), dict)
-         else {}),
+        (
+            "llm.main",
+            (
+                _as_dict(llm.get("main"), field="llm.main")
+                if isinstance(llm.get("main"), dict)
+                else {}
+            ),
+        ),
     ):
         for key in ("effective_context_percent", "compaction_trigger_percent"):
             if key in raw:
@@ -714,11 +731,10 @@ def _load_context_compaction_config(agent_context: dict) -> ContextCompactionCon
     raw = _as_dict(agent_context.get("compaction"), field="agent.context.compaction")
     value = raw.get("keep_recent_tokens", 20_000)
     if not isinstance(value, int) or isinstance(value, bool):
-        raise ValueError(
-            "agent.context.compaction.keep_recent_tokens 必须是正整数"
-        )
+        raise ValueError("agent.context.compaction.keep_recent_tokens 必须是正整数")
     return ContextCompactionConfig(
         keep_recent_tokens=value,
+        reasoning_effort=str(raw.get("reasoning_effort") or "").strip(),
     )
 
 
@@ -892,9 +908,8 @@ def _load_llm_runtimes(
         )
     return main_value, raw_main, parsed
 
-def _load_role_runtime(
-    llm: dict, role: str, main_runtime_id: str
-) -> tuple[str, dict]:
+
+def _load_role_runtime(llm: dict, role: str, main_runtime_id: str) -> tuple[str, dict]:
     value = llm.get(role)
     if value is None:
         return "", {}

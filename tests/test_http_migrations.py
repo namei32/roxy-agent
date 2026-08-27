@@ -108,7 +108,8 @@ async def test_embedder_uses_injected_requester():
                 "data": [
                     {"index": 1, "embedding": [0.2, 0.3]},
                     {"index": 0, "embedding": [0.0, 0.1]},
-                ]
+                ],
+                "usage": {"total_tokens": 7},
             },
         )
 
@@ -121,6 +122,14 @@ async def test_embedder_uses_injected_requester():
         )
         vectors = await embedder.embed_batch(["first", "second"])
         assert vectors == [[0.0, 0.1], [0.2, 0.3]]
+        assert embedder.stats == {
+            "model": "text-embedding-v3",
+            "request_count": 1,
+            "text_count": 2,
+            "input_chars": 11,
+            "truncated_chars": 11,
+            "provider_tokens": 7,
+        }
     finally:
         await requester.client.aclose()
 

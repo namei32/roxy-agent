@@ -13,7 +13,9 @@ from typing import TYPE_CHECKING, TypedDict, cast
 import json_repair
 
 from agent.config_models import Config
+from agent.model_runtime.call_trace import model_call_purpose
 from agent.provider import LLMProvider, LLMResponse
+from agent.policies.history_route import HistoryRoutePolicy
 from agent.skills import SkillsLoader
 from bus.event_bus import EventSubscription
 from bus.events_lifecycle import TurnCommitted
@@ -53,8 +55,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("plugins.default_memory.engine")
 
-_HYPOTHESIS_MAX_TOKENS = 80
-_HYPOTHESIS_TIMEOUT_S = 3.0
 _VECTOR_SCORE_THRESHOLD = 0.35
 _VECTOR_TOP_K = 15
 _ChatCall = Callable[..., Awaitable[LLMResponse]]
@@ -85,7 +85,9 @@ def _consolidation_commit_digest(event: ConsolidationCommitted) -> str:
         "scope_chat_id": event.scope_chat_id,
         "conversation": event.conversation,
     }
-    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    encoded = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
@@ -121,13 +123,11 @@ def _undo_store_by_message_sources(
         return {"affected_ids": [], "restored_ids": [], "rollback_source_ids": []}
     target_ids = set(clean_ids)
     with store._lock:
-        rows = store._db.execute(
-            """
+        rows = store._db.execute("""
             SELECT id, source_ref
             FROM memory_items
             WHERE COALESCE(source_ref, '') != ''
-            """
-        ).fetchall()
+            """).fetchall()
         affected_ids: set[str] = set()
         rollback_source_ids: set[str] = set()
         for item_id, source_ref in rows:
@@ -228,11 +228,7 @@ def _coerce_emotional_weight(value: object) -> int:
 def _dict_items(value: object) -> list[dict[str, object]]:
     if not isinstance(value, list):
         return []
-    return [
-        cast(dict[str, object], item)
-        for item in value
-        if isinstance(item, dict)
-    ]
+    return [cast(dict[str, object], item) for item in value if isinstance(item, dict)]
 
 
 def _build_long_term_prompt(*, conversation: str, existing_profile: str) -> str:
@@ -467,7 +463,10 @@ def _default_memory_tool_profile() -> MemoryToolProfile:
             parameters={
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "要查找的记忆主题，推荐写成陈述句"},
+                    "query": {
+                        "type": "string",
+                        "description": "要查找的记忆主题，推荐写成陈述句",
+                    },
                     "intent": {
                         "type": "string",
                         "enum": ["answer", "timeline"],
@@ -505,7 +504,10 @@ def _default_memory_tool_profile() -> MemoryToolProfile:
             parameters={
                 "type": "object",
                 "properties": {
-                    "summary": {"type": "string", "description": "一句话描述要记住的内容"},
+                    "summary": {
+                        "type": "string",
+                        "description": "一句话描述要记住的内容",
+                    },
                     "memory_kind": {
                         "type": "string",
                         "enum": ["procedure", "preference", "event", "profile", ""],
@@ -591,12 +593,24 @@ class DefaultMemoryEngine:
         self._retriever: Retriever | None = None
         self._tagger: ProcedureTagger | None = None
         self._post_response_worker: PostResponseMemoryWorker | None = None
+        gate = default_config.gate
+        query_rewrite = default_config.query_rewrite
+        self._history_route = HistoryRoutePolicy(
+            light_provider=self._light_provider,
+            light_model=self._light_model,
+            enabled=gate.enabled,
+            llm_timeout_ms=gate.llm_timeout_ms,
+            max_tokens=gate.max_tokens,
+            reasoning_effort=gate.reasoning_effort,
+            query_rewrite_enabled=query_rewrite.enabled,
+            query_rewrite_timeout_ms=query_rewrite.timeout_ms,
+            query_rewrite_max_tokens=query_rewrite.max_tokens,
+            query_rewrite_reasoning_effort=query_rewrite.reasoning_effort,
+        )
         self._event_bus = event_publisher
         self.closeables: list[object] = []
         self._event_wired = False
-        self._consolidation_locks: dict[
-            tuple[int, str], tuple[asyncio.Lock, int]
-        ] = {}
+        self._consolidation_locks: dict[tuple[int, str], tuple[asyncio.Lock, int]] = {}
 
         db_path = resolve_memory_db_path(
             workspace=workspace,
@@ -613,9 +627,7 @@ class DefaultMemoryEngine:
             or config.light_base_url
             or config.base_url
             or "",
-            api_key=embedding.api_key
-            or config.light_api_key
-            or config.api_key,
+            api_key=embedding.api_key or config.light_api_key or config.api_key,
             model=embedding.model,
             output_dimensionality=embedding.output_dimensionality,
             requester=http_resources.external_default,
@@ -637,6 +649,7 @@ class DefaultMemoryEngine:
             inject_max_procedure_preference=retrieval.inject.procedure_preference,
             inject_max_event_profile=retrieval.inject.event_profile,
             procedure_guard_enabled=retrieval.procedure_guard_enabled,
+            high_inject_delta=retrieval.relative_delta,
             hotness_alpha=0.20,
         )
         skills_loader = SkillsLoader(workspace)
@@ -645,9 +658,7 @@ class DefaultMemoryEngine:
             model=self._light_model,
             skills_fn=lambda: [
                 record.name
-                for record in skills_loader.list_skill_records(
-                    filter_unavailable=False
-                )
+                for record in skills_loader.list_skill_records(filter_unavailable=False)
             ],
         )
         self._post_response_worker = PostResponseMemoryWorker(
@@ -830,17 +841,23 @@ class DefaultMemoryEngine:
     ) -> dict[str, object] | None:
         try:
             started_at = time.perf_counter()
+            memory_config = getattr(self._config, "memory", None)
+            consolidation_effort = str(
+                getattr(memory_config, "consolidation_reasoning_effort", "") or ""
+            ).strip()
             prompt = _build_long_term_prompt(
                 conversation=conversation,
                 existing_profile=existing_profile,
             )
-            resp = await self._provider.chat(
-                messages=[{"role": "user", "content": prompt}],
-                tools=[],
-                model=self._config.model,
-                max_tokens=600,
-                disable_thinking=True,
-            )
+            with model_call_purpose("memory_consolidation"):
+                resp = await self._provider.chat(
+                    messages=[{"role": "user", "content": prompt}],
+                    tools=[],
+                    model=self._config.model,
+                    max_tokens=600,
+                    disable_thinking=not bool(consolidation_effort),
+                    reasoning_effort=consolidation_effort or None,
+                )
             text = (resp.content or "").strip()
             elapsed_ms = int((time.perf_counter() - started_at) * 1000)
             logger.info(
@@ -878,7 +895,56 @@ class DefaultMemoryEngine:
     async def _query_context(self, request: MemoryQuery) -> MemoryQueryResult:
         retriever = self._require_retriever()
         scope = resolve_memory_scope(request.scope)
+        history = request.context.get("history")
+        recent_history = (
+            json.dumps(history, ensure_ascii=False, default=str)
+            if isinstance(history, list | dict)
+            else str(history or "")
+        )
+        raw_metadata = request.context.get("session_metadata")
+        metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
+        history_route = getattr(self, "_history_route", None)
+        if history_route is None:
+            # Compatibility for legacy/deserialized engines and lightweight test
+            # fixtures that predate the route policy. Retrieval must fail open.
+            history_route = HistoryRoutePolicy(
+                light_provider=None,
+                light_model="",
+                enabled=False,
+                llm_timeout_ms=1,
+                max_tokens=1,
+                query_rewrite_enabled=False,
+            )
+            self._history_route = history_route
+        route = await history_route.decide(
+            user_msg=request.text,
+            metadata=metadata,
+            recent_history=recent_history,
+        )
+        route_trace = {
+            "gate_type": route.meta.source,
+            "route_decision": route.meta.reason_code,
+            "route_confidence": route.meta.confidence,
+            "route_fail_open": route.fail_open,
+            "route_latency_ms": route.latency_ms,
+            "gate_latency_ms": route.gate_latency_ms,
+            "query_rewrite_latency_ms": route.rewrite_latency_ms,
+            "query_rewrite_source": route.rewrite_source,
+        }
+        if not route.needs_history:
+            return MemoryQueryResult(
+                trace={
+                    "engine": self.DESCRIPTOR.name,
+                    "profile": self.DESCRIPTOR.profile.value,
+                    "intent": request.intent,
+                    "effect": request.effect,
+                    **route_trace,
+                },
+                raw={"rewritten_query": route.rewritten_query},
+            )
         queries = self._resolve_queries(request)
+        if route.rewritten_query and route.rewritten_query not in queries:
+            queries.append(route.rewritten_query)
         memory_types = self._resolve_memory_types(request)
         items = await self._retrieve_related(
             request.text,
@@ -886,15 +952,16 @@ class DefaultMemoryEngine:
             top_k=request.limit,
             scope_channel=scope.channel or None,
             scope_chat_id=scope.chat_id or None,
-            require_scope_match=bool(request.filters.hints.get("require_scope_match", False)),
+            require_scope_match=bool(
+                request.filters.hints.get("require_scope_match", False)
+            ),
             aux_queries=queries[1:],
             time_start=request.filters.time_start,
             time_end=request.filters.time_end,
         )
         text_block, injected_ids = retriever.build_injection_block(items)
         records = [
-            self._build_record(item, injected_ids=injected_ids)
-            for item in items
+            self._build_record(item, injected_ids=injected_ids) for item in items
         ]
         return MemoryQueryResult(
             text_block=text_block,
@@ -904,8 +971,9 @@ class DefaultMemoryEngine:
                 "profile": self.DESCRIPTOR.profile.value,
                 "intent": request.intent,
                 "effect": request.effect,
+                **route_trace,
             },
-            raw={"items": items},
+            raw={"items": items, "rewritten_query": route.rewritten_query},
         )
 
     # post-response 摄入入口：外部只提交对话内容，失效判断仍在 engine 内部完成。
@@ -982,7 +1050,8 @@ class DefaultMemoryEngine:
         if memory_type == "procedure":
             extra["rule_schema"] = build_procedure_rule_schema(
                 summary=request.summary,
-                tool_requirement=str(request.metadata.get("tool_requirement") or "") or None,
+                tool_requirement=str(request.metadata.get("tool_requirement") or "")
+                or None,
                 steps=list(steps or []),
             )
             await self._attach_trigger_tags(extra=extra, summary=request.summary)
@@ -1017,7 +1086,9 @@ class DefaultMemoryEngine:
             accepted=bool(found_ids),
             status="superseded",
             affected_ids=found_ids,
-            missing_ids=[item_id for item_id in clean_ids if item_id not in set(found_ids)],
+            missing_ids=[
+                item_id for item_id in clean_ids if item_id not in set(found_ids)
+            ],
             items=[
                 {
                     "id": item.get("id"),
@@ -1218,9 +1289,7 @@ class DefaultMemoryEngine:
                 },
                 source_ref=f"{source_ref}#profile",
                 happened_at=happened_at,
-                emotional_weight=_coerce_emotional_weight(
-                    item.get("emotional_weight")
-                ),
+                emotional_weight=_coerce_emotional_weight(item.get("emotional_weight")),
                 source_key=_build_implicit_item_source_key(
                     source_ref,
                     "profile",
@@ -1272,10 +1341,18 @@ class DefaultMemoryEngine:
         self,
         request: MemoryQuery,
     ) -> MemoryQueryResult:
-        hyp1_task = asyncio.create_task(self._gen_hypothesis(request.text, style="event"))
-        hyp2_task = asyncio.create_task(self._gen_hypothesis(request.text, style="general"))
-        hyp1, hyp2 = await asyncio.gather(hyp1_task, hyp2_task)
-        aux_queries = [text for text in (hyp1, hyp2) if text]
+        default_config = self._resolved_default_config()
+        if default_config.hyde.enabled:
+            hyp1_task = asyncio.create_task(
+                self._gen_hypothesis(request.text, style="event")
+            )
+            hyp2_task = asyncio.create_task(
+                self._gen_hypothesis(request.text, style="general")
+            )
+            hyp1, hyp2 = await asyncio.gather(hyp1_task, hyp2_task)
+            aux_queries = [text for text in (hyp1, hyp2) if text]
+        else:
+            aux_queries = []
         scope = resolve_memory_scope(request.scope)
         types = self._resolve_memory_types(request)
         hits = await self._retrieve_related(
@@ -1322,7 +1399,9 @@ class DefaultMemoryEngine:
             limit=request.limit,
         )
         return MemoryQueryResult(
-            records=[self._build_record(item) for item in hits if isinstance(item, dict)],
+            records=[
+                self._build_record(item) for item in hits if isinstance(item, dict)
+            ],
             trace={
                 "source": self.DESCRIPTOR.name,
                 "intent": "timeline",
@@ -1339,7 +1418,7 @@ class DefaultMemoryEngine:
         scope = resolve_memory_scope(request.scope)
         score_threshold = None
         if request.filters.relevance_floor == "strong":
-            thresholds = self._default_config.retrieval.thresholds
+            thresholds = self._resolved_default_config().retrieval.thresholds
             score_threshold = max(thresholds.preference, thresholds.profile)
         hits = await self._retrieve_related(
             request.text,
@@ -1399,18 +1478,21 @@ class DefaultMemoryEngine:
         )
 
     async def _gen_hypothesis(self, query: str, style: str) -> str | None:
+        hyde_config = self._resolved_default_config().hyde
         prompt = _explicit_hypothesis_prompt(query, style)
         try:
             chat = cast(_ChatCall, self._light_provider.chat)
-            resp = await asyncio.wait_for(
-                chat(
-                    messages=[{"role": "user", "content": prompt}],
-                    tools=[],
-                    model=self._light_model,
-                    max_tokens=_HYPOTHESIS_MAX_TOKENS,
-                ),
-                timeout=_HYPOTHESIS_TIMEOUT_S,
-            )
+            with model_call_purpose(f"hyde_{style}"):
+                resp = await asyncio.wait_for(
+                    chat(
+                        messages=[{"role": "user", "content": prompt}],
+                        tools=[],
+                        model=self._light_model,
+                        max_tokens=hyde_config.max_tokens,
+                        reasoning_effort=hyde_config.reasoning_effort or None,
+                    ),
+                    timeout=max(0.1, hyde_config.timeout_ms / 1000.0),
+                )
             text = (resp.content or "").strip()
             return text if text else None
         except Exception as e:
@@ -1454,6 +1536,16 @@ class DefaultMemoryEngine:
             raise RuntimeError("memory retriever unavailable")
         return self._retriever
 
+    def _resolved_default_config(self) -> DefaultMemoryConfig:
+        config = getattr(self, "_default_config", None)
+        if isinstance(config, DefaultMemoryConfig):
+            return config
+        # Compatibility for legacy/deserialized engines and lightweight test
+        # fixtures that predate the workspace-local default-memory config.
+        config = DefaultMemoryConfig()
+        self._default_config = config
+        return config
+
     @classmethod
     def _build_record(
         cls,
@@ -1462,7 +1554,9 @@ class DefaultMemoryEngine:
         injected_ids: list[str] | None = None,
     ) -> MemoryRecord:
         extra = item.get("extra_json")
-        signals = dict(cast(dict[str, object], extra)) if isinstance(extra, dict) else {}
+        signals = (
+            dict(cast(dict[str, object], extra)) if isinstance(extra, dict) else {}
+        )
         memory_kind = str(item.get("memory_type", "") or "")
         item_id = str(item.get("id", "") or "")
         source_ref = str(item.get("source_ref", "") or "")
@@ -1519,9 +1613,7 @@ class DefaultMemoryEngine:
                 maybe_tool_chain = message.get("tool_chain")
                 if isinstance(maybe_tool_chain, list):
                     tool_chain = [
-                        item
-                        for item in maybe_tool_chain
-                        if isinstance(item, dict)
+                        item for item in maybe_tool_chain if isinstance(item, dict)
                     ]
         if not user_message and not assistant_response:
             return None
