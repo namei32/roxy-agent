@@ -136,11 +136,12 @@ def _pre_tool(
     arguments: dict[str, object],
     *,
     chat_id: str = "42",
+    channel: str = "telegram",
     source: str = "passive",
 ) -> PreToolCtx:
     return PreToolCtx(
-        session_key=f"telegram:{chat_id}",
-        channel="telegram",
+        session_key=f"{channel}:{chat_id}",
+        channel=channel,
         chat_id=chat_id,
         tool_name=tool_name,
         arguments=arguments,
@@ -171,6 +172,26 @@ def test_prompt_only_admits_authorized_telegram_image(
     assert plugin.prompt_hint(_prompt(media=[str(image)], chat_id="43")) is None
     assert plugin.prompt_hint(_prompt(media=[str(image)], channel="cli")) is None
     assert plugin.prompt_hint(_prompt(media=None)) is None
+
+
+@pytest.mark.asyncio
+async def test_project_evidence_tools_are_not_subject_to_interview_channel_guard(
+    tmp_path: Path,
+) -> None:
+    plugin = _plugin(tmp_path)
+
+    for tool_name in (
+        "roxy_project_search",
+        "roxy_project_read",
+        "akashic_project_search",
+        "akashic_project_read",
+    ):
+        assert (
+            await plugin.guard_scoped_tools(
+                _pre_tool(tool_name, {}, channel="mobile")
+            )
+            is None
+        )
 
 
 @pytest.mark.asyncio

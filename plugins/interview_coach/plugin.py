@@ -19,10 +19,6 @@ _NOTE_TOOLS = frozenset(
 _SCOPED_TOOLS = frozenset(
     {
         "interview_prepare",
-        "roxy_project_search",
-        "roxy_project_read",
-        "akashic_project_search",
-        "akashic_project_read",
         *_NOTE_TOOLS,
     }
 )
