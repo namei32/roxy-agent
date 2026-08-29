@@ -113,15 +113,17 @@ def _control_client_message_id(metadata: dict[str, object]) -> str:
 
     start_turn 边界已对 inboundMetadata 做完整结构校验（字符串键对象、
     client_message_id 非字符串即 fail-loud），这里只按已建立不变量读取，
-    不再重复同一结构校验；普通非 mobile 入口没有该字段时返回 "missing"。
+    不再重复同一结构校验；普通非 mobile 入口没有该字段时返回空串。
+
+    "missing" 只允许由日志格式化层显示，不能成为可传播的协议身份。
     """
 
     inbound_metadata = metadata.get("inboundMetadata")
     if not isinstance(inbound_metadata, dict):
-        return "missing"
+        return ""
     value = inbound_metadata.get("client_message_id", "")
     if not isinstance(value, str) or not value:
-        return "missing"
+        return ""
     return value
 
 

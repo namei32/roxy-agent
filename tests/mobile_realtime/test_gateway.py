@@ -771,6 +771,105 @@ def test_resume_resets_when_durable_inbox_has_sequence_gap(
         runtime.close()
 
 
+def test_publish_rejects_invalid_client_message_id_before_durable_inbox(
+    tmp_path: Path,
+) -> None:
+    """新 producer 的伪身份必须停在 Gateway 入箱边界。"""
+
+    async def build():
+        return build_mobile_gateway_runtime(
+            _config(),
+            tmp_path,
+            master_keys=_EphemeralMasterKeys(),
+        )
+
+    runtime, _ = asyncio.run(build())
+    device_id = uuid4().hex
+    _register_test_device(runtime, device_id)
+    try:
+        with pytest.raises(ValueError, match="ULID 或 UUIDv7"):
+            asyncio.run(
+                runtime.publish_event(
+                    event_type="turn.started",
+                    payload={"client_message_id": "missing"},
+                )
+            )
+        assert runtime.storage.count_durable_events(device_id) == 0
+        assert runtime.storage.read_cursor(device_id).next_event_seq == 1
+    finally:
+        runtime.close()
+
+
+def test_resume_resets_legacy_invalid_client_message_id_before_replay(
+    tmp_path: Path,
+) -> None:
+    """旧 inbox 中的 poison 不再上 wire；reset ACK 后按正常路径回收。"""
+
+    async def build():
+        return build_mobile_gateway_runtime(
+            _config(),
+            tmp_path,
+            master_keys=_EphemeralMasterKeys(),
+        )
+
+    runtime, _ = asyncio.run(build())
+    device_id = uuid4().hex
+    _register_test_device(runtime, device_id)
+    try:
+        runtime._enqueue_event(
+            device_id=device_id,
+            event_type="connection.degraded",
+            payload={"reason": "before-poison"},
+        )
+        poison_id = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+        runtime.storage.append_durable_event(
+            device_id=device_id,
+            event_id=poison_id,
+            envelope_json=json.dumps(
+                {
+                    "id": poison_id,
+                    "type": "turn.started",
+                    "payload": {"client_message_id": "missing"},
+                    "session_id": "mobile:legacy",
+                    "turn_id": "turn:legacy",
+                }
+            ),
+            created_at=datetime.now(timezone.utc),
+        )
+        runtime._enqueue_event(
+            device_id=device_id,
+            event_type="connection.degraded",
+            payload={"reason": "after-poison"},
+        )
+
+        socket = _ControlledWebSocket()
+        asyncio.run(
+            runtime._resume_and_register(
+                cast(Any, socket),
+                device_id=device_id,
+                connection_epoch=1,
+                last_ack=0,
+            )
+        )
+
+        assert len(socket.sent_text) == 1
+        stored = json.loads(socket.sent_text[0])
+        assert stored["event_seq"] == 4
+        assert stored["type"] == "sync.reset_required"
+        assert stored["payload"] == {"reason": "invalid_durable_client_message_id"}
+        assert runtime.storage.count_durable_events(device_id) == 4
+        assert runtime.storage.read_cursor(device_id).sent_event_seq == 4
+
+        advance = runtime.inbox.acknowledge(
+            device_id,
+            through_event_seq=4,
+        )
+        assert advance.deleted_events == 4
+        assert runtime.storage.count_durable_events(device_id) == 0
+    finally:
+        runtime.close()
+
+
 def test_gateway_restart_allocates_epoch_newer_than_previous_connection(
     tmp_path: Path,
 ) -> None:
@@ -1111,7 +1210,7 @@ def test_publish_event_respects_required_capability(tmp_path: Path) -> None:
     asyncio.run(
         runtime.publish_event(
             event_type="turn.output.completed",
-            payload={"client_message_id": "cmid-1"},
+            payload={"client_message_id": "01ARZ3NDEKTSV4RRFFQ69G5FAB"},
             session_id="mobile:abc",
             turn_id="turn-1",
             required_capability=TURN_OUTPUT_COMPLETED_CAPABILITY,
@@ -1152,7 +1251,7 @@ def test_device_update_refreshes_capabilities_and_unlocks_event(
     asyncio.run(
         runtime.publish_event(
             event_type="turn.output.completed",
-            payload={"client_message_id": "cmid-0"},
+            payload={"client_message_id": "01ARZ3NDEKTSV4RRFFQ69G5FAA"},
             session_id="mobile:abc",
             turn_id="turn-0",
             required_capability=TURN_OUTPUT_COMPLETED_CAPABILITY,
@@ -1176,7 +1275,7 @@ def test_device_update_refreshes_capabilities_and_unlocks_event(
     asyncio.run(
         runtime.publish_event(
             event_type="turn.output.completed",
-            payload={"client_message_id": "cmid-1"},
+            payload={"client_message_id": "01ARZ3NDEKTSV4RRFFQ69G5FAB"},
             session_id="mobile:abc",
             turn_id="turn-1",
             required_capability=TURN_OUTPUT_COMPLETED_CAPABILITY,
@@ -2263,7 +2362,10 @@ def test_broken_socket_send_failure_closes_socket_and_resume_replays_once(
         await runtime.publish_event(
             device_id=device_id,
             event_type="message.final",
-            payload={"content": "done", "client_message_id": "cmid-t"},
+            payload={
+                "content": "done",
+                "client_message_id": "01ARZ3NDEKTSV4RRFFQ69G5FAC",
+            },
             session_id="mobile:s1",
             turn_id="mobile:t1",
         )
@@ -2313,7 +2415,10 @@ def test_broken_socket_send_failure_closes_socket_and_resume_replays_once(
     assert len(sent_records) == 1
     assert sent_records[0].akashic_fields["session_id"] == "mobile:s1"
     assert sent_records[0].akashic_fields["turn_id"] == "mobile:t1"
-    assert sent_records[0].akashic_fields["client_message_id"] == "cmid-t"
+    assert (
+        sent_records[0].akashic_fields["client_message_id"]
+        == "01ARZ3NDEKTSV4RRFFQ69G5FAC"
+    )
     assert sent_records[0].akashic_fields["counts"] == (
         f"event_type=message.final device_id={registered_device_id} "
         f"event_seq=1 connection_epoch=2"
@@ -2349,7 +2454,10 @@ def test_replaced_epoch_during_send_records_no_sent_and_replay_records_once(
         await runtime.publish_event(
             device_id=device_id,
             event_type="message.final",
-            payload={"content": "done", "client_message_id": "cmid-replace"},
+            payload={
+                "content": "done",
+                "client_message_id": "01ARZ3NDEKTSV4RRFFQ69G5FAD",
+            },
             session_id="mobile:s1",
             turn_id="mobile:t1",
         )
@@ -2391,7 +2499,10 @@ def test_replaced_epoch_during_send_records_no_sent_and_replay_records_once(
     assert len(sent_records) == 1
     assert sent_records[0].akashic_fields["session_id"] == "mobile:s1"
     assert sent_records[0].akashic_fields["turn_id"] == "mobile:t1"
-    assert sent_records[0].akashic_fields["client_message_id"] == "cmid-replace"
+    assert (
+        sent_records[0].akashic_fields["client_message_id"]
+        == "01ARZ3NDEKTSV4RRFFQ69G5FAD"
+    )
     assert sent_records[0].akashic_fields["counts"] == (
         f"event_type=message.final device_id={registered_device_id} "
         f"event_seq=1 connection_epoch=2"
@@ -2531,7 +2642,7 @@ def test_terminal_milestone_logger_contract_is_no_throw(
         "tl:event.sent",
         session_id="mobile:s1",
         turn_id="mobile:t1",
-        client_message_id="cmid-t",
+        client_message_id="01ARZ3NDEKTSV4RRFFQ69G5FAC",
         counts=(
             "event_type=message.final device_id=d1 " "event_seq=2 connection_epoch=3"
         ),
@@ -2544,7 +2655,9 @@ def test_terminal_milestone_logger_contract_is_no_throw(
     assert len(records) == 1
     assert records[0].akashic_fields["session_id"] == "mobile:s1"
     assert records[0].akashic_fields["turn_id"] == "mobile:t1"
-    assert records[0].akashic_fields["client_message_id"] == "cmid-t"
+    assert (
+        records[0].akashic_fields["client_message_id"] == "01ARZ3NDEKTSV4RRFFQ69G5FAC"
+    )
     assert records[0].akashic_fields["counts"] == (
         "event_type=message.final device_id=d1 event_seq=2 connection_epoch=3"
     )
@@ -2585,7 +2698,10 @@ def test_live_observation_failure_keeps_cursor_and_epoch_after_send(
         await runtime.publish_event(
             device_id=device_id,
             event_type="message.final",
-            payload={"content": "done", "client_message_id": "cmid-t"},
+            payload={
+                "content": "done",
+                "client_message_id": "01ARZ3NDEKTSV4RRFFQ69G5FAC",
+            },
             session_id="mobile:s1",
             turn_id="mobile:t1",
         )
@@ -2664,7 +2780,10 @@ def test_resume_observation_failure_keeps_cursor_without_duplicate(
         _register_test_device(runtime, device_id)
         await runtime.publish_event(
             event_type="message.final",
-            payload={"content": "done", "client_message_id": "cmid-t"},
+            payload={
+                "content": "done",
+                "client_message_id": "01ARZ3NDEKTSV4RRFFQ69G5FAC",
+            },
             session_id="mobile:s1",
             turn_id="mobile:t1",
         )

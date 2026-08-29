@@ -126,16 +126,17 @@ def _item_content(item: InboundItem) -> str:
 def _inbound_client_message_id(msg: InboundItem) -> str:
     """每轮只解析/验证一次的入站 client_message_id（非字符串 fail-loud）。"""
 
-    # 1. 非入站消息恒为 missing；入站消息缺失字段也算 missing（非 mobile 合法）。
+    # 1. 后台任务完成等独立 turn 没有对应的手机消息；用空串表示“缺失”，
+    #    绝不能把日志占位词 "missing" 冒充协议身份写入 durable inbox。
     if not isinstance(msg, InboundMessage):
-        return "missing"
+        return ""
     raw = (msg.metadata or {}).get("client_message_id")
     if raw is None:
-        return "missing"
+        return ""
     # 2. 字段存在但非字符串是内部合同错误，fail-loud 抛出。
     if not isinstance(raw, str):
         raise TypeError("client_message_id 必须是字符串")
-    return raw or "missing"
+    return raw
 
 
 def _inbound_execution_turn_id(msg: InboundItem) -> str:

@@ -1804,7 +1804,7 @@ async def test_final_payload_accepts_client_message_id_without_user_message_id(
                 channel="mobile",
                 chat_id=session_id.removeprefix("mobile:"),
                 content="处理消息时出错，请稍后再试。",
-                metadata={"client_message_id": "cmid-fail"},
+                metadata={"client_message_id": "01ARZ3NDEKTSV4RRFFQ69G5FAH"},
                 control_turn_id=turn_id,
             )
         )
@@ -1813,7 +1813,7 @@ async def test_final_payload_accepts_client_message_id_without_user_message_id(
     assert final["event_type"] == "message.final"
     assert final["turn_id"] == turn_id
     payload = cast(dict[str, object], final["payload"])
-    assert payload["client_message_id"] == "cmid-fail"
+    assert payload["client_message_id"] == "01ARZ3NDEKTSV4RRFFQ69G5FAH"
     assert "user_message_id" not in payload
     final_records = [
         record
@@ -1822,7 +1822,10 @@ async def test_final_payload_accepts_client_message_id_without_user_message_id(
     ]
     assert len(final_records) == 1
     assert final_records[0].akashic_fields["turn_id"] == turn_id
-    assert final_records[0].akashic_fields["client_message_id"] == "cmid-fail"
+    assert (
+        final_records[0].akashic_fields["client_message_id"]
+        == "01ARZ3NDEKTSV4RRFFQ69G5FAH"
+    )
     storage.close()
 
 
@@ -1841,7 +1844,7 @@ async def test_typed_interrupted_outbound_publishes_one_durable_terminal(
         channel="mobile",
         chat_id=session_id.removeprefix("mobile:"),
         content="本轮已中断。",
-        metadata={"client_message_id": "cmid-interrupted"},
+        metadata={"client_message_id": "01ARZ3NDEKTSV4RRFFQ69G5FAN"},
         control_turn_id=turn_id,
         terminal_status=TurnTerminalStatus.INTERRUPTED,
     )
@@ -1861,7 +1864,7 @@ async def test_typed_interrupted_outbound_publishes_one_durable_terminal(
         "status": "interrupted",
         "message": "本轮已中断。",
         "control_turn_id": turn_id,
-        "client_message_id": "cmid-interrupted",
+        "client_message_id": "01ARZ3NDEKTSV4RRFFQ69G5FAN",
     }
     storage.close()
 
@@ -2913,7 +2916,7 @@ async def test_first_delta_orders_received_then_publish_then_published(
             content="查一下",
             timestamp=datetime.now(timezone.utc),
             turn_id=turn_id,
-            client_message_id="cmid-first",
+            client_message_id="01ARZ3NDEKTSV4RRFFQ69G5FAA",
         )
     )
 
@@ -2948,7 +2951,7 @@ async def test_first_delta_orders_received_then_publish_then_published(
         assert milestones[0]["duration_ms"] == pytest.approx(1_000.0)
         assert milestones[0]["session_id"] == session_id
         assert milestones[0]["turn_id"] == turn_id
-        assert milestones[0]["client_message_id"] == "cmid-first"
+        assert milestones[0]["client_message_id"] == "01ARZ3NDEKTSV4RRFFQ69G5FAA"
 
         # 3. 放行后 published 才打点，同一三元 identity、duration 从 turn.started。
         runtime.delta_publish_release.set()
@@ -2968,7 +2971,7 @@ async def test_first_delta_orders_received_then_publish_then_published(
         assert published["duration_ms"] == pytest.approx(2_000.0)
         assert published["session_id"] == session_id
         assert published["turn_id"] == turn_id
-        assert published["client_message_id"] == "cmid-first"
+        assert published["client_message_id"] == "01ARZ3NDEKTSV4RRFFQ69G5FAA"
     await channel.stop()
     storage.close()
 
@@ -3019,7 +3022,7 @@ async def test_dual_field_delta_accepts_thinking_and_answer_without_short_circui
             content="双字段",
             timestamp=datetime.now(timezone.utc),
             turn_id=turn_id,
-            client_message_id="cmid-dual",
+            client_message_id="01ARZ3NDEKTSV4RRFFQ69G5FAB",
         )
     )
 
@@ -3164,7 +3167,7 @@ async def test_terminal_and_reconcile_flush_pending_delta_before_terminal_event(
             content="A",
             timestamp=datetime.now(timezone.utc),
             turn_id=turn_id,
-            client_message_id="cmid-A",
+            client_message_id="01ARZ3NDEKTSV4RRFFQ69G5FAC",
         )
     )
     for delta in ("一", "二"):
@@ -3234,7 +3237,7 @@ async def test_terminal_and_reconcile_flush_pending_delta_before_terminal_event(
             content="B",
             timestamp=datetime.now(timezone.utc),
             turn_id=second_turn,
-            client_message_id="cmid-B",
+            client_message_id="01ARZ3NDEKTSV4RRFFQ69G5FAD",
         )
     )
     await channel._on_stream_delta(
@@ -3306,7 +3309,7 @@ async def test_terminal_barrier_flushes_accepted_deltas_then_terminal_and_drops_
             content="继续",
             timestamp=datetime.now(timezone.utc),
             turn_id=turn_id,
-            client_message_id="cmid-A",
+            client_message_id="01ARZ3NDEKTSV4RRFFQ69G5FAC",
         )
     )
     # 首个 content delta 立即 flush，第二段留在批里等待定时器。
@@ -3480,7 +3483,7 @@ async def test_terminal_and_late_delta_queued_on_same_lock_release_terminal_then
             content="继续",
             timestamp=datetime.now(timezone.utc),
             turn_id=turn_id,
-            client_message_id="cmid-A",
+            client_message_id="01ARZ3NDEKTSV4RRFFQ69G5FAC",
         )
     )
     for delta in ("一", "二"):
@@ -3584,7 +3587,7 @@ async def _race_channel(
             content="继续",
             timestamp=datetime.now(timezone.utc),
             turn_id=turn_id,
-            client_message_id="cmid-race",
+            client_message_id="01ARZ3NDEKTSV4RRFFQ69G5FAE",
         )
     )
     return runtime, channel, manager, storage, session_id, turn_id
@@ -3689,7 +3692,7 @@ async def test_output_completed_never_follows_terminal(tmp_path: Path) -> None:
                 channel="mobile",
                 chat_id=session_id.removeprefix("mobile:"),
                 turn_id=turn_id,
-                client_message_id="cmid-race",
+                client_message_id="01ARZ3NDEKTSV4RRFFQ69G5FAE",
             )
         )
     )
@@ -4035,7 +4038,7 @@ async def test_late_a_final_keeps_b_active_and_identity(
             content="A",
             timestamp=datetime.now(timezone.utc),
             turn_id=turn_a,
-            client_message_id="cmid-A",
+            client_message_id="01ARZ3NDEKTSV4RRFFQ69G5FAC",
         )
     )
     for delta in ("A1", "A2"):
@@ -4057,11 +4060,11 @@ async def test_late_a_final_keeps_b_active_and_identity(
             content="B",
             timestamp=datetime.now(timezone.utc),
             turn_id=turn_b,
-            client_message_id="cmid-B",
+            client_message_id="01ARZ3NDEKTSV4RRFFQ69G5FAD",
         )
     )
-    channel._send_received_at[(session_id, "cmid-A")] = 10.0
-    channel._send_received_at[(session_id, "cmid-B")] = 20.0
+    channel._send_received_at[(session_id, "01ARZ3NDEKTSV4RRFFQ69G5FAC")] = 10.0
+    channel._send_received_at[(session_id, "01ARZ3NDEKTSV4RRFFQ69G5FAD")] = 20.0
 
     # 1. 迟到的 A final 通过 execution attempt 归属 A；逻辑 Turn 独立投影。
     logical_turn_a = "turn:logical-A"
@@ -4074,7 +4077,7 @@ async def test_late_a_final_keeps_b_active_and_identity(
                 control_turn_id=logical_turn_a,
                 execution_attempt_id=turn_a,
                 metadata={
-                    "client_message_id": "cmid-A",
+                    "client_message_id": "01ARZ3NDEKTSV4RRFFQ69G5FAC",
                     "persisted_user_message_id": "uid-A",
                 },
             )
@@ -4084,7 +4087,7 @@ async def test_late_a_final_keeps_b_active_and_identity(
     assert final["turn_id"] == turn_a
     final_payload = cast(dict[str, object], final["payload"])
     assert final_payload["control_turn_id"] == logical_turn_a
-    assert final_payload["client_message_id"] == "cmid-A"
+    assert final_payload["client_message_id"] == "01ARZ3NDEKTSV4RRFFQ69G5FAC"
     assert final_payload["user_message_id"] == "uid-A"
     final_records = [
         record
@@ -4093,16 +4096,24 @@ async def test_late_a_final_keeps_b_active_and_identity(
     ]
     assert len(final_records) == 1
     assert final_records[0].akashic_fields["turn_id"] == turn_a
-    assert final_records[0].akashic_fields["client_message_id"] == "cmid-A"
+    assert (
+        final_records[0].akashic_fields["client_message_id"]
+        == "01ARZ3NDEKTSV4RRFFQ69G5FAC"
+    )
 
     # 2. A cleanup 只清 A：B 的 active/process/turn/send maps 全部保留。
     assert channel._active_turn_ids == {session_id: turn_b}
     assert set(channel._process_turns) == {(session_id, turn_b)}
-    assert channel._process_turns[(session_id, turn_b)].client_message_id == "cmid-B"
+    assert (
+        channel._process_turns[(session_id, turn_b)].client_message_id
+        == "01ARZ3NDEKTSV4RRFFQ69G5FAD"
+    )
     assert channel._turn_started_at == {
         (session_id, turn_b): channel._turn_started_at[(session_id, turn_b)]
     }
-    assert channel._send_received_at == {(session_id, "cmid-B"): 20.0}
+    assert channel._send_received_at == {
+        (session_id, "01ARZ3NDEKTSV4RRFFQ69G5FAD"): 20.0
+    }
     assert channel._delta_batches == {}
     assert (session_id, turn_a) in channel._turn_terminals
     assert (session_id, turn_b) not in channel._turn_terminals
@@ -4168,7 +4179,7 @@ async def test_interrupt_publish_paths_carry_known_client_message_id(
             content="A",
             timestamp=datetime.now(timezone.utc),
             turn_id=active_turn,
-            client_message_id="cmid-stop",
+            client_message_id="01ARZ3NDEKTSV4RRFFQ69G5FAF",
         )
     )
 
@@ -4190,7 +4201,7 @@ async def test_interrupt_publish_paths_carry_known_client_message_id(
         "status": "interrupted",
         "message": "已停止",
         "control_turn_id": "turn-logical-stop",
-        "client_message_id": "cmid-stop",
+        "client_message_id": "01ARZ3NDEKTSV4RRFFQ69G5FAF",
     }
     assert session_id not in channel._active_turn_ids
 
@@ -4214,7 +4225,7 @@ async def test_interrupt_publish_paths_carry_known_client_message_id(
             content="B",
             timestamp=datetime.now(timezone.utc),
             turn_id=shutdown_turn,
-            client_message_id="cmid-shutdown",
+            client_message_id="01ARZ3NDEKTSV4RRFFQ69G5FAG",
         )
     )
     await channel.stop()
@@ -4226,7 +4237,7 @@ async def test_interrupt_publish_paths_carry_known_client_message_id(
         "message": "服务端正在维护，本轮生成已中断",
         "reason": "runtime_shutdown",
         "control_turn_id": "turn-logical-shutdown",
-        "client_message_id": "cmid-shutdown",
+        "client_message_id": "01ARZ3NDEKTSV4RRFFQ69G5FAG",
     }
     manager.close()
     storage.close()
@@ -4669,6 +4680,114 @@ async def test_send_and_turn_started_bind_each_client_message_id_per_session(
 
 
 @pytest.mark.asyncio
+async def test_spawn_completion_turn_omits_absent_client_message_id_from_wire(
+    tmp_path: Path,
+) -> None:
+    """后台完成通知是独立 turn；没有手机上行消息时 wire 字段必须省略。"""
+
+    storage = MobileRealtimeStorage(tmp_path / "mobile.db")
+    runtime = _Runtime(storage)
+    channel = MobileRealtimeChannel(cast(MobileGatewayRuntime, runtime))
+    session_id = f"mobile:{uuid4()}"
+    turn_id = f"turn:{uuid4().hex}"
+
+    await channel._on_turn_started(
+        TurnStarted(
+            session_key=session_id,
+            channel="mobile",
+            chat_id=session_id.removeprefix("mobile:"),
+            content="[后台任务完成] job-1",
+            timestamp=datetime.now(timezone.utc),
+            turn_id=turn_id,
+            client_message_id="",
+        )
+    )
+    await channel._on_output_completed(
+        TurnOutputCompleted(
+            session_key=session_id,
+            channel="mobile",
+            chat_id=session_id.removeprefix("mobile:"),
+            turn_id=turn_id,
+            client_message_id="",
+        )
+    )
+
+    assert channel._process_turns[(session_id, turn_id)].client_message_id == ""
+    assert [event["event_type"] for event in runtime.events] == [
+        "turn.started",
+        "turn.output.completed",
+    ]
+    assert runtime.events[0]["payload"] == {
+        "content": "[后台任务完成] job-1",
+        "control_turn_id": turn_id,
+    }
+    assert runtime.events[1]["payload"] == {}
+
+    # 终态边界也会拦住旧 bug 的字面值，且失败前不会追加 durable event。
+    with pytest.raises(RuntimeError, match="ULID 或 UUIDv7"):
+        await channel._publish_terminal(
+            session_id=session_id,
+            turn_id=turn_id,
+            event_type="message.final",
+            payload={
+                "content": "完成",
+                "control_turn_id": turn_id,
+                "client_message_id": "missing",
+            },
+        )
+    assert len(runtime.events) == 2
+    assert (session_id, turn_id) not in channel._turn_terminals
+
+    assert await channel._publish_terminal(
+        session_id=session_id,
+        turn_id=turn_id,
+        event_type="message.final",
+        payload={
+            "content": "完成",
+            "control_turn_id": turn_id,
+            "client_message_id": "",
+        },
+    )
+    assert runtime.events[-1]["payload"] == {
+        "content": "完成",
+        "control_turn_id": turn_id,
+    }
+    storage.close()
+
+
+@pytest.mark.asyncio
+async def test_invalid_turn_started_client_message_id_fails_before_state_or_publish(
+    tmp_path: Path,
+) -> None:
+    """伪身份绝不能先污染进程状态，更不能进入可重放 Mobile inbox。"""
+
+    storage = MobileRealtimeStorage(tmp_path / "mobile.db")
+    runtime = _Runtime(storage)
+    channel = MobileRealtimeChannel(cast(MobileGatewayRuntime, runtime))
+    session_id = f"mobile:{uuid4()}"
+    turn_id = f"turn:{uuid4().hex}"
+
+    with pytest.raises(RuntimeError, match="ULID 或 UUIDv7"):
+        await channel._on_turn_started(
+            TurnStarted(
+                session_key=session_id,
+                channel="mobile",
+                chat_id=session_id.removeprefix("mobile:"),
+                content="后台完成",
+                timestamp=datetime.now(timezone.utc),
+                turn_id=turn_id,
+                client_message_id="missing",
+            )
+        )
+
+    assert runtime.events == []
+    assert channel._active_turn_ids == {}
+    assert channel._process_turns == {}
+    assert channel._turn_started_at == {}
+    storage.close()
+
+
+@pytest.mark.asyncio
 async def test_terminal_and_stop_clear_send_and_turn_maps(tmp_path: Path) -> None:
     storage = MobileRealtimeStorage(tmp_path / "mobile.db")
     device_id = uuid4().hex
@@ -4703,15 +4822,15 @@ async def test_terminal_and_stop_clear_send_and_turn_maps(tmp_path: Path) -> Non
         thinking_block=None,
         tool_blocks={},
         answer_segments=[],
-        client_message_id="cmid-A",
+        client_message_id="01ARZ3NDEKTSV4RRFFQ69G5FAC",
     )
     channel._turn_started_at[(session_id, turn_id)] = 100.0
-    channel._send_received_at[(session_id, "cmid-A")] = 50.0
-    channel._send_received_at[(session_id, "cmid-B")] = 60.0
-    channel._send_received_at[("mobile:other", "cmid-C")] = 70.0
+    channel._send_received_at[(session_id, "01ARZ3NDEKTSV4RRFFQ69G5FAC")] = 50.0
+    channel._send_received_at[(session_id, "01ARZ3NDEKTSV4RRFFQ69G5FAD")] = 60.0
+    channel._send_received_at[("mobile:other", "01ARZ3NDEKTSV4RRFFQ69G5FAE")] = 70.0
 
     # 1. terminal（message.final）只清理 A 的 send/turn maps，
-    #    同 session 排队中的 cmid-B 与其他会话条目必须保留。
+    #    同 session 排队中的第二条 ID 与其他会话条目必须保留。
     await channel._on_response(
         OutboundMessage(
             channel="mobile",
@@ -4724,8 +4843,8 @@ async def test_terminal_and_stop_clear_send_and_turn_maps(tmp_path: Path) -> Non
     assert channel._process_turns == {}
     assert channel._turn_started_at == {}
     assert channel._send_received_at == {
-        (session_id, "cmid-B"): 60.0,
-        ("mobile:other", "cmid-C"): 70.0,
+        (session_id, "01ARZ3NDEKTSV4RRFFQ69G5FAD"): 60.0,
+        ("mobile:other", "01ARZ3NDEKTSV4RRFFQ69G5FAE"): 70.0,
     }
 
     # 2. A/B overlap：B 已接替 active 时，迟到的 A cleanup 只清 A 自己的状态，
@@ -4738,7 +4857,7 @@ async def test_terminal_and_stop_clear_send_and_turn_maps(tmp_path: Path) -> Non
             thinking_block=None,
             tool_blocks={},
             answer_segments=[],
-            client_message_id="cmid-B",
+            client_message_id="01ARZ3NDEKTSV4RRFFQ69G5FAD",
         )
     )
     channel._turn_started_at[(session_id, overlap_turn)] = 200.0
@@ -4753,8 +4872,8 @@ async def test_terminal_and_stop_clear_send_and_turn_maps(tmp_path: Path) -> Non
     assert set(channel._process_turns) == {(session_id, overlap_turn)}
     assert channel._turn_started_at == {(session_id, overlap_turn): 200.0}
     assert channel._send_received_at == {
-        (session_id, "cmid-B"): 60.0,
-        ("mobile:other", "cmid-C"): 70.0,
+        (session_id, "01ARZ3NDEKTSV4RRFFQ69G5FAD"): 60.0,
+        ("mobile:other", "01ARZ3NDEKTSV4RRFFQ69G5FAE"): 70.0,
     }
     assert channel._delta_batches == {}
     assert pending.timer.cancelling()
@@ -4809,7 +4928,7 @@ async def test_terminal_final_publish_fail_once_is_retryable_without_fake_succes
             content="继续",
             timestamp=datetime.now(timezone.utc),
             turn_id=turn_id,
-            client_message_id="cmid-fail",
+            client_message_id="01ARZ3NDEKTSV4RRFFQ69G5FAH",
         )
     )
     for delta in ("你", "好"):
@@ -4836,7 +4955,7 @@ async def test_terminal_final_publish_fail_once_is_retryable_without_fake_succes
         await channel._on_response(outbound)
     assert runtime.terminal_attempts == 1
     assert key not in channel._turn_terminals
-    assert channel._process_turns[key].client_message_id == "cmid-fail"
+    assert channel._process_turns[key].client_message_id == "01ARZ3NDEKTSV4RRFFQ69G5FAH"
     assert channel._process_turns[key].answer_segments == ["你", "好"]
     assert channel._process_turns[key].final_suffix_emitted == "世界"
     assert channel._active_turn_ids[session_id] == turn_id
@@ -4920,7 +5039,7 @@ async def test_terminal_failure_after_batch_flush_retry_does_not_duplicate_delta
             content="继续",
             timestamp=datetime.now(timezone.utc),
             turn_id=turn_id,
-            client_message_id="cmid-batch",
+            client_message_id="01ARZ3NDEKTSV4RRFFQ69G5FAJ",
         )
     )
     for delta in ("一", "二"):
@@ -5027,7 +5146,7 @@ async def test_late_delta_queued_during_terminal_failure_gap_accepted_then_retry
             content="继续",
             timestamp=datetime.now(timezone.utc),
             turn_id=turn_id,
-            client_message_id="cmid-gap",
+            client_message_id="01ARZ3NDEKTSV4RRFFQ69G5FAK",
         )
     )
     for delta in ("你", "好"):
@@ -5149,7 +5268,7 @@ async def test_interrupted_terminal_publish_fail_once_is_retryable(
             content="继续",
             timestamp=datetime.now(timezone.utc),
             turn_id=turn_id,
-            client_message_id="cmid-stop",
+            client_message_id="01ARZ3NDEKTSV4RRFFQ69G5FAF",
         )
     )
     key = (session_id, turn_id)
@@ -5170,7 +5289,7 @@ async def test_interrupted_terminal_publish_fail_once_is_retryable(
         )
     assert runtime.terminal_attempts == 1
     assert key not in channel._turn_terminals
-    assert channel._process_turns[key].client_message_id == "cmid-stop"
+    assert channel._process_turns[key].client_message_id == "01ARZ3NDEKTSV4RRFFQ69G5FAF"
     assert channel._active_turn_ids[session_id] == turn_id
     assert channel._delta_locks.get(key) is not None
 
@@ -5193,7 +5312,7 @@ async def test_interrupted_terminal_publish_fail_once_is_retryable(
         "status": "interrupted",
         "message": "已停止",
         "control_turn_id": turn_id,
-        "client_message_id": "cmid-stop",
+        "client_message_id": "01ARZ3NDEKTSV4RRFFQ69G5FAF",
     }
     assert channel._process_turns == {}
     assert channel._active_turn_ids == {}
@@ -5322,7 +5441,7 @@ async def _fail_delta_channel(
             content="继续",
             timestamp=datetime.now(timezone.utc),
             turn_id=turn_id,
-            client_message_id="cmid-fail-delta",
+            client_message_id="01ARZ3NDEKTSV4RRFFQ69G5FAM",
         )
     )
     return runtime, channel, manager, storage, session_id, turn_id
