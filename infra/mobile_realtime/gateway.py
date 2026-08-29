@@ -81,6 +81,7 @@ from infra.mobile_realtime.protocol import (
     TURN_OUTPUT_COMPLETED_CAPABILITY,
     frame_to_json,
     parse_frame,
+    validate_frame_id,
 )
 from infra.mobile_realtime.storage import (
     AckOverflowError,
@@ -133,6 +134,7 @@ _MAX_PENDING_CONNECTION_EVENTS = 64
 _CLOSE_VERSION = 4406
 _CONNECTION_CONTROL_SEND_TIMEOUT_SECONDS = 3.0
 _CONNECTION_CONTROL_LOCK_TIMEOUT_SECONDS = 30.0
+_DURABLE_REPLAY_VALIDATION_PAGE_SIZE = 512
 _CROCKFORD32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 _TIMELINE_TERMINAL_EVENT_TYPES = frozenset({"message.final", "turn.interrupted"})
@@ -838,6 +840,29 @@ class MobileGatewayRuntime:
                 device_id=device_id,
                 event_type="sync.reset_required",
                 payload={"reason": "inbox_retention_exceeded"},
+            )
+            return last_ack, last_ack, terminal
+
+        # 4. 旧版本可能已经把日志占位词 "missing" 写入 durable inbox。
+        #    冻结窗口在发送任何事件前完整验明；发现伪身份只追加 reset，
+        #    让客户端重建可重建投影，随后由正常累计 ACK 回收旧窗口。
+        invalid_event_seq = _first_invalid_client_message_id_event_seq(
+            self.storage,
+            device_id=device_id,
+            after_event_seq=last_ack,
+            through_event_seq=replay_through,
+        )
+        if invalid_event_seq is not None:
+            logger.warning(
+                "mobile durable replay client_message_id 无效，要求重建投影: "
+                "device=%s event_seq=%d",
+                device_id,
+                invalid_event_seq,
+            )
+            terminal = self._enqueue_event(
+                device_id=device_id,
+                event_type="sync.reset_required",
+                payload={"reason": "invalid_durable_client_message_id"},
             )
             return last_ack, last_ack, terminal
 
@@ -2560,6 +2585,7 @@ def _encode_stored_event(
 ) -> str:
     """在入箱前验证事件，并编码不含连接态字段的稳定 envelope。"""
 
+    _validate_event_client_message_id(event_type=event_type, payload=payload)
     body: dict[str, object] = {
         "id": event_id,
         "type": event_type,
@@ -2578,6 +2604,73 @@ def _encode_stored_event(
     )
     _ = _stored_event_to_wire(encoded, event_seq=1, connection_epoch=1)
     return encoded
+
+
+def _validate_event_client_message_id(
+    *,
+    event_type: str,
+    payload: dict[str, object],
+) -> None:
+    """校验 GenericEvent 根载荷中可选的手机消息身份。"""
+
+    if "client_message_id" not in payload:
+        return
+    value = payload["client_message_id"]
+    if not isinstance(value, str):
+        raise ValueError(f"{event_type}.client_message_id 必须是字符串")
+    _ = validate_frame_id(value, f"{event_type}.client_message_id")
+
+
+def _stored_event_has_invalid_client_message_id(envelope_json: str) -> bool:
+    """判断既有 durable envelope 是否携带不可消费的根 client identity。"""
+
+    try:
+        body = json.loads(envelope_json)
+    except json.JSONDecodeError:
+        return True
+    if not isinstance(body, dict):
+        return True
+    event_type = body.get("type")
+    payload = body.get("payload")
+    if not isinstance(event_type, str) or not isinstance(payload, dict):
+        return True
+    try:
+        _validate_event_client_message_id(
+            event_type=event_type,
+            payload=cast(dict[str, object], payload),
+        )
+    except ValueError:
+        return True
+    return False
+
+
+def _first_invalid_client_message_id_event_seq(
+    storage: MobileRealtimeStorage,
+    *,
+    device_id: str,
+    after_event_seq: int,
+    through_event_seq: int,
+) -> int | None:
+    """分页扫描冻结重放窗口，返回首个 client identity poison 的序号。"""
+
+    cursor = after_event_seq
+    while cursor < through_event_seq:
+        page = tuple(
+            event
+            for event in storage.read_durable_events(
+                device_id,
+                after_event_seq=cursor,
+                limit=_DURABLE_REPLAY_VALIDATION_PAGE_SIZE,
+            )
+            if event.event_seq <= through_event_seq
+        )
+        if not page:
+            return None
+        for event in page:
+            if _stored_event_has_invalid_client_message_id(event.envelope_json):
+                return event.event_seq
+        cursor = page[-1].event_seq
+    return None
 
 
 def _stored_event_type(event: DurableInboxEvent) -> str:

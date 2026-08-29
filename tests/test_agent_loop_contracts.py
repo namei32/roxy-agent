@@ -383,6 +383,9 @@ async def test_spawn_completion_turn_id_chain_identical() -> None:
     ) -> OutboundMessage:
         observed_child_turn_ids.append(running_turn_id.get())
         assert running_turn_id.get().startswith("turn:")
+        # 后台完成通知是独立 turn，没有对应的手机上行消息。缺失身份必须保持
+        # 为空，不能复用父 turn，也不能把日志占位词 "missing" 当成 wire ID。
+        assert current_client_message_id.get() == ""
         raise RuntimeError("boom")
 
     loop = _real_path_loop(bus, core_process)
@@ -394,6 +397,7 @@ async def test_spawn_completion_turn_id_chain_identical() -> None:
     assert outbound.content == "出错：boom"
     assert observed_child_turn_ids[0].startswith("turn:")
     assert started_events[0].turn_id == observed_child_turn_ids[0]
+    assert started_events[0].client_message_id == ""
     assert outbound.control_turn_id == observed_child_turn_ids[0]
     bus.complete_inbound.assert_awaited_once_with(item)
     assert loop._active_tasks == {}

@@ -607,9 +607,18 @@ def frame_to_json(frame: MobileFrame) -> str:
     )
 
 
-def _validate_frame_id(value: str, field: str) -> None:
+def validate_frame_id(value: str, field: str) -> str:
+    """校验可跨 Mobile wire 传播的稳定身份，并返回原值。"""
+
     if _FRAME_ID_PATTERN.fullmatch(value) is None:
         raise ValueError(f"{field} 必须是 ULID 或 UUIDv7")
+    return value
+
+
+def _validate_frame_id(value: str, field: str) -> None:
+    """Pydantic validators 使用的兼容包装。"""
+
+    _ = validate_frame_id(value, field)
 
 
 def _reject_json_constant(value: str) -> None:

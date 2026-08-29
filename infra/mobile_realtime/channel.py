@@ -65,6 +65,7 @@ from infra.mobile_realtime.protocol import (
     MessageSendCommand,
     MAX_JSON_FRAME_BYTES,
     TURN_OUTPUT_COMPLETED_CAPABILITY,
+    validate_frame_id,
 )
 from infra.mobile_realtime.plugin_ui import PluginUiQuery, PluginUiQueryScheduler
 from infra.mobile_realtime.remote_media import (
@@ -169,6 +170,38 @@ def _utf8_chunks(text: str, max_bytes: int) -> Iterator[str]:
         chunk_bytes += character_bytes
     if start < len(text):
         yield text[start:]
+
+
+def _optional_client_message_id(value: object, *, field: str) -> str | None:
+    """把缺失身份规范化为 None，并在 durable publish 前拒绝伪造身份。"""
+
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise RuntimeError(f"{field} 必须是字符串")
+    try:
+        return validate_frame_id(value, field)
+    except ValueError as error:
+        raise RuntimeError(str(error)) from error
+
+
+def _validated_mobile_payload(
+    payload: Mapping[str, object],
+    *,
+    event_type: str,
+) -> dict[str, object]:
+    """复制 wire payload，并统一校验/省略可选 client_message_id。"""
+
+    result = dict(payload)
+    client_message_id = _optional_client_message_id(
+        result.get("client_message_id"),
+        field=f"{event_type}.client_message_id",
+    )
+    if client_message_id is None:
+        _ = result.pop("client_message_id", None)
+    else:
+        result["client_message_id"] = client_message_id
+    return result
 
 
 _MOBILE_TOOL_SECRET_KEYS = frozenset(
@@ -1796,6 +1829,10 @@ class MobileRealtimeChannel:
         self._raise_delta_failure()
         if event.channel != self.name:
             return
+        client_message_id = _optional_client_message_id(
+            event.client_message_id,
+            field="turn.started.client_message_id",
+        )
         turn_id = event.turn_id or event.session_key
         self._active_turn_ids[event.session_key] = turn_id
         process_key = (event.session_key, turn_id)
@@ -1809,31 +1846,35 @@ class MobileRealtimeChannel:
             tool_blocks={},
             answer_segments=[],
             control_turn_id=event.control_turn_id or turn_id,
-            client_message_id=event.client_message_id,
+            client_message_id=client_message_id or "",
         )
         self._turn_started_at[process_key] = monotonic()
         # 同一 key 的旧终态墓碑（同 turn_id 重试）不得压制新一轮增量。
         _ = self._turn_terminals.pop(process_key, None)
+        payload: dict[str, object] = {
+            "content": event.content,
+            "control_turn_id": event.control_turn_id or turn_id,
+        }
+        if client_message_id is not None:
+            payload["client_message_id"] = client_message_id
         await self._runtime.publish_event(
             event_type="turn.started",
             session_id=event.session_key,
             turn_id=turn_id,
-            payload={
-                "content": event.content,
-                "client_message_id": event.client_message_id,
-                "control_turn_id": event.control_turn_id or turn_id,
-            },
+            payload=payload,
         )
         # 3. 时间链：服务端接受 turn；duration 为 send.received → turn.started
-        received_at = self._send_received_at.get(
-            (event.session_key, event.client_message_id)
+        received_at = (
+            self._send_received_at.get((event.session_key, client_message_id))
+            if client_message_id is not None
+            else None
         )
         turn_milestone(
             logger,
             "tl:turn.started",
             session_id=event.session_key,
             turn_id=turn_id,
-            client_message_id=event.client_message_id,
+            client_message_id=client_message_id or "",
             duration_ms=(
                 (monotonic() - received_at) * 1_000 if received_at is not None else None
             ),
@@ -2095,6 +2136,10 @@ class MobileRealtimeChannel:
         self._raise_delta_failure()
         if event.channel != self.name:
             return
+        client_message_id = _optional_client_message_id(
+            event.client_message_id,
+            field="turn.output.completed.client_message_id",
+        )
         session_id = event.session_key
         turn_id = event.turn_id or self._current_turn_id(session_id)
         # 终态已收口则丢弃迟到信号，绝不重建 per-turn 结构。
@@ -2110,11 +2155,14 @@ class MobileRealtimeChannel:
                 )
                 return
             _ = await self._flush_batch_locked(session_id, turn_id)
+            payload: dict[str, object] = {}
+            if client_message_id is not None:
+                payload["client_message_id"] = client_message_id
             await self._runtime.publish_event(
                 event_type="turn.output.completed",
                 session_id=session_id,
                 turn_id=turn_id,
-                payload={"client_message_id": event.client_message_id},
+                payload=payload,
                 required_capability=TURN_OUTPUT_COMPLETED_CAPABILITY,
             )
 
@@ -2149,11 +2197,10 @@ class MobileRealtimeChannel:
         if media and message_id is None:
             raise RuntimeError("出站媒体缺少已持久化的 assistant 消息")
         source_metadata = dict(message.metadata)
-        client_message_id = source_metadata.get("client_message_id")
-        if client_message_id is not None and (
-            not isinstance(client_message_id, str) or not client_message_id
-        ):
-            raise RuntimeError("mobile final 缺少完整 client 消息标识")
+        client_message_id = _optional_client_message_id(
+            source_metadata.get("client_message_id"),
+            field="mobile final.client_message_id",
+        )
         if message.terminal_status in (
             TurnTerminalStatus.INTERRUPTED,
             TurnTerminalStatus.CANCELLED,
@@ -2283,9 +2330,7 @@ class MobileRealtimeChannel:
         if state is not None and state.client_message_id:
             trace_client_message_id = state.client_message_id
         else:
-            trace_client_message_id = cast(
-                str, source_metadata.get("client_message_id") or ""
-            )
+            trace_client_message_id = client_message_id or ""
         turn_milestone(
             logger,
             "tl:final.published",
@@ -2688,30 +2733,36 @@ class MobileRealtimeChannel:
     ) -> bool:
         """锁内收口：flush 已接受 delta → durable publish → 成功后才提交墓碑。"""
 
+        # 1. wire 身份先于任何 delta flush 校验。生产者即使再次误传
+        #    "missing"，也只能在进程内 fail-loud，不能污染可重放 inbox。
+        validated_payload = _validated_mobile_payload(
+            payload,
+            event_type=event_type,
+        )
         key = (session_id, turn_id)
-        # 1. 锁内复核：其他 owner 已成功收口则不重复发布。
+        # 2. 锁内复核：其他 owner 已成功收口则不重复发布。
         if key in self._turn_terminals:
             return False
-        # 2. 按 wire 顺序先 flush 已接受 delta（含 final suffix）；已发布不回卷
+        # 3. 按 wire 顺序先 flush 已接受 delta（含 final suffix）；已发布不回卷
         #    不重复，失败重试时对应 batch 为空，process state 保留供 suffix 计算。
         _ = await self._flush_batch_locked(session_id, turn_id)
-        # 3. durable 终态发布：await 成功返回前没有任何已提交 closed 墓碑。
+        # 4. durable 终态发布：await 成功返回前没有任何已提交 closed 墓碑。
         if device_id is None:
             await self._runtime.publish_event(
                 event_type=event_type,
                 session_id=session_id,
                 turn_id=turn_id,
-                payload=payload,
+                payload=validated_payload,
             )
         else:
             await self._runtime.publish_event(
                 event_type=event_type,
                 session_id=session_id,
                 turn_id=turn_id,
-                payload=payload,
+                payload=validated_payload,
                 device_id=device_id,
             )
-        # 4. publish 确认成功后才在同一锁内提交终态墓碑（有界 256）。
+        # 5. publish 确认成功后才在同一锁内提交终态墓碑（有界 256）。
         if len(self._turn_terminals) >= _MAX_DELTA_BATCHES:
             _ = self._turn_terminals.pop(next(iter(self._turn_terminals)))
         self._turn_terminals[key] = event_type
