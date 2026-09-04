@@ -57,6 +57,7 @@ from plugins.default_memory.config import (
 
 MIGRATION_SCHEMA_VERSION = 1
 MIGRATION_ROOT = Path("backups/memory-engine-migrations")
+_CANDIDATE_CONFIG = "config.candidate.toml"
 SEND_HISTORY_CONFIRMATION = "SEND-HISTORY-TO-EMBEDDING-PROVIDER"
 APPLY_CONFIRMATION = "APPLY-AKASHA"
 REVERT_CONFIRMATION = "REVERT-AKASHA"
@@ -206,7 +207,8 @@ async def prepare_memory_migration(
                 f"operation 当前阶段不能 prepare: {manifest['phase']}"
             )
         candidate_bytes = _read_required_file(
-            operation / "config.candidate", "候选配置"
+            operation / _CANDIDATE_CONFIG,
+            "候选配置",
         )
         _verify_prepare_resume_state(operation, workspace, manifest)
         if embedding_model_id and embedding_model_id != str(
@@ -218,8 +220,8 @@ async def prepare_memory_migration(
         original = _read_required_file(config_path, "主配置")
         candidate_bytes = _candidate_config(original, embedding_model_id)
         _atomic_write_bytes(operation / "config.before", original, 0o600)
-        _atomic_write_bytes(operation / "config.candidate", candidate_bytes, 0o600)
-        host = Config.load(operation / "config.candidate", workspace=workspace)
+        _atomic_write_bytes(operation / _CANDIDATE_CONFIG, candidate_bytes, 0o600)
+        host = Config.load(operation / _CANDIDATE_CONFIG, workspace=workspace)
         plugin, plugin_identity = _load_plugin_identity(workspace)
         index_path, memory_path = _sidecar_paths(workspace, plugin)
         snapshot = operation / "source-sessions.db"
@@ -256,7 +258,7 @@ async def prepare_memory_migration(
         }
         _atomic_write_json(manifest_path, manifest)
 
-    host = Config.load(operation / "config.candidate", workspace=workspace)
+    host = Config.load(operation / _CANDIDATE_CONFIG, workspace=workspace)
     target = cast(dict[str, object], manifest["target"])
     if _target_identity(host)["cacheNamespace"] != target["cacheNamespace"]:
         raise MemoryEngineMigrationError("候选配置解析出的 embedding identity 已漂移")
@@ -408,7 +410,7 @@ async def prepare_memory_migration(
                 _artifact_record(operation, candidate_memory) if turns else None
             ),
             "candidateConfig": _artifact_record(
-                operation, operation / "config.candidate"
+                operation, operation / _CANDIDATE_CONFIG
             ),
             "configBefore": _artifact_record(operation, operation / "config.before"),
             "legacyMemoryReview": _artifact_record(
@@ -533,7 +535,7 @@ def apply_memory_migration(
             protected_after_sidecars = _protected_state(workspace)
             _assert_protected_equal(protected_before, protected_after_sidecars)
             _atomic_publish_from(
-                operation / "config.candidate",
+                operation / _CANDIDATE_CONFIG,
                 config_path,
                 mode=0o600,
             )
@@ -1235,7 +1237,7 @@ def _verify_prepare_resume_state(
     """Reject mutation of a resumable operation before another provider call."""
 
     before = _read_required_file(operation / "config.before", "原配置快照")
-    candidate = _read_required_file(operation / "config.candidate", "候选配置")
+    candidate = _read_required_file(operation / _CANDIDATE_CONFIG, "候选配置")
     if _sha256_bytes(before) != manifest.get("originalConfigSha256"):
         raise MemoryEngineMigrationError("续跑 operation 的原配置快照已漂移")
     if _sha256_bytes(candidate) != manifest.get("candidateConfigSha256"):
@@ -1298,7 +1300,7 @@ def _verify_apply_preconditions(
         str(recorded_paths["memory"]),
     ):
         raise MemoryEngineMigrationError("迁移收据中的 Akasha sidecar 路径已漂移")
-    host = Config.load(operation / "config.candidate", workspace=workspace)
+    host = Config.load(operation / _CANDIDATE_CONFIG, workspace=workspace)
     target = cast(dict[str, object], manifest["target"])
     if _target_identity(host)["cacheNamespace"] != target["cacheNamespace"]:
         raise MemoryEngineMigrationError("目标 embedding identity 已漂移")
@@ -1324,7 +1326,7 @@ def _verify_fixed_input(
     operation: Path,
     manifest: dict[str, object],
 ) -> None:
-    host = Config.load(operation / "config.candidate", workspace=workspace)
+    host = Config.load(operation / _CANDIDATE_CONFIG, workspace=workspace)
     target = cast(dict[str, object], manifest["target"])
     required = list_required_embedding_messages(operation / "source-sessions.db")
     actual = _frozen_embedding_digest(

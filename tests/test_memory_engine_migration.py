@@ -262,6 +262,61 @@ async def test_assess_is_read_only_when_embedding_table_does_not_exist(
 
 
 @pytest.mark.asyncio
+async def test_prepare_candidate_config_is_loadable_by_real_config_loader(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    memory = workspace / "memory"
+    memory.mkdir(parents=True)
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        """
+[llm]
+main = "main"
+
+[llm.runtimes.main]
+provider = "openai"
+model = "chat-model"
+api_key = "chat-key"
+base_url = "https://chat.example/v1"
+
+[memory]
+enabled = true
+engine = "default"
+
+[memory.embedding]
+model = "embedding-model"
+api_key = "embedding-key"
+base_url = "https://embedding.example/v1"
+output_dimensionality = 2
+""".strip() + "\n",
+        encoding="utf-8",
+    )
+    _create_sessions(workspace / "sessions.db", turns=1)
+    _create_memory2(memory / "memory2.db")
+    (memory / "MEMORY.md").write_text("# stable profile\n", encoding="utf-8")
+    (memory / "SELF.md").write_text("# self\n", encoding="utf-8")
+    (memory / "PENDING.md").write_text("", encoding="utf-8")
+    host = Config.load(config_path, workspace=workspace)
+
+    prepared = await migration.prepare_memory_migration(
+        config_path=config_path,
+        workspace=workspace,
+        operation_id="real-config-loader",
+        confirmation=migration.SEND_HISTORY_CONFIRMATION,
+        embedder=_FakeEmbedder(host),
+    )
+
+    candidate = (
+        workspace
+        / "backups/memory-engine-migrations/real-config-loader/config.candidate.toml"
+    )
+    assert prepared["phase"] == "prepared"
+    assert candidate.is_file()
+    assert Config.load(candidate, workspace=workspace).memory.engine == "akasha"
+
+
+@pytest.mark.asyncio
 async def test_prepare_apply_verify_and_revert_preserve_all_authoritative_state(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -464,7 +519,8 @@ async def test_prepare_resume_rejects_candidate_config_tamper_before_provider_ca
             embedder=_FakeEmbedder(host, fail_on_call=2),
         )
     candidate = (
-        workspace / "backups/memory-engine-migrations/resume-tamper/config.candidate"
+        workspace
+        / "backups/memory-engine-migrations/resume-tamper/config.candidate.toml"
     )
     candidate.write_text(
         candidate.read_text(encoding="utf-8") + "\n# drift\n",
