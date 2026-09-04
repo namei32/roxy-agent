@@ -335,6 +335,30 @@ Agent 根据电量模型自适应调整轮询频率——你刚聊完时不烦�
 
 见 [记忆系统](./_handbook/memory-markdown.md)。
 
+已有对话的 workspace 不允许在 Dashboard 里直接改引擎。先只读盘点，再在隔离快照补齐
+历史向量；`apply` 和 `revert` 必须在 runtime 完全停止后执行：
+
+```bash
+uv run python main.py memory-migrate assess --config config.toml
+
+uv run python main.py memory-migrate prepare --config config.toml \
+  --confirm SEND-HISTORY-TO-EMBEDDING-PROVIDER
+
+uv run python main.py memory-migrate apply --config config.toml \
+  --operation-id OPERATION_ID \
+  --confirm APPLY-AKASHA
+
+uv run python main.py memory-migrate verify --config config.toml \
+  --operation-id OPERATION_ID
+```
+
+`prepare` 会输出生成的 `operationId`；后续命令必须复用它。如果不是沿用当前
+`[memory.embedding]` 绑定，可在 `assess` 和 `prepare` 额外传入
+`--embedding-model-id EMBEDDING_MODEL_ID`。
+
+命令保留 `memory2.db` 和 Markdown 长期记忆；完整事务边界与回滚步骤见
+[Akasha 首次切换迁移](./docs/design/akasha-first-adoption-migration.md)。
+
 ## Drift 空闲任务
 
 没内容可推时 agent 不空转——执行你写的 `SKILL.md`（分步操作指南），比如审计长期记忆是否准确、补用户画像、自我诊断。

@@ -9,6 +9,7 @@
   python main.py exec ...           非交互执行一个 turn
   python main.py veda-reset         重建 workspace 默认人格
   python main.py roxy-migrate ...   显式复制旧 workspace 到新名称空间
+  python main.py memory-migrate ... 可恢复地把已有历史切换到 Akasha
 """
 
 from __future__ import annotations
@@ -109,9 +110,20 @@ def _workspace_from_args(
 def _run_lightweight_command() -> bool:
     """在加载 Agent runtime 依赖前分发恢复与纯配置命令。"""
     args = sys.argv[1:]
-    if not args or args[0] not in {"setup-main", "veda-reset", "roxy-migrate"}:
+    if not args or args[0] not in {
+        "setup-main",
+        "veda-reset",
+        "roxy-migrate",
+        "memory-migrate",
+    }:
         return False
     command = args[0]
+
+    if command == "memory-migrate":
+        from agent.migrations.memory_engine_cli import run_memory_migration_cli
+
+        _ = run_memory_migration_cli(args[1:])
+        return True
 
     if command == "roxy-migrate":
         import argparse
@@ -239,6 +251,7 @@ _HELP = """\
   init                          非交互初始化配置和工作区
   veda-reset                    备份并重建 workspace 默认人格
   roxy-migrate                  显式迁移旧 workspace 到 Roxy 路径
+  memory-migrate                可恢复地切换已有历史到 Akasha
   gateway                       启动未托管 Agent 服务（调试）
   supervise                     显式进入 supervisor（兼容别名）
   app-server --stdio            在 stdio 上运行程序化控制面
@@ -254,6 +267,8 @@ _HELP = """\
   --workspace PATH              覆盖 config.toml 中的 runtime.workspace
   roxy-migrate --from-workspace OLD --to-workspace NEW [--dry-run]
                                 复制并原子发布 workspace；源目录保留
+  memory-migrate assess|prepare|apply|verify|revert [options]
+                                安全准备、提交、验证或回滚 Akasha 切换
   -h, --help                    显示帮助
 
 无命令时启动 Agent 服务。
