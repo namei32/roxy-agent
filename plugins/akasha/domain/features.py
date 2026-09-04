@@ -605,9 +605,13 @@ def _mix_sources(
     )
     mixed: dict[int, float] = defaultdict(float)
     for node, value in direct:
-        mixed[node] += (1.0 - context_mass) * value
+        weighted = (1.0 - context_mass) * value
+        if weighted > 0.0:
+            mixed[node] += weighted
     for node, value in context:
-        mixed[node] += context_mass * value
+        weighted = context_mass * value
+        if weighted > 0.0:
+            mixed[node] += weighted
     return (
         _normalize_pairs_by_id(tuple(mixed.items()))
         if mixed
