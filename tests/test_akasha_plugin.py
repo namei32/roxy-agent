@@ -48,7 +48,7 @@ from plugins.akasha.application.rebuild import rebuild_memory
 from plugins.akasha.config import AkashaConfig, render_akasha_config
 from plugins.akasha.dashboard import register as register_dashboard
 from plugins.akasha.domain.features import BurstAwareFeaturePool
-from plugins.akasha.domain.model import MemoryConfig
+from plugins.akasha.domain.model import MemoryConfig, Turn
 from plugins.akasha.engine import (
     ActiveRecallSnapshot,
     AkashaFeedbackPersistModule,
@@ -468,6 +468,53 @@ def test_mobile_recall_card_projection_preserves_bounded_lanes() -> None:
 def test_active_mobile_recall_marks_temporary_absence_as_pending() -> None:
     assert _empty_mobile_recall()["pending"] is False
     assert _empty_mobile_recall(pending=True)["pending"] is True
+
+
+def test_empty_new_burst_ignores_zero_weight_context_seed() -> None:
+    """An empty user cue can start a new burst without inventing seed mass."""
+
+    def turn(
+        node_id: int,
+        dense: tuple[float, float] | None,
+        terms: tuple[tuple[str, int], ...],
+        gap: float | None,
+    ) -> Turn:
+        vector = None if dense is None else np.asarray(dense, dtype=np.float32)
+        return Turn(
+            node_id=node_id,
+            turn_id=f"turn-{node_id}",
+            session_key="test:one",
+            user_seq=node_id * 2,
+            user_message_id=f"user-{node_id}",
+            assistant_message_id=f"assistant-{node_id}",
+            started_at=f"2026-09-0{node_id + 1}T00:00:00+00:00",
+            committed_at=f"2026-09-0{node_id + 1}T00:00:01+00:00",
+            user_text="" if dense is None else terms[0][0],
+            assistant_text="answer",
+            user_dense=vector,
+            assistant_dense=vector,
+            user_terms=terms,
+            assistant_terms=terms,
+            inter_gap_seconds=gap,
+        )
+
+    turns = [
+        turn(0, (0.0, 1.0), (("first", 1),), None),
+        turn(1, (1.0, 0.0), (("context", 1),), 10.0),
+        replace(
+            turn(2, None, (), 2_303.0),
+            assistant_dense=np.asarray((0.0, 1.0), dtype=np.float32),
+            assistant_terms=(("answer", 1),),
+        ),
+    ]
+    pool = BurstAwareFeaturePool(turns)
+    context = pool.build_context(((1, 1.0),))
+
+    decision = pool.infer_burst_seed(2, context, (1,), True)
+
+    assert decision.continued is False
+    assert decision.context_mass == 0.0
+    assert decision.evidence.seed == ()
 
 
 def test_suffix_loader_and_appendable_features_match_full_replay(
