@@ -167,3 +167,28 @@ def test_help_lists_veda_reset() -> None:
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "veda-reset" in result.stdout
+    assert "memory-migrate" in result.stdout
+
+
+def test_memory_migrate_help_runs_before_full_agent_runtime() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(_PROJECT_ROOT / "main.py"),
+            "memory-migrate",
+            "--help",
+        ],
+        cwd=_PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    assert "assess" in result.stdout
+    assert "prepare" in result.stdout
+    assert "apply" in result.stdout
+    assert "verify" in result.stdout
+    assert "revert" in result.stdout
+    assert "apscheduler" not in output

@@ -53,6 +53,17 @@ class EmbeddingIssue:
 
 
 @dataclass(frozen=True)
+class RequiredEmbeddingMessage:
+    """One exact persisted message required by the replay embedding boundary."""
+
+    message_id: str
+    session_key: str
+    seq: int
+    role: str
+    content: str
+
+
+@dataclass(frozen=True)
 class EmbeddingAudit:
     """Summarize the frozen embedding boundary for eligible dialogue turns."""
 
@@ -202,6 +213,47 @@ def audit_source_embeddings(
         dimension=dimension,
         issues=tuple(issues),
     )
+
+
+def list_required_embedding_messages(
+    source_path: Path,
+) -> tuple[RequiredEmbeddingMessage, ...]:
+    """Return the exact non-empty messages governed by the strict replay audit.
+
+    Keeping this projection beside ``_eligible_pairs`` prevents migration tooling
+    from growing a second, subtly different definition of an Akasha turn.
+    """
+
+    source = sqlite3.connect(f"file:{source_path}?mode=ro", uri=True)
+    source.row_factory = sqlite3.Row
+    try:
+        _validate_source(source)
+        messages = _source_messages(source)
+        pairs, _, _ = _eligible_pairs(messages)
+        required: list[RequiredEmbeddingMessage] = []
+        seen: set[str] = set()
+        for message in _pair_messages(pairs):
+            content = _message_text(message)
+            if not content.strip():
+                continue
+            message_id = str(message["id"])
+            if message_id in seen:
+                raise ValueError(
+                    f"eligible Akasha message appears more than once: {message_id}"
+                )
+            seen.add(message_id)
+            required.append(
+                RequiredEmbeddingMessage(
+                    message_id=message_id,
+                    session_key=str(message["session_key"]),
+                    seq=int(message["seq"]),
+                    role=str(message["role"]),
+                    content=content,
+                )
+            )
+        return tuple(required)
+    finally:
+        source.close()
 
 
 @dataclass(frozen=True)
