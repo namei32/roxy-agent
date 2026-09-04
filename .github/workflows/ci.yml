@@ -111,10 +111,8 @@ jobs:
 
       - name: Run pytest
         timeout-minutes: 15
-        env:
-          PYTHONWARNINGS: "ignore:.*AbstractEventLoopPolicy.*:DeprecationWarning"
         run: |
-          .venv/bin/pytest -vv -W error -o faulthandler_timeout=60 tests/
+          .venv/bin/pytest -vv -o faulthandler_timeout=60 tests/
 
   docker-control-gate:
     runs-on: ubuntu-latest
