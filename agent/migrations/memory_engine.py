@@ -634,7 +634,12 @@ def verify_memory_migration(
                 "Akasha index 没有覆盖当前全部 eligible turns: "
                 f"indexed={len(turns)} eligible={audit.eligible_turns}"
             )
-        _verify_akasha_pair(index_path, memory_path if turns else None, plugin)
+        _verify_akasha_pair(
+            index_path,
+            memory_path if turns else None,
+            plugin,
+            live_index=True,
+        )
         report = {
             "status": "verified",
             "operationId": operation_id,
@@ -1442,7 +1447,19 @@ def _verify_akasha_pair(
     index: Path,
     memory: Path | None,
     plugin: AkashaConfig,
+    *,
+    live_index: bool = False,
 ) -> None:
+    """Validate one graph/index pair at its current lifecycle boundary.
+
+    Prepared and freshly published candidates have an immutable SQLite file, so
+    their graph snapshot must retain the exact source file hash.  The online
+    runtime subsequently performs an idempotent sparse-index refresh at startup;
+    SQLite may then change physical bytes even when every logical table is
+    unchanged.  A live pair therefore uses the runtime's stable identity checks:
+    config, turn count, turn/message bindings, and feedback bindings.
+    """
+
     _assert_sqlite_integrity(index)
     turns = load_turns(index)
     if not turns:
@@ -1456,7 +1473,7 @@ def _verify_akasha_pair(
         memory,
         turns=turns,
         config=plugin.memory_config(),
-        source_index_sha256=_sha256_file(index),
+        source_index_sha256=None if live_index else _sha256_file(index),
     )
 
 
@@ -1672,7 +1689,12 @@ def _installed_candidate_matches(
         index = Path(str(paths["index"]))
         memory = Path(str(paths["memory"]))
         turns = load_turns(index)
-        _verify_akasha_pair(index, memory if turns else None, plugin)
+        _verify_akasha_pair(
+            index,
+            memory if turns else None,
+            plugin,
+            live_index=True,
+        )
         host = Config.load(config_path, workspace=workspace)
         audit = audit_source_embeddings(
             workspace / "sessions.db",

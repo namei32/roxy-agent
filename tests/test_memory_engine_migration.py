@@ -480,6 +480,51 @@ async def test_prepare_apply_verify_and_revert_preserve_all_authoritative_state(
 
 
 @pytest.mark.asyncio
+async def test_verify_accepts_runtime_noop_sparse_index_rewrite(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, config_path, host = _workspace(tmp_path, monkeypatch)
+    await migration.prepare_memory_migration(
+        config_path=config_path,
+        workspace=workspace,
+        operation_id="live-index-rewrite",
+        confirmation=migration.SEND_HISTORY_CONFIRMATION,
+        embedder=_FakeEmbedder(host),
+    )
+    migration.apply_memory_migration(
+        config_path=config_path,
+        workspace=workspace,
+        operation_id="live-index-rewrite",
+        confirmation=migration.APPLY_CONFIRMATION,
+    )
+    index = workspace / "memory/akasha-v2-index.db"
+    before = migration._sha256_file(index)
+
+    # OnlineMemoryRuntime does this on startup.  The source has no new turns,
+    # but SQLite still rewrites compact state and changes the physical file.
+    result = migration.build_sparse_index(
+        workspace / "sessions.db",
+        index,
+        migration.BuildConfig(
+            embedding_model=host.memory.embedding.model,
+            embedding_dimension=host.memory.embedding.output_dimensionality,
+        ),
+    )
+
+    assert result.indexed_turns == 0
+    assert result.skipped_existing_turns == 1
+    assert migration._sha256_file(index) != before
+    verified = migration.verify_memory_migration(
+        config_path=config_path,
+        workspace=workspace,
+        operation_id="live-index-rewrite",
+    )
+    assert verified["status"] == "verified"
+    assert verified["indexedTurns"] == 1
+
+
+@pytest.mark.asyncio
 async def test_prepare_resumes_after_provider_failure_without_reembedding_patch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
