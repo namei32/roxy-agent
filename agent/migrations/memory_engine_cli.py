@@ -23,6 +23,7 @@ from agent.migrations.memory_engine import (
     revert_memory_migration,
     verify_memory_migration,
 )
+from core.net.http import SharedHttpResources
 
 
 def run_memory_migration_cli(arguments: list[str]) -> int:
@@ -41,7 +42,7 @@ def run_memory_migration_cli(arguments: list[str]) -> int:
         elif parsed.action == "prepare":
             operation_id = operation_id or new_operation_id()
             result = asyncio.run(
-                prepare_memory_migration(
+                _prepare_with_http_resources(
                     config_path=config_path,
                     workspace=workspace,
                     operation_id=operation_id,
@@ -85,6 +86,30 @@ def run_memory_migration_cli(arguments: list[str]) -> int:
         )
     print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
+
+
+async def _prepare_with_http_resources(
+    *,
+    config_path: Path,
+    workspace: Path,
+    operation_id: str,
+    embedding_model_id: str,
+    confirmation: str,
+) -> dict[str, object]:
+    """Own the HTTP pool required by the standalone migration command."""
+
+    resources = SharedHttpResources()
+    try:
+        return await prepare_memory_migration(
+            config_path=config_path,
+            workspace=workspace,
+            operation_id=operation_id,
+            embedding_model_id=embedding_model_id,
+            confirmation=confirmation,
+            http_requester=resources.external_default,
+        )
+    finally:
+        await resources.aclose()
 
 
 def _workspace(config_path: Path, override: Path | None) -> Path:
