@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import cast
 
+import httpx
 import pytest
 
 from agent.config_models import (
@@ -18,6 +19,8 @@ from agent.config_models import (
     MemoryEmbeddingConfig,
 )
 from agent.migrations import memory_engine as migration
+from agent.migrations import memory_engine_cli as migration_cli
+from core.net.http import HttpRequester, RequestBudget, RetryPolicy
 
 
 class _FakeEmbedder:
@@ -229,6 +232,67 @@ def _protected_bytes(workspace: Path) -> dict[str, bytes]:
             "memory/PENDING.md",
         )
     }
+
+
+def test_prepare_cli_owns_http_resources_for_real_embedder(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    workspace, config_path, _ = _workspace(tmp_path, monkeypatch)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content.decode("utf-8"))
+        inputs = cast(list[str], payload["input"])
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "data": [
+                    {"index": index, "embedding": _vector(value)}
+                    for index, value in enumerate(inputs)
+                ]
+            },
+        )
+
+    requester = HttpRequester(
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        retry_policy=RetryPolicy(max_attempts=1),
+        default_timeout_s=1.0,
+        default_budget=RequestBudget(total_timeout_s=2.0),
+    )
+
+    class Resources:
+        external_default = requester
+        closed = False
+
+        async def aclose(self) -> None:
+            await requester.client.aclose()
+            self.closed = True
+
+    resources = Resources()
+    monkeypatch.setattr(migration_cli, "SharedHttpResources", lambda: resources)
+
+    result = migration_cli.run_memory_migration_cli(
+        [
+            "prepare",
+            "--config",
+            str(config_path),
+            "--workspace",
+            str(workspace),
+            "--operation-id",
+            "cli-http-lifecycle",
+            "--confirm",
+            migration.SEND_HISTORY_CONFIRMATION,
+        ]
+    )
+
+    assert result == 0
+    assert resources.closed is True
+    output = capsys.readouterr().out
+    payload = json.loads(output[output.index("{\n") :])
+    assert payload["phase"] == "prepared"
+    assert payload["providerStats"]["text_count"] == 2
 
 
 @pytest.mark.asyncio

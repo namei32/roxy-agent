@@ -31,6 +31,7 @@ import tomlkit
 
 from agent.config import Config
 from agent.plugins.manifest import builtin_plugin_data_dir
+from core.net.http import HttpRequester
 from memory2.embedder import Embedder
 from plugins.akasha.application.rebuild import rebuild_memory
 from plugins.akasha.application.runtime import OnlineMemoryRuntime
@@ -185,6 +186,7 @@ async def prepare_memory_migration(
     embedding_model_id: str = "",
     confirmation: str,
     embedder: EmbeddingClient | None = None,
+    http_requester: HttpRequester | None = None,
     fault_hook: FaultHook | None = None,
 ) -> dict[str, object]:
     """Build a complete migration candidate without mutating formal databases."""
@@ -271,7 +273,7 @@ async def prepare_memory_migration(
     _reconcile_patch(snapshot, patch_path, required_by_id, host.memory.embedding.model)
 
     owned_embedder = embedder is None
-    client = embedder or _build_embedder(host)
+    client = embedder or _build_embedder(host, requester=http_requester)
     if client.model_id != host.memory.embedding.model:
         raise MemoryEngineMigrationError(
             "embedding client model 与候选配置不一致: "
@@ -841,13 +843,18 @@ def _target_identity(host: Config) -> dict[str, object]:
     }
 
 
-def _build_embedder(host: Config) -> Embedder:
+def _build_embedder(
+    host: Config,
+    *,
+    requester: HttpRequester | None = None,
+) -> Embedder:
     embedding = host.memory.embedding
     return Embedder(
         base_url=embedding.base_url or host.light_base_url or host.base_url or "",
         api_key=embedding.api_key or host.light_api_key or host.api_key,
         model=embedding.model,
         output_dimensionality=embedding.output_dimensionality,
+        requester=requester,
     )
 
 
