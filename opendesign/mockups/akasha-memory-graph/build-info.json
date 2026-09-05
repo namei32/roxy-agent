@@ -1,0 +1,12 @@
+{
+  "artifact": "Akasha memory graph prototype",
+  "dependencies": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "lucide-react": "1.28.0",
+    "esbuild": "0.25.12"
+  },
+  "networkRuntimeDependencies": [],
+  "outputBytes": 246129,
+  "fixtureOnly": true
+}

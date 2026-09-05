@@ -4,6 +4,9 @@
 - 范围：用户要求完成 Read → Ownership → Isolate → Contract；功能约定见[首版功能约定](akasha-mobile-memory-graph.md)。
 - 状态：调查、归属、隔离与约定已准备；功能尚未实现；已有镜像漂移是后续正式实现的前置问题。
 
+本页保存第 1～4 步的调查和验证状态。后续三屏设计原型的运行、写入范围和验证见
+[原型说明](../../opendesign/mockups/akasha-memory-graph/README.md)，不替代本页记录的正式实现前置检查。
+
 ## 1. 调查基线与入口
 
 目标分支为本次 `git fetch origin main` 后的 `origin/main`。

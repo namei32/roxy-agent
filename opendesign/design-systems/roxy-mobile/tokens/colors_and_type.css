@@ -1,0 +1,37 @@
+/* Snapshot of Roxy Theme Catalog v2, light. Prototype asset; production source remains frontend/theme/src. */
+:root {
+  --roxy-color-bg-canvas: #f8f9ff;
+  --roxy-color-bg-surface: #ffffff;
+  --roxy-color-bg-surface-low: #f2f3fa;
+  --roxy-color-bg-surface-high: #e6e8ee;
+  --roxy-color-text-primary: #191c20;
+  --roxy-color-text-secondary: #42474e;
+  --roxy-color-text-muted: #73777f;
+  --roxy-color-border-default: #c2c7cf;
+  --roxy-color-action-primary: #2d72c4;
+  --roxy-color-on-action-primary: #ffffff;
+  --roxy-color-action-container: #d7e7ff;
+  --roxy-color-on-action-container: #001b3f;
+  --roxy-color-status-trace: #74558f;
+  --roxy-color-status-trace-container: #f0dbff;
+  --roxy-color-status-error: #ba1a1a;
+  --roxy-color-status-error-container: #ffdad6;
+  --roxy-color-status-success: #176b40;
+  --roxy-color-status-warning: #805600;
+  --roxy-color-status-warning-container: #ffdea5;
+  --font-body: "Roboto", "Noto Sans SC", "PingFang SC", system-ui, sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, monospace;
+  --radius-small: 8px;
+  --radius-medium: 12px;
+  --radius-large: 16px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --motion-standard: cubic-bezier(0.2, 0, 0, 1);
+  --duration-short: 150ms;
+  --duration-medium: 300ms;
+  color-scheme: light;
+}

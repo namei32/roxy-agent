@@ -1,15 +1,43 @@
 {
-  "generated": "2026-09-05T07:19:13Z",
+  "generated": "2026-09-05T07:57:29.194478+00:00",
   "sections": [
     {
       "id": "mockups",
       "label": "Mockups",
-      "groups": []
+      "groups": [
+        {
+          "slug": "akasha-memory-graph",
+          "files": [
+            {
+              "label": "index.html",
+              "path": "mockups/akasha-memory-graph/index.html"
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "design-systems",
       "label": "Design Systems",
-      "groups": []
+      "groups": [
+        {
+          "slug": "roxy-mobile",
+          "files": [
+            {
+              "label": "README.md",
+              "path": "design-systems/roxy-mobile/README.md"
+            },
+            {
+              "label": "SKILL.md",
+              "path": "design-systems/roxy-mobile/SKILL.md"
+            },
+            {
+              "label": "colors_and_type.css",
+              "path": "design-systems/roxy-mobile/tokens/colors_and_type.css"
+            }
+          ]
+        }
+      ]
     }
   ]
 }
