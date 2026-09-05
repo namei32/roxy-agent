@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from typing import Any
 
 SCHEMA = "akasha.memory-graph.v1"
 MAX_BYTES = 128 * 1024
@@ -12,7 +13,7 @@ GROUP_SIZE = 8
 NEIGHBOR_SIZE = 10
 SEARCH_SIZE = 12
 SOURCE_SIZE = 2048
-METHODS = {
+METHODS: dict[str, tuple[set[str], set[str]]] = {
     "graph.overview": ({"page"}, set()),
     "graph.group": ({"revision", "node_id", "page"}, {"revision", "node_id"}),
     "graph.neighbors": (
@@ -83,7 +84,7 @@ def page_info(total: int, page: int, size: int) -> dict[str, object]:
 
 
 def response(status: str, **values: object) -> dict[str, object]:
-    result = {"schema": SCHEMA, "status": status, **values}
+    result: dict[str, Any] = {"schema": SCHEMA, "status": status, **values}
     if len(result.get("nodes", [])) > 100 or len(result.get("edges", [])) > 200:
         raise GraphUnavailable("图查询超过节点或关系预算")
     encoded = json.dumps(

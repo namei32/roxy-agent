@@ -24,7 +24,7 @@ def file_signature(path: Path) -> tuple[int, ...]:
 
 
 def read_authorizer(
-    action: int, arg1: str, arg2: str, database: str, trigger: str
+    action: int, arg1: str | None, arg2: str | None, database: str | None, trigger: str
 ) -> int:
     """Deny mutations, attachment changes, and pragmas after read setup."""
 
@@ -36,6 +36,10 @@ def read_authorizer(
         sqlite3.SQLITE_RECURSIVE,
     }
     return sqlite3.SQLITE_OK if action in allowed else sqlite3.SQLITE_DENY
+
+
+def text_page(text: str, start: int, count: int) -> str:
+    return text[start : start + count]
 
 
 class AkashaGraphReader:
@@ -63,7 +67,7 @@ class AkashaGraphReader:
             revision = self._revision(signature)
             with closing(self._connect()) as connection:
                 # 2. BEGIN pins each attached read snapshot before validation.
-                connection.execute("BEGIN")
+                _ = connection.execute("BEGIN")
                 metadata = dict(connection.execute("SELECT key, value FROM metadata"))
                 connection.execute(
                     "SELECT COUNT(*) FROM sparse.sparse_turns"
@@ -106,11 +110,11 @@ class AkashaGraphReader:
         try:
             connection.row_factory = sqlite3.Row
             for name, path in (("sparse", self.index), ("sessions", self.sessions)):
-                connection.execute(
+                _ = connection.execute(
                     f"ATTACH DATABASE ? AS {name}",
                     (path.resolve().as_uri() + "?mode=ro",),
                 )
-            connection.execute("PRAGMA query_only = ON")
+            _ = connection.execute("PRAGMA query_only = ON")
             if (
                 connection.execute("PRAGMA application_id").fetchone()[0] != 1095452754
                 or connection.execute("PRAGMA user_version").fetchone()[0] != 2
@@ -119,7 +123,9 @@ class AkashaGraphReader:
             connection.create_function("graph_id", 2, public_id, deterministic=True)
             connection.create_function("graph_length", 1, len, deterministic=True)
             connection.create_function(
-                "graph_text_page", 3, lambda text, start, count: text[start:start + count],
+                "graph_text_page",
+                3,
+                text_page,
                 deterministic=True,
             )
             deadline = time.monotonic() + 5

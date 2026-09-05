@@ -75,7 +75,7 @@ function mountMemoryGraph(host, context) {
         route = { method: "graph.overview", params: {} }; busy = false;
         failure = fresh.status === "empty" ? null : fresh; render(); return;
       }
-      const next = previous.method === "graph.overview" || previous.method === "graph.group"
+      const next = previous.method === "graph.overview"
         ? { method: "graph.overview", params: {} }
         : { method: previous.method, params: { ...previous.params, revision: fresh.revision, page: 0 } };
       go(next.method, next.params, { remember: false });
@@ -140,7 +140,7 @@ function mountMemoryGraph(host, context) {
     return `${summary()}<form class="akmg-search" data-mg-search><label class="akmg-sr-only" for="akmg-search">搜索全部已发布记忆</label>
       <input id="akmg-search" type="search" maxlength="200" placeholder="搜索全部已发布记忆" value="${escapeHtml(queryText)}"><button type="submit">搜索</button></form>
       <div class="akmg-section-title"><h3>${group ? "组内记忆" : "关联组概览"}</h3>
-      ${group ? '<button type="button" data-mg="collapse">收起关联组</button>' : ""}</div>
+      ${group ? `<button type="button" data-mg="detail" data-node="${escapeHtml(data.root_id)}">组详情</button><button type="button" data-mg="collapse">收起</button>` : ""}</div>
       <p class="akmg-caption">${group ? `当前显示 ${data.scope.end - data.scope.start} / ${data.scope.total} 个成员` : "点击关联组展开。成员可以共享，组内计数不可相加。"}</p>
       ${mgPager(data.scope)}<div data-mg-canvas></div>
       ${mgNodeRows(group ? data.nodes.filter((n) => n.id !== data.root_id) : data.nodes, group ? "local" : "group")}

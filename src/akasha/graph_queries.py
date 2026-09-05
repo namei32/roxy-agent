@@ -51,7 +51,7 @@ class GraphQueries:
     def result(self, status: str, **values: object) -> dict[str, object]:
         return response(status, revision=self.revision, **values)
 
-    def count(self, query: str, values: tuple = ()) -> int:
+    def count(self, query: str, values: tuple[Any, ...] = ()) -> int:
         return int(self.db.execute(query, values).fetchone()[0])
 
     def resolve(self, identity: str) -> dict[str, Any] | None:
@@ -130,7 +130,7 @@ class GraphQueries:
 
         turns = self.count("SELECT COUNT(*) FROM turn_nodes")
         groups = self.count("SELECT COUNT(*) FROM hub_nodes")
-        refs = [
+        refs: list[dict[str, Any]] = [
             {"node_id": row[0], "kind": "hub"}
             for row in self.db.execute(
                 "SELECT node_id FROM hub_nodes ORDER BY created_event DESC, node_id LIMIT ? OFFSET ?",
@@ -183,14 +183,16 @@ class GraphQueries:
             query=query,
         )
 
-    def neighbor_refs(self, root: dict[str, Any], relation: str) -> tuple[str, dict]:
+    def neighbor_refs(
+        self, root: dict[str, Any], relation: str
+    ) -> tuple[str, dict[str, int]]:
         number = root["node_id"]
         if root["kind"] == "hub":
             return (
                 "SELECT DISTINCT turn_node_id node_id,'turn' kind FROM hub_memberships WHERE hub_node_id=:root"
                 + (" AND 0" if relation == "temporal" else "")
             ), {"root": number}
-        queries = []
+        queries: list[str] = []
         if relation in ("all", "membership"):
             queries.append(
                 "SELECT hub_node_id node_id,'hub' kind FROM hub_memberships WHERE turn_node_id=:root"
@@ -233,13 +235,15 @@ class GraphQueries:
             scope=page_info(total, page, size),
         )
 
-    def edges(self, refs: list[dict], nodes: list[dict], relation: str) -> list[dict]:
+    def edges(
+        self, refs: list[dict[str, Any]], nodes: list[dict[str, Any]], relation: str
+    ) -> list[dict[str, Any]]:
         """Return every stored edge of the requested types between page endpoints."""
 
         lookup = {ref["node_id"]: node["id"] for ref, node in zip(refs, nodes)}
         slots = ",".join("?" for _ in lookup)
         values = (*lookup, *lookup)
-        rows = []
+        rows: list[sqlite3.Row] = []
         if relation in ("all", "membership"):
             rows.extend(
                 self.db.execute(
@@ -264,7 +268,7 @@ class GraphQueries:
                     values,
                 ).fetchall()
             )
-        edges = []
+        edges: list[dict[str, Any]] = []
         for row in rows:
             strength = float(row["strength"])
             if not math.isfinite(strength) or strength < 0:

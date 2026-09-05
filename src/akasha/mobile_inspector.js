@@ -211,4 +211,3 @@ function mountInspector(host, context) {
   });
   return () => { active = false; };
 }
-
