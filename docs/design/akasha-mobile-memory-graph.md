@@ -107,14 +107,26 @@ SQLite authorizer 仅允许读查询操作，设置查询时限；查询不读�
 
 ## 6. 源码维护与运行
 
-- 真源是 `akasha-v2-engine/src/akasha`；当前固定 commit、subtree 和摘要见 [UPSTREAM.json](../../plugins/akasha/UPSTREAM.json)。
-  先在 canonical 仓库提交，再按完整文件集合镜像，运行 [镜像检查](../../scripts/check_akasha_v2_mirror.py)。
+- 真源仍是独立 Akasha Git 历史中的 `src/akasha`；可获取地址、固定 commit、subtree 和摘要见 [UPSTREAM.json](../../plugins/akasha/UPSTREAM.json)。
+  Roxy 发布副本保存在既有私有 `namei32/roxy-agent` 仓库的 `source/akasha-v2` 分支，原始仓库与基线另以 `origin_repository`、`origin_commit` 保留。
+  先在独立 canonical checkout 提交并发布源码，再按完整文件集合镜像，运行 [镜像检查](../../scripts/check_akasha_v2_mirror.py)。
+  分支仅供发现；发布和回滚始终使用完整 commit，不随分支头自动升级。该源码历史不合并进宿主 main。
 - `mobile_inspector.js` 保留原 Inspector/召回实现；`mobile_graph_canvas.js` 负责 SVG 与手势；
   `mobile_graph.js` 负责路由和请求；`mobile_ui_entry.js` 负责页签和 slot。
   在 canonical 仓库运行 `python3 scripts/build_mobile_ui.py`，生成并提交无外部 import 的 `mobile_ui.js`，适配宿主 blob 资源加载。
 - 安装入口与 Akasha 引擎选择沿用现有机制。已使用 Akasha 的实例发布新版宿主与插件后，在手机重新打开插件页面即可读取当前已发布图。
   本功能不需要 schema 升级、模型调用、图重建或新增配置。首次切换引擎仍遵循[既有迁移流程](akasha-first-adoption-migration.md)。
 - 回滚代码时恢复成对的 canonical pin 与宿主镜像；不恢复或覆盖用户数据库。
+
+复验发布源码时，使用现有私有仓库读取权限获取专用分支，再切到 pin 中的完整提交：
+
+```bash
+git clone --single-branch --branch source/akasha-v2 https://github.com/namei32/roxy-agent.git /path/to/akasha-v2-engine
+git -C /path/to/akasha-v2-engine checkout --detach <UPSTREAM.json中的commit>
+python scripts/check_akasha_v2_mirror.py --upstream /path/to/akasha-v2-engine
+```
+
+源码地址只影响发布可复验性，运行时仍加载宿主镜像，不在手机请求期间访问 GitHub。
 
 本地预览使用真实插件资产和 SQLite 读取链路，创建自己拥有的一次性样例目录：
 
