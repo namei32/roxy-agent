@@ -457,9 +457,7 @@ def test_unreinforced_relation_loses_accessibility_without_losing_raw_weight() -
 
     assert graph.weight[edge] == 1.0
     assert 0.0 < graph.retention_factor(edge) < 1.0
-    assert graph.effective_weight(edge) == pytest.approx(
-        graph.retention_factor(edge)
-    )
+    assert graph.effective_weight(edge) == pytest.approx(graph.retention_factor(edge))
 
 
 def test_recurrence_prior_separates_within_and_across_burst_timescales() -> None:
@@ -533,8 +531,7 @@ def test_retrieved_coactivation_partially_reconsolidates_relation() -> None:
         for before, after in zip(supported_at, graph.last_support_seconds)
     )
     assert all(
-        after > before
-        for before, after in zip(strong_credit, graph.support_credit)
+        after > before for before, after in zip(strong_credit, graph.support_credit)
     )
     assert graph.independent_credit == pytest.approx([1.0, 1.0])
     assert all(graph.retention_factor(edge) < 1.0 for edge in edges)
@@ -549,7 +546,15 @@ def test_rebuild_database_is_independent_of_python_hash_seed(tmp_path: Path) -> 
         environment = {
             **os.environ,
             "PYTHONHASHSEED": seed,
-            "PYTHONPATH": str(Path(__file__).parents[2] / "src"),
+            "PYTHONPATH": os.pathsep.join(
+                filter(
+                    None,
+                    (
+                        str(Path(__file__).parents[2] / "src"),
+                        os.environ.get("PYTHONPATH", ""),
+                    ),
+                )
+            ),
             "OPENBLAS_NUM_THREADS": "1",
             "MKL_NUM_THREADS": "1",
             "OMP_NUM_THREADS": "1",
@@ -583,15 +588,11 @@ def _completion(*items: RecallItem) -> PatternCompletion:
         sharp_completion_count=sum(
             "sharp_completion" in item.sources for item in items
         ),
-        basin_direct_count=sum(
-            "basin_direct" in item.sources for item in items
-        ),
+        basin_direct_count=sum("basin_direct" in item.sources for item in items),
         basin_completion_count=sum(
             "basin_completion" in item.sources for item in items
         ),
-        relative_tail_count=sum(
-            "relative_tail" in item.sources for item in items
-        ),
+        relative_tail_count=sum("relative_tail" in item.sources for item in items),
         pushes=1,
         residual_l1=0.0,
     )
@@ -635,45 +636,14 @@ def _turn(node_id: int, vector: np.ndarray, text: str) -> Turn:
 def _write_sparse_fixture(path: Path) -> None:
     connection = sqlite3.connect(path)
     try:
-        connection.executescript(
-            """
-            CREATE TABLE metadata (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            );
-            CREATE TABLE sparse_turns (
-                turn_id TEXT PRIMARY KEY,
-                session_key TEXT NOT NULL,
-                user_seq INTEGER NOT NULL,
-                user_message_id TEXT NOT NULL,
-                assistant_message_id TEXT NOT NULL,
-                started_at TEXT NOT NULL,
-                committed_at TEXT NOT NULL,
-                user_text TEXT NOT NULL,
-                assistant_text TEXT NOT NULL,
-                remember_targets_json TEXT NOT NULL,
-                forget_targets_json TEXT NOT NULL,
-                remember_boost REAL NOT NULL
-            );
-            CREATE TABLE turn_dense (
-                turn_id TEXT NOT NULL,
-                field TEXT NOT NULL,
-                embedding BLOB NOT NULL,
-                dim INTEGER NOT NULL
-            );
-            CREATE TABLE turn_terms (
-                turn_id TEXT NOT NULL,
-                field TEXT NOT NULL,
-                term TEXT NOT NULL,
-                tf INTEGER NOT NULL
-            );
-            """
-        )
+        from akasha.infrastructure.sparse_index.schema import SCHEMA, INDEX_VERSION
+
+        connection.executescript(SCHEMA)
         connection.executemany(
             "INSERT INTO metadata VALUES (?, ?)",
             [
                 ("embedding_model", "fixture"),
-                ("index_version", "8"),
+                ("index_version", INDEX_VERSION),
                 ("turns_missing_embeddings", "0"),
             ],
         )
@@ -682,7 +652,7 @@ def _write_sparse_fixture(path: Path) -> None:
             connection.execute(
                 """
                 INSERT INTO sparse_turns
-                VALUES (?, 's', ?, ?, ?, ?, ?, ?, ?, '[]', '[]', 1.0)
+                VALUES (?, 's', ?, ?, ?, ?, ?, ?, ?, '[]', '[]', 1.0, 'fixture')
                 """,
                 (
                     turn_id,
@@ -701,10 +671,10 @@ def _write_sparse_fixture(path: Path) -> None:
             )
             vector /= np.linalg.norm(vector)
             connection.executemany(
-                "INSERT INTO turn_dense VALUES (?, ?, ?, 2)",
+                "INSERT INTO turn_dense VALUES (?, ?, ?, ?, 2)",
                 [
-                    (turn_id, "user", vector.tobytes()),
-                    (turn_id, "assistant", vector.tobytes()),
+                    (turn_id, "user", f"s:{index}:user", vector.tobytes()),
+                    (turn_id, "assistant", f"s:{index}:assistant", vector.tobytes()),
                 ],
             )
             connection.executemany(

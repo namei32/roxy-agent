@@ -1,16 +1,9 @@
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = (ROOT / "src" / "akasha" / "mobile_ui.js").read_text(
-    encoding="utf-8"
-)
-STYLES = (ROOT / "src" / "akasha" / "mobile_ui.css").read_text(
-    encoding="utf-8"
-)
-PLUGIN = (ROOT / "src" / "akasha" / "plugin.py").read_text(
-    encoding="utf-8"
-)
+SCRIPT = (ROOT / "src" / "akasha" / "mobile_ui.js").read_text(encoding="utf-8")
+STYLES = (ROOT / "src" / "akasha" / "mobile_ui.css").read_text(encoding="utf-8")
+PLUGIN = (ROOT / "src" / "akasha" / "plugin.py").read_text(encoding="utf-8")
 
 
 def test_recall_lanes_have_distinct_semantic_classes() -> None:
@@ -20,9 +13,9 @@ def test_recall_lanes_have_distinct_semantic_classes() -> None:
 
 
 def test_recall_lanes_use_material_tonal_surfaces() -> None:
-    assert "--akasha-mobile-precise: var(--m-primary)" in STYLES
+    assert "--akasha-mobile-precise: var(--roxy-color-action-primary)" in STYLES
     assert "--akasha-mobile-completion:" in STYLES
-    assert "var(--m-trace, oklch(0.56 0.18 300))" in STYLES
+    assert "var(--roxy-color-status-trace)" in STYLES
     assert "grid-template-columns: 4px minmax(0, 1fr) auto" in STYLES
     assert "transition-property: all" not in STYLES
     assert "transition: all" not in STYLES

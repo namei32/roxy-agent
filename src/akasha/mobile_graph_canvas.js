@@ -1,15 +1,15 @@
 function drawMemoryGraph(host, data, options) {
   const width = 360;
-  const height = options.aggregate ? Math.max(210, Math.ceil(data.nodes.length / 2) * 76 + 25) : 320;
+  const height = options.aggregate ? Math.max(140, Math.ceil(data.nodes.length / 2) * 76 + 25) : 296;
   const points = new Map();
   data.nodes.forEach((node, index) => {
     if (options.aggregate) {
       points.set(node.id, { x: 95 + (index % 2) * 170, y: 45 + Math.floor(index / 2) * 76 });
     } else if (node.id === data.root_id) {
-      points.set(node.id, { x: 180, y: 160 });
+      points.set(node.id, { x: 180, y: 148 });
     } else {
       const angle = -Math.PI / 2 + (index - 1) * Math.PI * 2 / Math.max(1, data.nodes.length - 1);
-      points.set(node.id, { x: 180 + Math.cos(angle) * 122, y: 160 + Math.sin(angle) * 120 });
+      points.set(node.id, { x: 180 + Math.cos(angle) * 122, y: 148 + Math.sin(angle) * 106 });
     }
   });
   const label = (node) => node.kind === "hub" ? "关联组" : "记忆";
@@ -38,12 +38,16 @@ function drawMemoryGraph(host, data, options) {
     </g></svg>
     <div class="akmg-canvas-tools"><span data-graph-zoom>100%</span><button type="button" data-graph-reset>重置视图</button></div>`;
   const svg = host.querySelector("svg"), plane = host.querySelector("[data-graph-plane]");
+  host.prepend(host.querySelector(".akmg-canvas-tools"));
   const pointers = new Map();
-  let scale = 1, tx = 0, ty = 0, moved = false, start = null, pinch = null, pendingSelection = null;
+  let { scale = 1, tx = 0, ty = 0 } = options.view || {};
+  let moved = false, start = null, pinch = null, pendingSelection = null;
   const update = () => {
     plane.setAttribute("transform", `translate(${tx},${ty}) scale(${scale})`);
     host.querySelector("[data-graph-zoom]").textContent = `${Math.round(scale * 100)}%`;
+    options.onViewChange?.({ scale, tx, ty });
   };
+  update();
   const local = (x, y) => new DOMPoint(x, y).matrixTransform(svg.getScreenCTM().inverse());
   const centerDistance = () => {
     const [a, b] = [...pointers.values()];

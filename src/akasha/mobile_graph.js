@@ -25,6 +25,7 @@ function mountMemoryGraph(host, context) {
   let active = true, serial = 0, busy = false, data = null, overview = null;
   let route = { method: "graph.overview", params: {} }, selected = null, focus = true;
   let queryText = "", sourceOpen = false, notice = "", failure = null;
+  let graphView = {};
   const trail = [];
 
   const request = async (method, params) => {
@@ -36,11 +37,12 @@ function mountMemoryGraph(host, context) {
     if (result.status === "ready" && params.revision && result.revision !== params.revision) throw new Error("记忆图版本不一致，请刷新");
     return result;
   };
-  const save = () => ({ route, data, selected, sourceOpen, scroll: host.getBoundingClientRect().top });
+  const save = () => ({ route, data, selected, sourceOpen, graphView });
   const go = async (method, params = {}, { remember = true } = {}) => {
     if (!active) return;
     if (remember && data && !failure) { trail.push(save()); if (trail.length > 32) trail.shift(); }
     route = { method, params }; selected = null; sourceOpen = false; notice = "";
+    graphView = {};
     const token = ++serial;
     busy = true; failure = null; render();
     try {
@@ -59,7 +61,7 @@ function mountMemoryGraph(host, context) {
     ++serial; busy = false; failure = null; notice = "";
     const previous = trail.pop();
     if (!previous) { go("graph.overview", {}, { remember: false }); return; }
-    ({ route, data, selected, sourceOpen } = previous); render();
+    ({ route, data, selected, sourceOpen, graphView } = previous); render();
     host.scrollIntoView({ block: "start" });
   };
   const revision = () => data?.revision || overview?.revision;
@@ -87,7 +89,7 @@ function mountMemoryGraph(host, context) {
   const loadSource = async (field) => {
     const prior = data.sources[field];
     if (prior.next_offset === null || busy) return;
-    const token = ++serial; busy = true;
+    const token = ++serial; busy = true; render();
     try {
       const value = await request("graph.source", { revision: revision(), node_id: data.node.id, field, offset: prior.next_offset });
       if (!active || token !== serial) return;
@@ -122,7 +124,7 @@ function mountMemoryGraph(host, context) {
       ${sourceOpen ? Object.entries(data.sources).map(([field, item]) => `<article><h3>${field === "user" ? "原始输入" : "原始回复"}</h3>
         <div class="akmg-source-text">${escapeHtml(item.text || "（空正文）")}</div>
         <p class="akmg-caption">已显示 ${[...item.text].length} / ${item.total_chars} 字符</p>
-        ${item.next_offset !== null ? `<button type="button" data-mg="source-more" data-field="${field}">继续阅读${field === "user" ? "输入" : "回复"}</button>` : ""}</article>`).join("") : ""}
+        ${item.next_offset !== null ? `<button type="button" data-mg="source-more" data-field="${field}" ${busy ? "disabled" : ""}>继续阅读${field === "user" ? "输入" : "回复"}</button>` : ""}</article>`).join("") : ""}
       ${sourceOpen ? `<button type="button" data-mg="copy" ${complete ? "" : "disabled"}>${complete ? "复制完整原文" : "读完原文后可复制全文"}</button>` : ""}</section>`;
   }
   function detailBody() {
@@ -181,7 +183,8 @@ function mountMemoryGraph(host, context) {
       <p class="akmg-footnote">只读浏览 · 关联强度不代表事实可信度或因果关系</p></div>`;
     const canvas = host.querySelector("[data-mg-canvas]");
     if (canvas && data) drawMemoryGraph(canvas, data, {
-      aggregate: route.method === "graph.overview", selected, focus,
+      aggregate: route.method === "graph.overview", selected, focus, view: graphView,
+      onViewChange: (value) => { graphView = value; },
       onSelect: (id) => {
         if (route.method === "graph.overview") navigate("graph.group", id);
         else if (route.method === "graph.group" && id !== data.root_id) navigate("graph.neighbors", id);

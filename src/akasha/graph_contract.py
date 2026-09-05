@@ -85,6 +85,13 @@ def page_info(total: int, page: int, size: int) -> dict[str, object]:
 
 def response(status: str, **values: object) -> dict[str, object]:
     result: dict[str, Any] = {"schema": SCHEMA, "status": status, **values}
+    nodes: list[dict[str, Any]] = result.get("nodes", [])
+    edges: list[dict[str, Any]] = result.get("edges", [])
+    ids = {node["id"] for node in nodes}
+    if len(ids) != len(nodes) or len({edge["id"] for edge in edges}) != len(edges):
+        raise GraphUnavailable("记忆图包含重复身份")
+    if any(edge["source"] not in ids or edge["target"] not in ids for edge in edges):
+        raise GraphUnavailable("记忆关系缺少当前范围内的端点")
     if len(result.get("nodes", [])) > 100 or len(result.get("edges", [])) > 200:
         raise GraphUnavailable("图查询超过节点或关系预算")
     encoded = json.dumps(

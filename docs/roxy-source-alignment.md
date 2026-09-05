@@ -25,3 +25,5 @@ This alignment preserves the Roxy host package at `99505f0d1ed49133a8682e6eb5723
 | `plugin.py` | 96a75ddfd07b09d430b153d9cd45d713d0f623e3 feat(mobile): 发布模型胶囊并自动对账 Stable (#336) |
 
 The host mirror checker must pass against this committed subtree before graph feature work.
+
+Regression fixture alignment: source databases now include the existing Roxy sessions table and session metadata; the hash-seed fixture uses the canonical sparse schema/version instead of the retired v8 layout. Subprocess tests preserve the explicit host dependency path. Theme assertions reference the existing Roxy token owner. Recall/parity/count expectations are retained.

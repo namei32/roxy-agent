@@ -704,7 +704,9 @@ def _create_sessions(path: Path) -> None:
     with sqlite3.connect(path) as connection:
         connection.executescript(
             """
-            CREATE TABLE messages (
+            CREATE TABLE sessions (key TEXT PRIMARY KEY, metadata TEXT);
+                INSERT INTO sessions VALUES ('test:one', '{}');
+                CREATE TABLE messages (
                 id TEXT PRIMARY KEY,
                 session_key TEXT NOT NULL,
                 seq INTEGER NOT NULL,

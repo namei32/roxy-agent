@@ -298,6 +298,8 @@ class SparseIndexTest(unittest.TestCase):
         with closing(sqlite3.connect(self.source)) as connection, connection:
             connection.executescript(
                 """
+                CREATE TABLE sessions (key TEXT PRIMARY KEY, metadata TEXT);
+                INSERT INTO sessions VALUES ('test:one', '{}');
                 CREATE TABLE messages (
                     id TEXT PRIMARY KEY,
                     session_key TEXT NOT NULL,

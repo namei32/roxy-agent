@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 import time
 from contextlib import closing
 from pathlib import Path
+
+from session.memory_policy import excludes_memory
 
 from .graph_contract import GraphUnavailable, public_id, response, validate_request
 from .graph_queries import GraphQueries
@@ -24,7 +27,11 @@ def file_signature(path: Path) -> tuple[int, ...]:
 
 
 def read_authorizer(
-    action: int, arg1: str | None, arg2: str | None, database: str | None, trigger: str
+    action: int,
+    arg1: str | None,
+    arg2: str | None,
+    database: str | None,
+    trigger: str | None,
 ) -> int:
     """Deny mutations, attachment changes, and pragmas after read setup."""
 
@@ -40,6 +47,20 @@ def read_authorizer(
 
 def text_page(text: str, start: int, count: int) -> str:
     return text[start : start + count]
+
+
+def source_excluded(session_key: str, raw: str | None) -> bool:
+    metadata = json.loads(raw) if raw else {}
+    if not isinstance(metadata, dict):
+        raise ValueError("session metadata must be an object")
+    return excludes_memory(session_key, metadata)
+
+
+def message_skipped(raw: str | None) -> bool:
+    extra = json.loads(raw) if raw else {}
+    if not isinstance(extra, dict):
+        raise ValueError("message extra must be an object")
+    return bool(extra.get("skip_post_memory"))
 
 
 class AkashaGraphReader:
@@ -123,6 +144,12 @@ class AkashaGraphReader:
             connection.create_function("graph_id", 2, public_id, deterministic=True)
             connection.create_function("graph_length", 1, len, deterministic=True)
             connection.create_function(
+                "graph_excluded", 2, source_excluded, deterministic=True
+            )
+            connection.create_function(
+                "graph_skipped", 1, message_skipped, deterministic=True
+            )
+            connection.create_function(
                 "graph_text_page",
                 3,
                 text_page,
@@ -179,11 +206,12 @@ WHERE s.turn_id IS NULL OR u.id IS NULL OR a.id IS NULL OR ss.key IS NULL
  OR s.assistant_message_id IS NOT t.assistant_message_id
  OR s.session_key IS NOT t.session_key OR s.user_seq IS NOT t.user_seq
  OR u.session_key IS NOT t.session_key OR a.session_key IS NOT t.session_key
+ OR u.role IS NOT 'user' OR a.role IS NOT 'assistant'
  OR u.seq IS NOT t.user_seq OR u.ts IS NOT t.started_at OR a.ts IS NOT t.committed_at
  OR s.started_at IS NOT t.started_at OR s.committed_at IS NOT t.committed_at
  OR s.assistant_text IS NOT COALESCE(a.content, '')
- OR COALESCE(json_extract(u.extra, '$.skip_post_memory'), 0)=1
- OR COALESCE(json_extract(a.extra, '$.skip_post_memory'), 0)=1
+ OR graph_excluded(t.session_key, ss.metadata)
+ OR graph_skipped(u.extra) OR graph_skipped(a.extra)
  OR s.user_text IS NOT CASE
     WHEN json_extract(u.extra, '$.control_turn_id') IS NULL THEN COALESCE(u.content, '')
     ELSE (SELECT group_concat(content, char(10)||char(10)) FROM (
@@ -199,6 +227,11 @@ WHERE s.turn_id IS NULL OR u.id IS NULL OR a.id IS NULL OR ss.key IS NULL
         SELECT COUNT(*) FROM sessions.messages m WHERE m.session_key=t.session_key
           AND m.role='user'
           AND json_extract(m.extra, '$.control_turn_id')=json_extract(u.extra, '$.control_turn_id')
+    ) OR EXISTS (
+        SELECT 1 FROM sessions.messages m WHERE m.session_key=t.session_key
+          AND m.role='user'
+          AND json_extract(m.extra, '$.control_turn_id')=json_extract(u.extra, '$.control_turn_id')
+          AND graph_skipped(m.extra)
     )))
 LIMIT 1
 """

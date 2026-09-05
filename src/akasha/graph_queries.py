@@ -215,7 +215,7 @@ class GraphQueries:
                 0
             ]
         )
-        refs = [
+        refs: list[dict[str, Any]] = [
             dict(r)
             for r in self.db.execute(
                 "SELECT * FROM ("
