@@ -1,7 +1,10 @@
 {
-  "repository": "git@github.com:kachofugetsu09/akasha-v2-engine.git",
-  "commit": "372672ba5575064a24f3bcf4eecd21050b0366c3",
+  "repository": "https://github.com/namei32/roxy-agent.git",
+  "source_ref": "refs/heads/source/akasha-v2",
+  "commit": "d0f83777dc8005ddc8a61f36336688c165db9616",
   "source_subtree": "src/akasha",
-  "source_tree": "af0cd675dc073498d0a746f8dde4fc231dd18463",
-  "source_sha256": "a1fc7246940d2c8ab2fa969d0d7b36e98c51dc4541bcc7b38a30005c72270aa9"
+  "source_tree": "ea67f43954da5a70b9876f7b3dcca76f0d2961c4",
+  "source_sha256": "66ba48905552919016da9024b3c5e14ce5e511a4efa4eeabd7ad6ba868838009",
+  "origin_repository": "https://github.com/kachofugetsu09/akasha-v2-engine.git",
+  "origin_commit": "e85dc2c66ff4eb16af118c638d72e7c32f3dc69a"
 }

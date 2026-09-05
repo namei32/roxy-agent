@@ -273,8 +273,10 @@ turn_dense + prior-only dot ─► 左脑 dense top 5
 
 桌面端通过插件 Dashboard 注册三个只读端点：overview、分页检索轮次和单轮详情。
 移动端复用宿主通用 plugin UI 协议：当前 assistant 回复前显示本轮左右脑召回，
-导航页显示最近检索并按需读取详情。两端都不暴露图快照、任意 SQL、reinforce 或写入
-RPC；SQLite 连接使用 read-only URI 与 `query_only`。assistant 预览保持最多 50 字，
+导航页保留最近检索与详情，并按 [ADR 1004](../decisions/1004-akasha-mobile-graph-is-a-versioned-read-only-projection.md)
+增加[版本化只读记忆图](akasha-mobile-memory-graph.md)。图使用独立查询与预算，不改变召回投影。
+两端都不暴露任意 SQL、reinforce 或写入 RPC；SQLite 连接使用 read-only URI 与 `query_only`。
+既有 recall/Inspector assistant 预览保持最多 50 字，
 Dense 与显式补全按稳定 turn ID 去重后，分别按时间从近到远显示。
 
 `dashboard_panel_inspector.ts` 属于 upstream 镜像；宿主构建生成的同名 `.js` 是被

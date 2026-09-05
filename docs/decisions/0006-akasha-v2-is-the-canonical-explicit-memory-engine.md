@@ -1,6 +1,8 @@
 # 0006 · Akasha V2 是显式记忆的唯一算法实现
 
 - 状态：accepted
+- superseded by：[1004](1004-akasha-mobile-graph-is-a-versioned-read-only-projection.md)（仅手机端不展示图的限制；算法、只读和镜像合同继续有效）
+- refined by：[1004 的源码发布位置补充](1004-akasha-mobile-graph-is-a-versioned-read-only-projection.md#源码发布位置补充)（保留独立 Git 历史与固定镜像，允许既有私有仓库保存发布副本）
 - 日期：2026-07-27
 - 关联条款：MEM-009、SES-003、GOV-005、TST-002、TST-005
 

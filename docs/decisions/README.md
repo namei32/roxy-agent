@@ -46,6 +46,7 @@
 | [1001](1001-roxy-runtime-identity-migration.md) | accepted | Roxy 是唯一的新增运行时身份，旧 Akashic 仅作兼容 | WSP-003～WSP-004、WSP-006、MIG-001～MIG-002、WEBUI-007、SEC-010 |
 | [1002](1002-roxy-plugins-is-canonical-plugin-organization.md) | accepted | roxy-plugins 是插件源码的 canonical GitHub 组织 | GOV-005、PLG-009、WSP-004～WSP-005、TST-006～TST-007 |
 | [1003](1003-wsl-pulls-ci-promoted-immutable-releases.md) | accepted | WSL 只拉取 CI 晋升的不可变 release | RUN-004、RUN-016、CAP-002～CAP-003、PLG-013、ERR-001 |
+| [1004](1004-akasha-mobile-graph-is-a-versioned-read-only-projection.md) | accepted | Akasha 手机记忆图使用版本化只读投影 | MOB-001、MOB-006、PLG-011、MEM-009～MEM-010、TST-002 |
 
 ## 新增规则
 

@@ -47,6 +47,8 @@ from .application.cycle import RetrievalTicket
 from .application.runtime import OnlineMemoryRuntime, StagedOnlineCommit
 from .config import AkashaConfig, resolve_workspace_path
 from .domain.model import Turn
+from .graph_contract import GraphUnavailable
+from .graph_reader import AkashaGraphReader
 
 if TYPE_CHECKING:
     from bus.event_bus import EventBus
@@ -366,6 +368,11 @@ class AkashaMemoryEngine:
         self._pending: dict[str, PendingRetrieval] = {}
         self._source_generation = 0
         self._source_invalidated_error: RuntimeError | None = None
+        self._graph_reader = AkashaGraphReader(
+            resolve_workspace_path(workspace, akasha_config.db_path),
+            resolve_workspace_path(workspace, akasha_config.index_path),
+            self._sessions_path,
+        )
         self._staged_feedback: dict[
             str,
             dict[Literal["remember", "forget"], AkashaFeedbackMarker],
@@ -387,6 +394,16 @@ class AkashaMemoryEngine:
     @property
     def embedding_api(self) -> Embedder:
         return self._embedder
+
+    def inspect_graph(self, method: str, payload: dict[str, object]) -> dict[str, object]:
+        """Read a published graph under the existing publication/source fence."""
+
+        with self._lock:
+            if self._source_invalidated_error is not None:
+                raise GraphUnavailable("记忆来源正在更新，等待有效图发布后再查看")
+            return self._graph_reader.query(
+                method, payload, allow_empty=not self._runtime.cycle.turns,
+            )
 
     async def query(self, request: MemoryQuery) -> MemoryQueryResult:
         """Retrieve explicit completion and optionally retain its ticket.

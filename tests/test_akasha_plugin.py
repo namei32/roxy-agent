@@ -114,7 +114,7 @@ def test_akasha_v2_registers_both_host_protocols(tmp_path: Path) -> None:
     assert mobile.stylesheet == "mobile_ui.css"
     assert mobile.slots == ("turn.before_reasoning",)
     assert mobile.navigation is not None
-    assert mobile.navigation.label == "Akasha Inspector"
+    assert mobile.navigation.label == "Akasha 记忆"
 
 
 def test_mobile_recall_is_empty_when_akasha_is_not_the_memory_owner(
