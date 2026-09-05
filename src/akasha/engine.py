@@ -1,24 +1,29 @@
-"""Akasic Agent MemoryEngine adapter for Akasha V2."""
+"""Roxy Agent MemoryEngine adapter for Akasha V2."""
 
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import secrets
 import sqlite3
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from time import monotonic
-from typing import TYPE_CHECKING, Any, Literal, cast
+from time import monotonic, perf_counter
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 from zoneinfo import ZoneInfo
 
 import numpy as np
 
 from agent.config_models import Config
-from agent.control.context import current_turn_id
+from agent.control.context import running_turn_id
 from agent.tools.base import Tool
 from bus.events_lifecycle import TurnCommitted
+from core.common.diagnostic_log import turn_milestone
+from core.error_context import current_client_message_id, current_session_key
 from core.memory.engine import (
     EngineProfile,
     EvidenceRef,
@@ -36,6 +41,7 @@ from core.memory.engine import (
 )
 from memory2.embedder import Embedder
 from session.embedding_store import MessageEmbeddingStore
+from session.store import InteractionDeletion
 
 from .application.cycle import RetrievalTicket
 from .application.runtime import OnlineMemoryRuntime, StagedOnlineCommit
@@ -45,6 +51,98 @@ from .domain.model import Turn
 if TYPE_CHECKING:
     from bus.event_bus import EventBus
     from core.net.http import SharedHttpResources
+
+
+logger = logging.getLogger(__name__)
+
+
+def _milestone(
+    event: str,
+    *,
+    session_id: str = "",
+    turn_id: str = "",
+    client_message_id: str = "",
+    span_id: str = "",
+    operation: str = "",
+    duration_ms: float | None = None,
+    counts: str = "",
+    outcome: str = "",
+    level: int = logging.INFO,
+) -> None:
+    """打一个 Akasha 里程碑；身份与 span 显式传入，counts 合并稳定 operation/span_id。"""
+
+    stable_counts = ",".join(
+        f"{key}={value}"
+        for key, value in (
+            ("operation", operation),
+            ("span_id", span_id),
+        )
+        if value
+    )
+    merged_counts = ",".join(part for part in (stable_counts, counts) if part)
+    turn_milestone(
+        logger,
+        event,
+        session_id=session_id,
+        turn_id=turn_id,
+        client_message_id=client_message_id or "missing",
+        duration_ms=duration_ms,
+        counts=merged_counts,
+        outcome=outcome,
+        level=level,
+    )
+
+
+class _MilestoneIdentity(TypedDict):
+    session_id: str
+    turn_id: str
+    client_message_id: str
+    span_id: str
+    operation: str
+
+
+@dataclass(frozen=True)
+class _SpanIdentity:
+    """Pair one content-free span_id with its owning operation."""
+
+    span_id: str
+    operation: Literal["query", "turn_commit"]
+
+
+def _new_span(operation: Literal["query", "turn_commit"]) -> _SpanIdentity:
+    """Create one fresh content-free span identity per public invocation."""
+
+    return _SpanIdentity(
+        span_id=secrets.token_hex(8),
+        operation=operation,
+    )
+
+
+def _context_identity(span: _SpanIdentity) -> _MilestoneIdentity:
+    """当前 turn 上下文身份；query 等调用方路径从 contextvar 读取。"""
+
+    return {
+        "session_id": current_session_key.get() or "",
+        "turn_id": running_turn_id.get() or "",
+        "client_message_id": current_client_message_id.get() or "missing",
+        "span_id": span.span_id,
+        "operation": span.operation,
+    }
+
+
+def _event_identity(
+    event: TurnCommitted,
+    span: _SpanIdentity,
+) -> _MilestoneIdentity:
+    """TurnCommitted 观察者路径身份；显式从事件取，不依赖 contextvar。"""
+
+    return {
+        "session_id": event.session_key,
+        "turn_id": event.turn_id,
+        "client_message_id": event.client_message_id or "missing",
+        "span_id": span.span_id,
+        "operation": span.operation,
+    }
 
 
 class UnsupportedOperationError(RuntimeError):
@@ -94,11 +192,7 @@ class AkashaFeedbackMarker:
 
     @property
     def extra_key(self) -> str:
-        return (
-            "akasha_reinforce"
-            if self.action == "remember"
-            else "akasha_forget"
-        )
+        return "akasha_reinforce" if self.action == "remember" else "akasha_forget"
 
     def payload(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -152,7 +246,7 @@ class _AkashaFeedbackTool(Tool):
     ) -> str:
         return json.dumps(
             self._memory.stage_feedback(
-                turn_id=current_turn_id.get(),
+                turn_id=running_turn_id.get(),
                 action=self.action,
                 message_ids=message_ids,
                 reason=reason,
@@ -191,14 +285,14 @@ class AkashaFeedbackPersistModule:
         markers = cast(
             AkashaMemoryEngine,
             engine,
-        ).take_staged_feedback(current_turn_id.get())
+        ).take_staged_feedback(running_turn_id.get())
         for marker in markers:
             frame.slots[f"persist:user:{marker.extra_key}"] = marker.payload()
         return frame
 
 
 class AkashaMemoryEngine:
-    """Adapt the standalone explicit memory runtime to Akasic Agent."""
+    """Adapt the standalone explicit memory runtime to Roxy Agent."""
 
     DESCRIPTOR = MemoryEngineDescriptor(
         name="akasha",
@@ -237,16 +331,9 @@ class AkashaMemoryEngine:
         self._embedding_model = embedding.model
         self._embedder = Embedder(
             base_url=(
-                embedding.base_url
-                or config.light_base_url
-                or config.base_url
-                or ""
+                embedding.base_url or config.light_base_url or config.base_url or ""
             ),
-            api_key=(
-                embedding.api_key
-                or config.light_api_key
-                or config.api_key
-            ),
+            api_key=(embedding.api_key or config.light_api_key or config.api_key),
             model=embedding.model,
             output_dimensionality=embedding.output_dimensionality,
             requester=http_resources.external_default,
@@ -254,9 +341,7 @@ class AkashaMemoryEngine:
         self._config = akasha_config
         self._workspace = workspace
         self._sessions_path = workspace / "sessions.db"
-        self._embedding_store = MessageEmbeddingStore(
-            self._sessions_path
-        )
+        self._embedding_store = MessageEmbeddingStore(self._sessions_path)
         self._runtime = OnlineMemoryRuntime(
             sessions_path=self._sessions_path,
             index_path=resolve_workspace_path(
@@ -275,9 +360,12 @@ class AkashaMemoryEngine:
         # 2. Keep one global graph writer and one pending query per session.
         self._lock = threading.RLock()
         self._pending_changed = threading.Condition(self._lock)
+        self._source_event_gate = asyncio.Lock()
         self._commit_gate = asyncio.Lock()
         self._publish_task: asyncio.Task[None] | None = None
         self._pending: dict[str, PendingRetrieval] = {}
+        self._source_generation = 0
+        self._source_invalidated_error: RuntimeError | None = None
         self._staged_feedback: dict[
             str,
             dict[Literal["remember", "forget"], AkashaFeedbackMarker],
@@ -301,10 +389,56 @@ class AkashaMemoryEngine:
         return self._embedder
 
     async def query(self, request: MemoryQuery) -> MemoryQueryResult:
-        """Retrieve explicit completion and optionally retain its ticket."""
+        """Retrieve explicit completion and optionally retain its ticket.
+
+        总 span akasha.query.start/done/error/cancelled 覆盖整个 retrieval；
+        身份从当前 turn contextvar 读取，span 每次调用独立生成，不并发共享。
+        """
+
+        identity = _context_identity(_new_span("query"))
+        query_started = perf_counter()
+        _milestone("akasha.query.start", **identity)
+        try:
+            return await self._query_inner(
+                request,
+                identity=identity,
+                query_started=query_started,
+            )
+        except asyncio.CancelledError:
+            _milestone(
+                "akasha.query.cancelled",
+                duration_ms=(perf_counter() - query_started) * 1000,
+                outcome="cancelled",
+                **identity,
+            )
+            raise
+        except Exception:
+            _milestone(
+                "akasha.query.error",
+                duration_ms=(perf_counter() - query_started) * 1000,
+                outcome="error",
+                level=logging.ERROR,
+                **identity,
+            )
+            raise
+
+    async def _query_inner(
+        self,
+        request: MemoryQuery,
+        *,
+        identity: _MilestoneIdentity,
+        query_started: float,
+    ) -> MemoryQueryResult:
+        """Run the validated retrieval body under the query total span."""
 
         # 1. Validate the host query boundary and unsupported intent.
         if request.intent == "timeline":
+            _milestone(
+                "akasha.query.done",
+                duration_ms=(perf_counter() - query_started) * 1000,
+                outcome="unsupported",
+                **identity,
+            )
             return MemoryQueryResult(
                 trace={
                     "engine": "akasha",
@@ -313,9 +447,13 @@ class AkashaMemoryEngine:
             )
         text = request.text.strip()
         if not text:
-            return MemoryQueryResult(
-                trace={"engine": "akasha", "hit_count": 0}
+            _milestone(
+                "akasha.query.done",
+                duration_ms=(perf_counter() - query_started) * 1000,
+                outcome="skipped",
+                **identity,
             )
+            return MemoryQueryResult(trace={"engine": "akasha", "hit_count": 0})
         if request.timestamp is None:
             raise ValueError("Akasha query requires timestamp")
         if request.limit <= 0:
@@ -328,20 +466,118 @@ class AkashaMemoryEngine:
                 raise ValueError(f"Akasha {name} must be timezone-aware")
 
         # 2. Embed without blocking commits, then fence the shared graph read.
-        dense = np.asarray(
-            await self._embedder.embed(text),
-            dtype=np.float32,
+        embed_started = perf_counter()
+        _milestone("akasha.embed.start", **identity)
+        try:
+            dense = np.asarray(
+                await self._embedder.embed(text),
+                dtype=np.float32,
+            )
+        except asyncio.CancelledError:
+            _milestone(
+                "akasha.embed.cancelled",
+                duration_ms=(perf_counter() - embed_started) * 1000,
+                outcome="cancelled",
+                **identity,
+            )
+            raise
+        except Exception:
+            _milestone(
+                "akasha.embed.error",
+                duration_ms=(perf_counter() - embed_started) * 1000,
+                outcome="error",
+                level=logging.ERROR,
+                **identity,
+            )
+            raise
+        _milestone(
+            "akasha.embed.done",
+            duration_ms=(perf_counter() - embed_started) * 1000,
+            outcome="done",
+            **identity,
         )
-        async with self._commit_gate:
-            await self._wait_for_publication()
-            with self._lock:
-                cue, ticket = self._runtime.query_turn(
-                    text=text,
-                    dense=dense,
-                    session_key=request.scope.session_key,
-                    timestamp=request.timestamp,
+        gate_started = perf_counter()
+        _milestone("akasha.commit_gate.wait.start", **identity)
+        try:
+            await self._commit_gate.acquire()
+        except asyncio.CancelledError:
+            _milestone(
+                "akasha.commit_gate.wait.cancelled",
+                duration_ms=(perf_counter() - gate_started) * 1000,
+                outcome="cancelled",
+                **identity,
+            )
+            raise
+        except Exception:
+            _milestone(
+                "akasha.commit_gate.wait.error",
+                duration_ms=(perf_counter() - gate_started) * 1000,
+                outcome="error",
+                level=logging.ERROR,
+                **identity,
+            )
+            raise
+        _milestone(
+            "akasha.commit_gate.wait.done",
+            duration_ms=(perf_counter() - gate_started) * 1000,
+            outcome="done",
+            **identity,
+        )
+        try:
+            publication_started = perf_counter()
+            _milestone("akasha.prior_publication.wait.start", **identity)
+            try:
+                await self._wait_for_publication()
+            except asyncio.CancelledError:
+                _milestone(
+                    "akasha.prior_publication.wait.cancelled",
+                    duration_ms=(perf_counter() - publication_started) * 1000,
+                    outcome="cancelled",
+                    **identity,
                 )
-                lanes = self._records(ticket, cue, request)
+                raise
+            except Exception:
+                _milestone(
+                    "akasha.prior_publication.wait.error",
+                    duration_ms=(perf_counter() - publication_started) * 1000,
+                    outcome="error",
+                    level=logging.ERROR,
+                    **identity,
+                )
+                raise
+            _milestone(
+                "akasha.prior_publication.wait.done",
+                duration_ms=(perf_counter() - publication_started) * 1000,
+                outcome="done",
+                **identity,
+            )
+            with self._lock:
+                self._require_valid_source()
+                runtime_started = perf_counter()
+                _milestone("akasha.runtime.query.start", **identity)
+                try:
+                    cue, ticket = self._runtime.query_turn(
+                        text=text,
+                        dense=dense,
+                        session_key=request.scope.session_key,
+                        timestamp=request.timestamp,
+                    )
+                    lanes = self._records(ticket, cue, request)
+                except Exception:
+                    _milestone(
+                        "akasha.runtime.query.error",
+                        duration_ms=(perf_counter() - runtime_started) * 1000,
+                        outcome="error",
+                        level=logging.ERROR,
+                        **identity,
+                    )
+                    raise
+                _milestone(
+                    "akasha.runtime.query.done",
+                    duration_ms=(perf_counter() - runtime_started) * 1000,
+                    outcome="done",
+                    **identity,
+                )
                 retains_ticket = (
                     request.intent == "context"
                     and request.effect == "stateful"
@@ -355,9 +591,7 @@ class AkashaMemoryEngine:
                         )
                     turn_id = request.context.get("turn_id", "")
                     if not isinstance(turn_id, str):
-                        raise ValueError(
-                            "Akasha context turn_id must be a string"
-                        )
+                        raise ValueError("Akasha context turn_id must be a string")
                     self._pending[session_key] = PendingRetrieval(
                         ticket,
                         request.timestamp,
@@ -367,11 +601,20 @@ class AkashaMemoryEngine:
                         lanes,
                     )
                     self._pending_changed.notify_all()
+        finally:
+            self._commit_gate.release()
         # 3. Render context only for the runtime context-injection intent.
         text_block = (
             self._context_block(lanes, request.timestamp)
             if request.intent == "context"
             else ""
+        )
+        _milestone(
+            "akasha.query.done",
+            duration_ms=(perf_counter() - query_started) * 1000,
+            counts=f"hits={len(lanes.combined)}",
+            outcome="done",
+            **identity,
         )
         return MemoryQueryResult(
             text_block=text_block,
@@ -379,15 +622,11 @@ class AkashaMemoryEngine:
             trace={
                 "engine": "akasha",
                 "requested_effect": request.effect,
-                "effect": (
-                    "stateful" if retains_ticket else "read_only"
-                ),
+                "effect": ("stateful" if retains_ticket else "read_only"),
                 "state_version": ticket.state_version,
                 "seed_count": len(ticket.evidence.seed),
                 "dense_count": len(lanes.dense),
-                "active_basin_count": (
-                    ticket.completion.active_basin_count
-                ),
+                "active_basin_count": (ticket.completion.active_basin_count),
                 "completion_count": len(lanes.completion),
                 "pushes": ticket.completion.pushes,
                 "residual_l1": ticket.completion.residual_l1,
@@ -599,8 +838,7 @@ class AkashaMemoryEngine:
                 if (
                     message_id not in turns_by_message
                     and not (
-                        action == "remember"
-                        and message_id == "current_user_message"
+                        action == "remember" and message_id == "current_user_message"
                     )
                 )
             ]
@@ -622,12 +860,9 @@ class AkashaMemoryEngine:
                 reason=reason,
             )
             staged = self._staged_feedback.setdefault(turn_id, {})
-            opposite = staged.get(
-                "forget" if action == "remember" else "remember"
-            )
+            opposite = staged.get("forget" if action == "remember" else "remember")
             overlap = (
-                set(marker.target_turn_ids)
-                & set(opposite.target_turn_ids)
+                set(marker.target_turn_ids) & set(opposite.target_turn_ids)
                 if opposite is not None
                 else set()
             )
@@ -654,9 +889,7 @@ class AkashaMemoryEngine:
         with self._lock:
             staged = self._staged_feedback.pop(turn_id, {})
         return tuple(
-            staged[action]
-            for action in ("forget", "remember")
-            if action in staged
+            staged[action] for action in ("forget", "remember") if action in staged
         )
 
     def keyword_match_procedures(
@@ -673,17 +906,13 @@ class AkashaMemoryEngine:
         *,
         limit: int = 200,
     ) -> list[dict[str, object]]:
+        self._require_valid_source()
         selected = [
             turn
             for turn in self._runtime.cycle.turns
-            if time_start
-            <= datetime.fromisoformat(turn.started_at)
-            <= time_end
+            if time_start <= datetime.fromisoformat(turn.started_at) <= time_end
         ]
-        return [
-            self._turn_row(turn)
-            for turn in selected[-limit:]
-        ]
+        return [self._turn_row(turn) for turn in selected[-limit:]]
 
     def list_items_for_dashboard(
         self,
@@ -700,19 +929,17 @@ class AkashaMemoryEngine:
         sort_by: str = "created_at",
         sort_order: str = "desc",
     ) -> tuple[list[dict[str, object]], int]:
+        self._require_valid_source()
         del memory_type, status, scope_channel, scope_chat_id
         del has_embedding, sort_by
         rows = [
             self._turn_row(turn)
             for turn in self._runtime.cycle.turns
-            if (
-                not q
-                or q in turn.user_text
-                or q in turn.assistant_text
-            )
+            if (not q or q in turn.user_text or q in turn.assistant_text)
             and (
                 not source_ref
-                or source_ref in {
+                or source_ref
+                in {
                     turn.user_message_id,
                     turn.assistant_message_id,
                 }
@@ -732,6 +959,7 @@ class AkashaMemoryEngine:
         *,
         include_embedding: bool = False,
     ) -> dict[str, object] | None:
+        self._require_valid_source()
         _ = include_embedding
         for turn in self._runtime.cycle.turns:
             if turn.turn_id == item_id:
@@ -760,9 +988,7 @@ class AkashaMemoryEngine:
         )
 
     def delete_items_batch(self, ids: list[str]) -> int:
-        raise UnsupportedOperationError(
-            f"Akasha does not delete source turns: {ids}"
-        )
+        raise UnsupportedOperationError(f"Akasha does not delete source turns: {ids}")
 
     def find_similar_items_for_dashboard(
         self,
@@ -773,6 +999,7 @@ class AkashaMemoryEngine:
         score_threshold: float = 0.0,
         include_superseded: bool = False,
     ) -> list[dict[str, object]]:
+        self._require_valid_source()
         del memory_type, include_superseded
         turns = self._runtime.cycle.turns
         query = next(
@@ -796,69 +1023,404 @@ class AkashaMemoryEngine:
         )[:top_k]
 
     async def _on_turn_committed(self, event: TurnCommitted) -> None:
-        """Stage one committed turn and publish its graph asynchronously."""
+        """Serialize source-event embedding and staging with source deletion.
+
+        总 span akasha.turn_commit.start/done/error/cancelled 覆盖整个观察者；
+        身份显式从事件取，span 每次调用独立生成，EventBus 吞掉 handler 异常时
+        错误 span 仍可定位。
+        """
+
+        identity = _event_identity(event, _new_span("turn_commit"))
+        total_started = perf_counter()
+        _milestone("akasha.turn_commit.start", **identity)
+        skipped = False
+        try:
+            with self._lock:
+                source_generation = self._source_generation
+                source_was_invalid = self._source_invalidated_error is not None
+            gate_started = perf_counter()
+            _milestone("akasha.source_gate.wait.start", **identity)
+            try:
+                await self._source_event_gate.acquire()
+            except asyncio.CancelledError:
+                _milestone(
+                    "akasha.source_gate.wait.cancelled",
+                    duration_ms=(perf_counter() - gate_started) * 1000,
+                    outcome="cancelled",
+                    **identity,
+                )
+                raise
+            except Exception:
+                _milestone(
+                    "akasha.source_gate.wait.error",
+                    duration_ms=(perf_counter() - gate_started) * 1000,
+                    outcome="error",
+                    level=logging.ERROR,
+                    **identity,
+                )
+                raise
+            _milestone(
+                "akasha.source_gate.wait.done",
+                duration_ms=(perf_counter() - gate_started) * 1000,
+                outcome="done",
+                **identity,
+            )
+            try:
+                with self._lock:
+                    source_outdated = (
+                        source_was_invalid
+                        or source_generation != self._source_generation
+                    )
+                if source_outdated:
+                    _milestone(
+                        "akasha.source_event.skip",
+                        outcome="skipped",
+                        **identity,
+                    )
+                    skipped = True
+                elif await self._commit_source_event(event, identity):
+                    skipped = True
+            finally:
+                self._source_event_gate.release()
+        except asyncio.CancelledError:
+            _milestone(
+                "akasha.turn_commit.cancelled",
+                duration_ms=(perf_counter() - total_started) * 1000,
+                outcome="cancelled",
+                **identity,
+            )
+            raise
+        except Exception:
+            _milestone(
+                "akasha.turn_commit.error",
+                duration_ms=(perf_counter() - total_started) * 1000,
+                outcome="error",
+                level=logging.ERROR,
+                **identity,
+            )
+            raise
+        _milestone(
+            "akasha.turn_commit.done",
+            duration_ms=(perf_counter() - total_started) * 1000,
+            outcome="skipped" if skipped else "done",
+            **identity,
+        )
+
+    async def _commit_source_event(
+        self,
+        event: TurnCommitted,
+        identity: _MilestoneIdentity,
+    ) -> bool:
+        """Stage one committed turn and publish its graph asynchronously.
+
+        Return True when the commit was skipped by host policy, False otherwise.
+        """
 
         # 1. Respect the host's explicit exclusion and validate stable IDs.
-        if (
-            event.session_key.split(":", 1)[0] == "scheduler"
-            or bool((event.extra or {}).get("skip_post_memory"))
+        if event.session_key.split(":", 1)[0] == "scheduler" or bool(
+            (event.extra or {}).get("skip_post_memory")
         ):
             with self._lock:
-                self._pending.pop(event.session_key, None)
-            return
-        user_id = event.persisted_user_message_id
+                _ = self._pending.pop(event.session_key, None)
+            _milestone("akasha.commit_source.skip", outcome="skipped", **identity)
+            return True
+        user_ids = event.persisted_user_message_ids or (
+            (event.persisted_user_message_id,)
+            if event.persisted_user_message_id
+            else ()
+        )
+        user_id = user_ids[0] if user_ids else None
         assistant_id = event.assistant_message_id
         if not user_id or not assistant_id:
-            raise ValueError(
-                "TurnCommitted requires persisted user and assistant IDs"
+            raise ValueError("TurnCommitted requires persisted user and assistant IDs")
+        if self._runtime.has_committed_source(
+            session_key=event.session_key,
+            user_message_id=user_id,
+            assistant_message_id=assistant_id,
+        ):
+            _milestone(
+                "akasha.commit_source.skip",
+                counts="reason=source_replay",
+                outcome="skipped",
+                **identity,
             )
+            return True
 
         # 2. Embed exact persisted text without blocking other provider calls.
         messages = _load_messages(
             self._sessions_path,
             event.session_key,
-            user_id,
+            user_ids,
             assistant_id,
         )
         with self._lock:
             pending = self._pending.get(event.session_key)
-        if (
-            pending is not None
+        pending_matches = (
+            len(user_ids) == 1
+            and pending is not None
             and pending.query_text == cast(str, messages[0]["content"])
-        ):
-            assistant_vector = await self._embedder.embed(
-                cast(str, messages[1]["content"])
-            )
-            vectors = [
-                pending.query_dense.tolist(),
-                assistant_vector,
-            ]
-        else:
-            vectors = await self._embedder.embed_batch(
-                [cast(str, message["content"]) for message in messages]
-            )
-        _upsert_embeddings(
-            self._embedding_store,
-            self._embedding_model,
-            messages,
-            vectors,
         )
-
-        # 3. Serialize durable staging behind the prior graph publication.
-        async with self._commit_gate:
-            await self._wait_for_publication()
-            with self._lock:
-                if self._pending.get(event.session_key) is pending:
-                    self._pending.pop(event.session_key, None)
-                staged = self._runtime.stage_from_source(
-                    user_message_id=user_id,
-                    assistant_message_id=assistant_id,
-                    ticket=None if pending is None else pending.ticket,
+        vectors_by_index: list[list[float] | None] = [
+            self._embedding_store.get(
+                message_id=str(message["id"]),
+                content=str(message["content"]),
+                model=self._embedding_model,
+            )
+            for message in messages
+        ]
+        cache_hits = sum(vector is not None for vector in vectors_by_index)
+        pending_reused = False
+        if pending_matches and vectors_by_index[0] is None:
+            vectors_by_index[0] = cast(PendingRetrieval, pending).query_dense.tolist()
+            pending_reused = True
+        missing_indexes = [
+            index
+            for index, vector in enumerate(vectors_by_index)
+            if vector is None
+        ]
+        if not missing_indexes:
+            embed_mode = "cached"
+        elif len(missing_indexes) == 1:
+            embed_mode = "single"
+        else:
+            embed_mode = "batch"
+        embed_counts = (
+            f"embed_mode={embed_mode},cache_hits={cache_hits},"
+            f"cache_misses={len(missing_indexes)},"
+            f"pending_reused={int(pending_reused)}"
+        )
+        _milestone("akasha.embed.start", counts=embed_counts, **identity)
+        embed_started = perf_counter()
+        try:
+            if len(missing_indexes) == 1:
+                index = missing_indexes[0]
+                vectors_by_index[index] = await self._embedder.embed(
+                    cast(str, messages[index]["content"])
                 )
+            elif missing_indexes:
+                generated = await self._embedder.embed_batch(
+                    [
+                        cast(str, messages[index]["content"])
+                        for index in missing_indexes
+                    ]
+                )
+                if len(generated) != len(missing_indexes):
+                    raise ValueError("embedding count differs from cache misses")
+                for index, vector in zip(
+                    missing_indexes,
+                    generated,
+                    strict=True,
+                ):
+                    vectors_by_index[index] = vector
+            if any(vector is None for vector in vectors_by_index):
+                raise RuntimeError("committed embedding resolution incomplete")
+            vectors = cast(list[list[float]], vectors_by_index)
+        except asyncio.CancelledError:
+            _milestone(
+                "akasha.embed.cancelled",
+                duration_ms=(perf_counter() - embed_started) * 1000,
+                counts=embed_counts,
+                outcome="cancelled",
+                **identity,
+            )
+            raise
+        except Exception:
+            _milestone(
+                "akasha.embed.error",
+                duration_ms=(perf_counter() - embed_started) * 1000,
+                counts=embed_counts,
+                outcome="error",
+                level=logging.ERROR,
+                **identity,
+            )
+            raise
+        _milestone(
+            "akasha.embed.done",
+            counts=embed_counts,
+            duration_ms=(perf_counter() - embed_started) * 1000,
+            outcome="done",
+            **identity,
+        )
+        # 3. Serialize durable staging behind the prior graph publication.
+        gate_started = perf_counter()
+        _milestone("akasha.commit_gate.wait.start", **identity)
+        try:
+            await self._commit_gate.acquire()
+        except asyncio.CancelledError:
+            _milestone(
+                "akasha.commit_gate.wait.cancelled",
+                duration_ms=(perf_counter() - gate_started) * 1000,
+                outcome="cancelled",
+                **identity,
+            )
+            raise
+        except Exception:
+            _milestone(
+                "akasha.commit_gate.wait.error",
+                duration_ms=(perf_counter() - gate_started) * 1000,
+                outcome="error",
+                level=logging.ERROR,
+                **identity,
+            )
+            raise
+        _milestone(
+            "akasha.commit_gate.wait.done",
+            duration_ms=(perf_counter() - gate_started) * 1000,
+            outcome="done",
+            **identity,
+        )
+        try:
+            publication_started = perf_counter()
+            _milestone("akasha.prior_publication.wait.start", **identity)
+            try:
+                await self._wait_for_publication()
+            except asyncio.CancelledError:
+                _milestone(
+                    "akasha.prior_publication.wait.cancelled",
+                    duration_ms=(perf_counter() - publication_started) * 1000,
+                    outcome="cancelled",
+                    **identity,
+                )
+                raise
+            except Exception:
+                _milestone(
+                    "akasha.prior_publication.wait.error",
+                    duration_ms=(perf_counter() - publication_started) * 1000,
+                    outcome="error",
+                    level=logging.ERROR,
+                    **identity,
+                )
+                raise
+            _milestone(
+                "akasha.prior_publication.wait.done",
+                duration_ms=(perf_counter() - publication_started) * 1000,
+                outcome="done",
+                **identity,
+            )
+            if self._runtime.has_committed_source(
+                session_key=event.session_key,
+                user_message_id=user_id,
+                assistant_message_id=assistant_id,
+            ):
+                _milestone(
+                    "akasha.commit_source.skip",
+                    counts="reason=source_replay",
+                    outcome="skipped",
+                    **identity,
+                )
+                return True
+            stage_started = perf_counter()
+            _milestone("akasha.stage.start", **identity)
+            try:
+                with self._lock:
+                    self._require_valid_source()
+                    _upsert_embeddings(
+                        self._embedding_store,
+                        self._embedding_model,
+                        messages,
+                        vectors,
+                    )
+                    selected_ticket = None
+                    if self._pending.get(event.session_key) is pending:
+                        _ = self._pending.pop(event.session_key, None)
+                        selected_ticket = None if pending is None else pending.ticket
+                    staged = self._runtime.stage_from_source(
+                        user_message_id=user_id,
+                        assistant_message_id=assistant_id,
+                        ticket=selected_ticket,
+                    )
+            except Exception:
+                _milestone(
+                    "akasha.stage.error",
+                    duration_ms=(perf_counter() - stage_started) * 1000,
+                    outcome="error",
+                    level=logging.ERROR,
+                    **identity,
+                )
+                raise
+            _milestone(
+                "akasha.stage.done",
+                duration_ms=(perf_counter() - stage_started) * 1000,
+                outcome="done",
+                **identity,
+            )
             self._publish_task = asyncio.create_task(
                 asyncio.to_thread(self._publish_staged, staged),
                 name="akasha-publish-staged",
             )
+            _milestone("akasha.publish_scheduled", **identity)
+        finally:
+            self._commit_gate.release()
+        return False
+
+    async def delete_interaction_source(
+        self,
+        control_turn_id: str,
+        delete_source: Callable[[], InteractionDeletion | None],
+    ) -> InteractionDeletion | None:
+        """封住在线读写，执行窄 source 删除并重建派生状态。"""
+
+        # 1. 与在线 commit 串行，整个 source mutation 窗口不开放旧图。
+        async with self._source_event_gate:
+            async with self._commit_gate:
+                await self._wait_for_publication()
+                return await asyncio.to_thread(
+                    self._delete_source_and_rebuild,
+                    control_turn_id,
+                    delete_source,
+                )
+
+    def _delete_source_and_rebuild(
+        self,
+        control_turn_id: str,
+        delete_source: Callable[[], InteractionDeletion | None],
+    ) -> InteractionDeletion | None:
+        """在工作线程内完成 source transaction 与确定性派生发布。"""
+
+        # 1. 先使所有非 gate 管理读也 fail-loud，再调用唯一授权的删除动作。
+        with self._lock:
+            self._source_invalidated_error = RuntimeError(
+                "Akasha source mutation is in progress"
+            )
+        try:
+            deletion = delete_source()
+        except Exception:
+            with self._lock:
+                self._source_invalidated_error = None
+            raise
+        if deletion is None:
+            with self._lock:
+                self._source_invalidated_error = None
+            return None
+        if deletion.control_turn_id != control_turn_id:
+            with self._lock:
+                self._source_invalidated_error = RuntimeError(
+                    "Akasha source deletion returned a different interaction"
+                )
+            raise RuntimeError("interaction deletion identity mismatch")
+
+        # 2. 递增 source 代际，并清除所有基于旧图节点生成的 pending ticket。
+        with self._lock:
+            self._source_generation += 1
+            if self._pending:
+                self._pending.clear()
+                self._pending_changed.notify_all()
+
+        # 3. 以 canonical source 全量替换 turn 派生状态。
+        try:
+            self._runtime.rebuild_from_source()
+        except Exception as exc:
+            with self._lock:
+                self._source_invalidated_error = RuntimeError(
+                    "Akasha derived state is stale after interaction deletion"
+                )
+            raise RuntimeError(
+                "Akasha failed to reconcile interaction deletion: "
+                f"{deletion.control_turn_id}"
+            ) from exc
+        with self._lock:
+            self._source_invalidated_error = None
+        return deletion
 
     async def aclose(self) -> None:
         """Drain a staged graph publication before closing owned resources."""
@@ -881,6 +1443,10 @@ class AkashaMemoryEngine:
         with self._lock:
             self._runtime.publish_staged(staged)
 
+    def _require_valid_source(self) -> None:
+        if self._source_invalidated_error is not None:
+            raise self._source_invalidated_error
+
     def _records(
         self,
         ticket: RetrievalTicket,
@@ -897,9 +1463,7 @@ class AkashaMemoryEngine:
             else request.limit
         )
         dense_limit = min(5, request.limit)
-        completion_nodes = {
-            item.node_id: item for item in ticket.completion.items
-        }
+        completion_nodes = {item.node_id: item for item in ticket.completion.items}
         dense_candidates = []
         for turn in turns:
             if turn.node_id in self._runtime.cycle.inhibited_nodes:
@@ -913,9 +1477,7 @@ class AkashaMemoryEngine:
                 continue
             dense_candidates.append((turn.node_id, score))
         dense_candidates.sort(key=lambda item: (-item[1], item[0]))
-        dense_nodes = {
-            node_id for node_id, _ in dense_candidates[:dense_limit]
-        }
+        dense_nodes = {node_id for node_id, _ in dense_candidates[:dense_limit]}
         dense_records = [
             _memory_record(
                 turns[node_id],
@@ -954,9 +1516,7 @@ class AkashaMemoryEngine:
         # 3. Ranking chooses membership; chronology chooses presentation.
         return RetrievalRecords(
             dense=tuple(_sort_records_by_time(dense_records)),
-            completion=tuple(
-                _sort_records_by_time(completion_records)
-            ),
+            completion=tuple(_sort_records_by_time(completion_records)),
         )
 
     def _context_block(
@@ -1019,7 +1579,7 @@ class AkashaMemoryEngine:
 def _load_messages(
     sessions_path: Path,
     session_key: str,
-    user_id: str,
+    user_ids: tuple[str, ...],
     assistant_id: str,
 ) -> list[dict[str, object]]:
     connection = sqlite3.connect(
@@ -1028,24 +1588,26 @@ def _load_messages(
     )
     connection.row_factory = sqlite3.Row
     try:
+        message_ids = (*user_ids, assistant_id)
+        placeholders = ",".join("?" for _ in message_ids)
         rows = connection.execute(
-            """
+            f"""
             SELECT id, session_key, seq, role, content, ts
             FROM messages
-            WHERE id IN (?, ?)
+            WHERE id IN ({placeholders})
             ORDER BY seq
             """,
-            (user_id, assistant_id),
+            message_ids,
         ).fetchall()
     finally:
         connection.close()
-    if len(rows) != 2:
+    if len(rows) != len(user_ids) + 1:
         raise ValueError("TurnCommitted messages do not exist")
     if (
-        rows[0]["id"] != user_id
-        or rows[0]["role"] != "user"
-        or rows[1]["id"] != assistant_id
-        or rows[1]["role"] != "assistant"
+        tuple(str(row["id"]) for row in rows[:-1]) != user_ids
+        or any(row["role"] != "user" for row in rows[:-1])
+        or rows[-1]["id"] != assistant_id
+        or rows[-1]["role"] != "assistant"
         or any(row["session_key"] != session_key for row in rows)
     ):
         raise ValueError("TurnCommitted message identity mismatch")
@@ -1161,9 +1723,9 @@ def _format_records(
     for record in records:
         user = str(record.signals["user_text"])
         assistant = str(record.signals["assistant_preview"])
-        timestamp = _parse_turn_time(
-            str(record.signals["started_at"])
-        ).astimezone(ZoneInfo("Asia/Shanghai"))
+        timestamp = _parse_turn_time(str(record.signals["started_at"])).astimezone(
+            ZoneInfo("Asia/Shanghai")
+        )
         refs = record.evidence[0].refs
         lines.append(
             f"- user={_json_string(user)} "
@@ -1230,8 +1792,7 @@ def _missing_feedback_messages(
         "error": "messages_not_in_akasha",
         "missing_message_ids": message_ids,
         "hint": (
-            "请重新 fetch_messages，并只选择完整 "
-            "user/assistant 回合中的消息 ID。"
+            "请重新 fetch_messages，并只选择完整 " "user/assistant 回合中的消息 ID。"
         ),
     }
 
@@ -1291,7 +1852,6 @@ def _matches_filters(
         return False
 
     # 2. Strong relevance excludes weak relative-tail-only associations.
-    return (
-        filters.relevance_floor != "strong"
-        or any(source != "relative_tail" for source in sources)
+    return filters.relevance_floor != "strong" or any(
+        source != "relative_tail" for source in sources
     )

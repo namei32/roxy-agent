@@ -6,8 +6,10 @@ from .builder import (
     BuildResult,
     EmbeddingAudit,
     EmbeddingIssue,
+    RequiredEmbeddingMessage,
     audit_source_embeddings,
     build_sparse_index,
+    list_required_embedding_messages,
 )
 
 __all__ = [
@@ -16,6 +18,8 @@ __all__ = [
     "BuildResult",
     "EmbeddingAudit",
     "EmbeddingIssue",
+    "RequiredEmbeddingMessage",
     "audit_source_embeddings",
     "build_sparse_index",
+    "list_required_embedding_messages",
 ]

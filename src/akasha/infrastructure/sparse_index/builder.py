@@ -7,12 +7,16 @@ import hashlib
 import math
 import sqlite3
 from collections import Counter, defaultdict
+from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import cast
 from zoneinfo import ZoneInfo
 
 import numpy as np
+
+from session.memory_policy import excludes_memory
 
 from .encoding import LexicalState, lexical_identity, tokenize
 from .model import CanonicalTurn, SessionState, SparseFeature, TimeStats
@@ -20,6 +24,7 @@ from .schema import INDEX_VERSION, SCHEMA
 
 LOCAL_TIMEZONE = ZoneInfo("Asia/Shanghai")
 INTERRUPTED_ASSISTANT_MARKER = "[interrupted]"
+TurnPair = tuple[tuple[sqlite3.Row, ...], sqlite3.Row]
 
 
 class AppendOnlyViolation(RuntimeError):
@@ -48,11 +53,23 @@ class EmbeddingIssue:
 
 
 @dataclass(frozen=True)
+class RequiredEmbeddingMessage:
+    """One exact persisted message required by the replay embedding boundary."""
+
+    message_id: str
+    session_key: str
+    seq: int
+    role: str
+    content: str
+
+
+@dataclass(frozen=True)
 class EmbeddingAudit:
     """Summarize the frozen embedding boundary for eligible dialogue turns."""
 
     eligible_turns: int
     excluded_interrupted_turns: int
+    excluded_memory_turns: int
     eligible_messages: int
     valid_messages: int
     dimension: int | None
@@ -69,6 +86,7 @@ class BuildResult:
 
     discovered_turns: int
     excluded_interrupted_turns: int
+    excluded_memory_turns: int
     indexed_turns: int
     skipped_existing_turns: int
     turns_missing_embeddings: int
@@ -96,7 +114,7 @@ def build_sparse_index(
         _validate_index_version(output)
 
         # 2. Restore prior online state and identify append-only work.
-        turns, missing, excluded_interrupted = _load_canonical_turns(
+        turns, missing, excluded_interrupted, excluded_memory = _load_canonical_turns(
             source,
             config,
         )
@@ -131,6 +149,11 @@ def build_sparse_index(
                 "turns_excluded_interrupted",
                 str(excluded_interrupted),
             )
+            _set_metadata(
+                output,
+                "turns_excluded_memory",
+                str(excluded_memory),
+            )
             for key, value in lexical_identity().items():
                 _set_metadata(output, key, value)
         return _build_result(
@@ -138,6 +161,7 @@ def build_sparse_index(
             turns,
             missing,
             excluded_interrupted,
+            excluded_memory,
             new_turns,
             existing,
         )
@@ -157,7 +181,7 @@ def audit_source_embeddings(
     try:
         _validate_source(source)
         messages = _source_messages(source)
-        pairs, excluded_interrupted = _eligible_pairs(messages)
+        pairs, excluded_interrupted, excluded_memory = _eligible_pairs(messages)
         rows = source.execute(
             """
             SELECT message_id, content_hash, embedding, dim
@@ -183,11 +207,53 @@ def audit_source_embeddings(
     return EmbeddingAudit(
         eligible_turns=len(pairs),
         excluded_interrupted_turns=excluded_interrupted,
+        excluded_memory_turns=excluded_memory,
         eligible_messages=required,
         valid_messages=required - len(issues),
         dimension=dimension,
         issues=tuple(issues),
     )
+
+
+def list_required_embedding_messages(
+    source_path: Path,
+) -> tuple[RequiredEmbeddingMessage, ...]:
+    """Return the exact non-empty messages governed by the strict replay audit.
+
+    Keeping this projection beside ``_eligible_pairs`` prevents migration tooling
+    from growing a second, subtly different definition of an Akasha turn.
+    """
+
+    source = sqlite3.connect(f"file:{source_path}?mode=ro", uri=True)
+    source.row_factory = sqlite3.Row
+    try:
+        _validate_source(source)
+        messages = _source_messages(source)
+        pairs, _, _ = _eligible_pairs(messages)
+        required: list[RequiredEmbeddingMessage] = []
+        seen: set[str] = set()
+        for message in _pair_messages(pairs):
+            content = _message_text(message)
+            if not content.strip():
+                continue
+            message_id = str(message["id"])
+            if message_id in seen:
+                raise ValueError(
+                    f"eligible Akasha message appears more than once: {message_id}"
+                )
+            seen.add(message_id)
+            required.append(
+                RequiredEmbeddingMessage(
+                    message_id=message_id,
+                    session_key=str(message["session_key"]),
+                    seq=int(message["seq"]),
+                    role=str(message["role"]),
+                    content=content,
+                )
+            )
+        return tuple(required)
+    finally:
+        source.close()
 
 
 @dataclass(frozen=True)
@@ -198,8 +264,11 @@ class EncodedTurn:
     term_fields: dict[str, Counter[str]]
     start_gap_seconds: float | None
     log_start_gap: float | None
-    inter_turn_gap_seconds: float | None
-    log_inter_turn_gap: float | None
+    response_delta_seconds: float | None
+    idle_gap_seconds: float | None
+    log_idle_gap: float | None
+    overlap_seconds: float | None
+    log_overlap: float | None
     persisted_message_span_seconds: float
     log_persisted_message_span: float
     channel: str
@@ -214,7 +283,7 @@ class EncodedTurn:
 
 
 def _validate_source(connection: sqlite3.Connection) -> None:
-    required = {"messages", "message_embeddings"}
+    required = {"sessions", "messages", "message_embeddings"}
     actual = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     missing = required - actual
     if missing:
@@ -230,17 +299,18 @@ def _validate_index_version(connection: sqlite3.Connection) -> None:
 def _load_canonical_turns(
     connection: sqlite3.Connection,
     config: BuildConfig,
-) -> tuple[list[CanonicalTurn], int, int]:
+) -> tuple[list[CanonicalTurn], int, int, int]:
     """Reconstruct every dialogue turn and count incomplete dense cache rows."""
 
     # 1. Read source rows and the selected embedding space.
     messages = _source_messages(connection)
-    pairs, excluded_interrupted = _eligible_pairs(messages)
+    pairs, excluded_interrupted, excluded_memory = _eligible_pairs(messages)
     audit = _audit_rows(
         connection,
         pairs,
         config,
         excluded_interrupted,
+        excluded_memory,
     )
     invalid = {issue.message_id for issue in audit.issues}
     embeddings = {}
@@ -262,58 +332,154 @@ def _load_canonical_turns(
 
     # 2. Preserve incomplete dense turns for lexical and temporal evidence.
     turns = [
-        _make_turn(user, assistant, embeddings)
-        for user, assistant in pairs
+        _make_turn(users, assistant, embeddings)
+        for users, assistant in pairs
     ]
     missing_embeddings = sum(
-        user["id"] not in embeddings
+        any(
+            _message_text(user).strip() and user["id"] not in embeddings
+            for user in users
+        )
         or assistant["id"] not in embeddings
-        for user, assistant in pairs
+        for users, assistant in pairs
     )
 
     # 3. Establish one deterministic global causal order.
     turns.sort(
         key=lambda turn: (
-            _parse_time(turn.started_at),
+            _parse_time(turn.committed_at),
             turn.session_key.encode("utf-8"),
             turn.user_seq,
             turn.turn_id.encode("utf-8"),
         )
     )
     turns = _resolve_feedback_targets(turns)
-    return turns, missing_embeddings, excluded_interrupted
+    return turns, missing_embeddings, excluded_interrupted, excluded_memory
 
 
 def _source_messages(
     connection: sqlite3.Connection,
 ) -> list[sqlite3.Row]:
+    """读取全部消息并带出 session metadata；孤儿消息 fail-loud 而不是静默消失。"""
+
+    # 1. 先核对每条消息都有对应 session 行，损坏数据不得伪装成空结果。
+    session_keys = {
+        str(row["key"])
+        for row in connection.execute("SELECT key FROM sessions")
+    }
+    orphan_keys = {
+        str(row["session_key"])
+        for row in connection.execute("SELECT DISTINCT session_key FROM messages")
+    } - session_keys
+    if orphan_keys:
+        preview = ", ".join(sorted(orphan_keys)[:5])
+        raise ValueError(
+            f"messages 存在无 session 记录的孤儿 session_key: {preview}"
+            + (f" 等 {len(orphan_keys)} 个" if len(orphan_keys) > 5 else "")
+        )
     return connection.execute(
         """
-        SELECT session_key, seq, id, role, content, extra, ts
-        FROM messages
-        ORDER BY session_key, seq
+        SELECT m.session_key, m.seq, m.id, m.role, m.content, m.extra, m.ts,
+               s.metadata AS session_metadata
+        FROM messages AS m
+        JOIN sessions AS s ON s.key = m.session_key
+        ORDER BY m.session_key, m.seq
         """
     ).fetchall()
 
 
 def _eligible_pairs(
     messages: list[sqlite3.Row],
-) -> tuple[list[tuple[sqlite3.Row, sqlite3.Row]], int]:
-    """Pair committed user/assistant messages and exclude explicit skips."""
+) -> tuple[list[TurnPair], int, int]:
+    """按显式 turn 元数据重建新格式，并保留严格 legacy 相邻配对。"""
 
     grouped: dict[str, list[sqlite3.Row]] = defaultdict(list)
     for message in messages:
         grouped[str(message["session_key"])].append(message)
     pairs = []
     excluded_interrupted = 0
+    excluded_memory = 0
     for session_messages in grouped.values():
+        explicit: dict[str, list[sqlite3.Row]] = {}
+        explicit_order: list[str] = []
+        for message in session_messages:
+            turn_id = _message_extra(message).get("control_turn_id")
+            if turn_id is None:
+                continue
+            if not isinstance(turn_id, str) or not turn_id:
+                raise ValueError(f"control_turn_id 必须是非空字符串: {message['id']}")
+            if turn_id not in explicit:
+                explicit[turn_id] = []
+                explicit_order.append(turn_id)
+            explicit[turn_id].append(message)
+
+        # 1. 新格式只信任显式 ID、ordinal 和 terminal 标志。
+        for turn_id in explicit_order:
+            turn_messages = explicit[turn_id]
+            users = [row for row in turn_messages if row["role"] == "user"]
+            if not users and all(
+                row["role"] == "assistant"
+                and _message_extra(row).get("proactive") is True
+                for row in turn_messages
+            ):
+                continue
+            assistants = [
+                row
+                for row in turn_messages
+                if row["role"] == "assistant"
+                and _message_extra(row).get("turn_terminal") is True
+            ]
+            ordinals = [_message_extra(row).get("turn_input_ordinal") for row in users]
+            if (
+                not users
+                or len(assistants) != 1
+                or any(
+                    not isinstance(value, int) or isinstance(value, bool)
+                    for value in ordinals
+                )
+            ):
+                raise ValueError(f"同 turn transcript 结构无效: {turn_id}")
+            typed_ordinals = cast(list[int], ordinals)
+            if sorted(typed_ordinals) != list(range(len(users))):
+                raise ValueError(f"同 turn input ordinal 不连续: {turn_id}")
+            users.sort(
+                key=lambda row: cast(
+                    int,
+                    _message_extra(row)["turn_input_ordinal"],
+                )
+            )
+            assistant = assistants[0]
+            if _message_extra(assistant).get("turn_input_count") != len(users):
+                raise ValueError(f"同 turn input count 不匹配: {turn_id}")
+            if any(int(user["seq"]) >= int(assistant["seq"]) for user in users):
+                raise ValueError(f"同 turn assistant 顺序无效: {turn_id}")
+            first = users[0]
+            if _excluded_session(str(first["session_key"]), first):
+                excluded_memory += 1
+                continue
+            if _interrupted_pair(first, assistant):
+                excluded_interrupted += 1
+                continue
+            if any(_skip_post_memory(row) for row in (*users, assistant)):
+                continue
+            if not any(_message_text(row) for row in (*users, assistant)):
+                continue
+            pairs.append((tuple(users), assistant))
+
+        # 2. 无显式 turn metadata 的旧消息继续使用严格相邻配对。
         for user, assistant in zip(
             session_messages,
             session_messages[1:],
         ):
+            if (
+                _message_extra(user).get("control_turn_id") is not None
+                or _message_extra(assistant).get("control_turn_id") is not None
+            ):
+                continue
             if user["role"] != "user" or assistant["role"] != "assistant":
                 continue
-            if _excluded_session(str(user["session_key"])):
+            if _excluded_session(str(user["session_key"]), user):
+                excluded_memory += 1
                 continue
             if _interrupted_pair(user, assistant):
                 excluded_interrupted += 1
@@ -322,12 +488,24 @@ def _eligible_pairs(
                 continue
             if not _message_text(user) and not _message_text(assistant):
                 continue
-            pairs.append((user, assistant))
-    return pairs, excluded_interrupted
+            pairs.append(((user,), assistant))
+    return pairs, excluded_interrupted, excluded_memory
 
 
-def _excluded_session(session_key: str) -> bool:
-    return session_key.split(":", 1)[0] == "scheduler"
+def _excluded_session(session_key: str, user: sqlite3.Row) -> bool:
+    return excludes_memory(session_key, _session_metadata(user))
+
+
+def _session_metadata(message: sqlite3.Row) -> dict[str, object]:
+    raw = message["session_metadata"]
+    if not raw:
+        return {}
+    payload = json.loads(str(raw))
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"session metadata must be an object: {message['session_key']}"
+        )
+    return payload
 
 
 def _skip_post_memory(message: sqlite3.Row) -> bool:
@@ -363,9 +541,10 @@ def _interrupted_pair(
 
 def _audit_rows(
     connection: sqlite3.Connection,
-    pairs: list[tuple[sqlite3.Row, sqlite3.Row]],
+    pairs: list[TurnPair],
     config: BuildConfig,
     excluded_interrupted: int,
+    excluded_memory: int,
 ) -> EmbeddingAudit:
     rows = connection.execute(
         """
@@ -390,6 +569,7 @@ def _audit_rows(
     return EmbeddingAudit(
         eligible_turns=len(pairs),
         excluded_interrupted_turns=excluded_interrupted,
+        excluded_memory_turns=excluded_memory,
         eligible_messages=required,
         valid_messages=required - len(issues),
         dimension=dimension,
@@ -398,7 +578,7 @@ def _audit_rows(
 
 
 def _embedding_issues(
-    pairs: list[tuple[sqlite3.Row, sqlite3.Row]],
+    pairs: list[TurnPair],
     embeddings: dict[str, sqlite3.Row],
     expected_dimension: int | None,
 ) -> tuple[list[EmbeddingIssue], set[int], int]:
@@ -407,7 +587,7 @@ def _embedding_issues(
     issues = []
     dimensions: set[int] = set()
     required = 0
-    for message in (item for pair in pairs for item in pair):
+    for message in _pair_messages(pairs):
         content = _message_text(message)
         if not content.strip():
             continue
@@ -449,6 +629,14 @@ def _embedding_issues(
     return issues, dimensions, required
 
 
+def _pair_messages(pairs: list[TurnPair]) -> Iterator[sqlite3.Row]:
+    """按 transcript 顺序展开全部用户消息和最终助手消息。"""
+
+    for users, assistant in pairs:
+        yield from users
+        yield assistant
+
+
 def _embedding_issue(
     message: sqlite3.Row,
     row: sqlite3.Row | None,
@@ -479,13 +667,13 @@ def _embedding_issue(
 
 
 def _dimension_mismatches(
-    pairs: list[tuple[sqlite3.Row, sqlite3.Row]],
+    pairs: list[TurnPair],
     embeddings: dict[str, sqlite3.Row],
     expected_dimension: int,
     invalid_ids: set[str],
 ) -> list[EmbeddingIssue]:
     issues = []
-    for message in (item for pair in pairs for item in pair):
+    for message in _pair_messages(pairs):
         if not _message_text(message).strip():
             continue
         message_id = str(message["id"])
@@ -507,10 +695,11 @@ def _dimension_mismatches(
 
 
 def _make_turn(
-    user: sqlite3.Row,
+    users: tuple[sqlite3.Row, ...],
     assistant: sqlite3.Row,
     embeddings: dict[str, np.ndarray],
 ) -> CanonicalTurn:
+    user = users[0]
     turn_id = f"{user['id']}::{assistant['id']}"
     remember_targets, remember_boost = _feedback_marker(
         user,
@@ -526,6 +715,22 @@ def _make_turn(
         carrier_turn_id=turn_id,
         target_required=True,
     )
+    user_vectors = [
+        embeddings[str(row["id"])]
+        for row in users
+        if _message_text(row).strip() and str(row["id"]) in embeddings
+    ]
+    required_user_vectors = sum(bool(_message_text(row).strip()) for row in users)
+    user_embedding = embeddings.get(str(user["id"])) if len(users) == 1 else None
+    if (
+        len(users) > 1
+        and user_vectors
+        and len(user_vectors) == required_user_vectors
+    ):
+        mean = np.mean(np.stack(user_vectors), axis=0)
+        norm = float(np.linalg.norm(mean))
+        if norm > 0.0:
+            user_embedding = mean / norm
     return CanonicalTurn(
         turn_id=turn_id,
         session_key=user["session_key"],
@@ -534,9 +739,9 @@ def _make_turn(
         assistant_message_id=assistant["id"],
         started_at=user["ts"],
         committed_at=assistant["ts"],
-        user_text=user["content"] or "",
+        user_text="\n\n".join(_message_text(row) for row in users),
         assistant_text=assistant["content"] or "",
-        user_embedding=embeddings.get(user["id"]),
+        user_embedding=user_embedding,
         assistant_embedding=embeddings.get(assistant["id"]),
         remember_target_turn_ids=remember_targets,
         forget_target_turn_ids=forget_targets,
@@ -716,6 +921,13 @@ def _select_new_turns(
 ) -> list[CanonicalTurn]:
     """Accept only unchanged existing turns followed by causal append-only work."""
 
+    source_turn_ids = {turn.turn_id for turn in turns}
+    removed = sorted(set(existing) - source_turn_ids)
+    if removed:
+        raise AppendOnlyViolation(
+            "source removed indexed turns; rebuild is required, "
+            f"first={removed[0]}"
+        )
     for turn in turns:
         row = existing.get(turn.turn_id)
         if row is None:
@@ -730,7 +942,7 @@ def _select_new_turns(
         return turns
     last_indexed = max(
         (
-            _parse_time(row["started_at"]),
+            _parse_time(row["committed_at"]),
             row["session_key"].encode("utf-8"),
             row["user_seq"],
             row["turn_id"].encode("utf-8"),
@@ -742,7 +954,7 @@ def _select_new_turns(
         turn.turn_id
         for turn in new_turns
         if (
-            _parse_time(turn.started_at),
+            _parse_time(turn.committed_at),
             turn.session_key.encode("utf-8"),
             turn.user_seq,
             turn.turn_id.encode("utf-8"),
@@ -770,9 +982,9 @@ def _load_time_stats(connection: sqlite3.Connection) -> dict[str, TimeStats]:
     return {
         row["channel"]: TimeStats(
             channel=row["channel"],
-            inter_gap_count=row["inter_gap_count"],
-            mean_log_inter_gap=row["mean_log_inter_gap"],
-            m2_log_inter_gap=row["m2_log_inter_gap"],
+            idle_gap_count=row["idle_gap_count"],
+            mean_log_idle_gap=row["mean_log_idle_gap"],
+            m2_log_idle_gap=row["m2_log_idle_gap"],
         )
         for row in connection.execute("SELECT * FROM time_stats")
     }
@@ -815,8 +1027,11 @@ def _encode_turn(
         term_fields=term_fields,
         start_gap_seconds=temporal.start_gap_seconds,
         log_start_gap=temporal.log_start_gap,
-        inter_turn_gap_seconds=temporal.inter_turn_gap_seconds,
-        log_inter_turn_gap=temporal.log_inter_turn_gap,
+        response_delta_seconds=temporal.response_delta_seconds,
+        idle_gap_seconds=temporal.idle_gap_seconds,
+        log_idle_gap=temporal.log_idle_gap,
+        overlap_seconds=temporal.overlap_seconds,
+        log_overlap=temporal.log_overlap,
         persisted_message_span_seconds=temporal.persisted_message_span_seconds,
         log_persisted_message_span=temporal.log_persisted_message_span,
         channel=temporal.channel,
@@ -838,8 +1053,11 @@ class EncodedTime:
     features: list[SparseFeature]
     start_gap_seconds: float | None
     log_start_gap: float | None
-    inter_turn_gap_seconds: float | None
-    log_inter_turn_gap: float | None
+    response_delta_seconds: float | None
+    idle_gap_seconds: float | None
+    log_idle_gap: float | None
+    overlap_seconds: float | None
+    log_overlap: float | None
     persisted_message_span_seconds: float
     log_persisted_message_span: float
     channel: str
@@ -868,23 +1086,32 @@ def _encode_time(
     if persisted_span < 0:
         raise AppendOnlyViolation(f"negative persisted message span at turn {turn.turn_id}")
     start_gap = None if previous is None else (started - _parse_time(previous.last_started_at)).total_seconds()
-    inter_gap = None if previous is None else (started - _parse_time(previous.last_committed_at)).total_seconds()
-    if start_gap is not None and (start_gap < 0 or inter_gap is None or inter_gap < 0):
+    response_delta = (
+        None
+        if previous is None
+        else (started - _parse_time(previous.last_committed_at)).total_seconds()
+    )
+    if start_gap is not None and (start_gap < 0 or response_delta is None):
         raise AppendOnlyViolation(f"negative session gap at turn {turn.turn_id}")
     log_start_gap = None if start_gap is None else math.log1p(start_gap)
-    log_inter_gap = None if inter_gap is None else math.log1p(inter_gap)
+    idle_gap = None if response_delta is None else max(response_delta, 0.0)
+    overlap = None if response_delta is None else max(-response_delta, 0.0)
+    log_idle_gap = None if idle_gap is None else math.log1p(idle_gap)
+    log_overlap = None if overlap is None else math.log1p(overlap)
     stats = time_stats.setdefault(channel, TimeStats(channel, 0.0, 0.0, 0))
     variance = (
-        stats.m2_log_inter_gap / (stats.inter_gap_count - 1)
-        if stats.inter_gap_count > 1
+        stats.m2_log_idle_gap / (stats.idle_gap_count - 1)
+        if stats.idle_gap_count > 1
         else None
     )
     local = _local_time(turn.started_at)
     evidence = {
-        "inter_turn_gap_seconds": inter_gap,
-        "prior_count": stats.inter_gap_count,
-        "prior_mean_log_inter_gap": stats.mean_log_inter_gap,
-        "prior_variance_log_inter_gap": variance,
+        "response_delta_seconds": response_delta,
+        "idle_gap_seconds": idle_gap,
+        "overlap_seconds": overlap,
+        "prior_count": stats.idle_gap_count,
+        "prior_mean_log_idle_gap": stats.mean_log_idle_gap,
+        "prior_variance_log_idle_gap": variance,
         "persisted_message_span_seconds": persisted_span,
         "start_gap_seconds": start_gap,
     }
@@ -897,16 +1124,29 @@ def _encode_time(
             evidence_json=json.dumps(evidence, sort_keys=True),
         )
     ]
-    if log_inter_gap is not None:
-        _update_time_stats(stats, log_inter_gap)
+    if log_overlap is not None and overlap is not None and overlap > 0.0:
+        features.append(
+            SparseFeature(
+                family="time_overlap",
+                feature_id=channel,
+                value=log_overlap,
+                rank=1,
+                evidence_json=json.dumps(evidence, sort_keys=True),
+            )
+        )
+    if log_idle_gap is not None:
+        _update_time_stats(stats, log_idle_gap)
     hour_angle = 2.0 * math.pi * (local.hour + local.minute / 60.0 + local.second / 3600.0) / 24.0
     weekday_angle = 2.0 * math.pi * local.weekday() / 7.0
     return EncodedTime(
         features=features,
         start_gap_seconds=start_gap,
         log_start_gap=log_start_gap,
-        inter_turn_gap_seconds=inter_gap,
-        log_inter_turn_gap=log_inter_gap,
+        response_delta_seconds=response_delta,
+        idle_gap_seconds=idle_gap,
+        log_idle_gap=log_idle_gap,
+        overlap_seconds=overlap,
+        log_overlap=log_overlap,
         persisted_message_span_seconds=persisted_span,
         log_persisted_message_span=math.log1p(persisted_span),
         channel=channel,
@@ -921,11 +1161,11 @@ def _encode_time(
     )
 
 
-def _update_time_stats(stats: TimeStats, log_inter_gap: float) -> None:
-    stats.inter_gap_count += 1
-    delta = log_inter_gap - stats.mean_log_inter_gap
-    stats.mean_log_inter_gap += delta / stats.inter_gap_count
-    stats.m2_log_inter_gap += delta * (log_inter_gap - stats.mean_log_inter_gap)
+def _update_time_stats(stats: TimeStats, log_idle_gap: float) -> None:
+    stats.idle_gap_count += 1
+    delta = log_idle_gap - stats.mean_log_idle_gap
+    stats.mean_log_idle_gap += delta / stats.idle_gap_count
+    stats.m2_log_idle_gap += delta * (log_idle_gap - stats.mean_log_idle_gap)
 
 
 def _persist_turn(
@@ -1061,7 +1301,8 @@ def _persist_channel_observations(
         dense_rows,
     )
     connection.execute(
-        "INSERT INTO time_observations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO time_observations VALUES "
+        "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             turn.turn_id,
             encoded.channel,
@@ -1069,8 +1310,11 @@ def _persist_channel_observations(
             encoded.session_turn_index,
             encoded.start_gap_seconds,
             encoded.log_start_gap,
-            encoded.inter_turn_gap_seconds,
-            encoded.log_inter_turn_gap,
+            encoded.response_delta_seconds,
+            encoded.idle_gap_seconds,
+            encoded.log_idle_gap,
+            encoded.overlap_seconds,
+            encoded.log_overlap,
             encoded.persisted_message_span_seconds,
             encoded.log_persisted_message_span,
             encoded.local_hour,
@@ -1121,9 +1365,9 @@ def _persist_online_state(
         [
             (
                 stats.channel,
-                stats.inter_gap_count,
-                stats.mean_log_inter_gap,
-                stats.m2_log_inter_gap,
+                stats.idle_gap_count,
+                stats.mean_log_idle_gap,
+                stats.m2_log_idle_gap,
             )
             for stats in time_stats.values()
         ],
@@ -1151,6 +1395,7 @@ def _build_result(
     turns: list[CanonicalTurn],
     missing: int,
     excluded_interrupted: int,
+    excluded_memory: int,
     new_turns: list[CanonicalTurn],
     existing: dict[str, sqlite3.Row],
 ) -> BuildResult:
@@ -1160,6 +1405,7 @@ def _build_result(
     return BuildResult(
         discovered_turns=len(turns),
         excluded_interrupted_turns=excluded_interrupted,
+        excluded_memory_turns=excluded_memory,
         indexed_turns=len(new_turns),
         skipped_existing_turns=len(existing),
         turns_missing_embeddings=missing,
