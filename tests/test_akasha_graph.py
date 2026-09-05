@@ -153,7 +153,9 @@ def reader(tmp_path: Path) -> AkashaGraphReader:
 
 
 def pinned(reader: AkashaGraphReader) -> str:
-    return reader.query("graph.overview", {})["revision"]
+    revision = reader.query("graph.overview", {})["revision"]
+    assert isinstance(revision, str)
+    return revision
 
 
 def disk_state(reader: AkashaGraphReader) -> dict:
@@ -425,10 +427,14 @@ def test_thousand_turn_graph_remains_bounded_and_unexpanded_memory_is_searchable
         "end": 1000,
         "next_page": None,
     }
-    assert len(page["nodes"]) == 11 and len(page["edges"]) < 200
-    assert reader.query("graph.search", {"revision": revision, "query": "北极星"})[
+    nodes, edges = page["nodes"], page["edges"]
+    assert isinstance(nodes, list) and isinstance(edges, list)
+    assert len(nodes) == 11 and len(edges) < 200
+    items = reader.query("graph.search", {"revision": revision, "query": "北极星"})[
         "items"
-    ][0]["id"] == node_id("turn", 999)
+    ]
+    assert isinstance(items, list)
+    assert items[0]["id"] == node_id("turn", 999)
 
 
 @pytest.mark.asyncio
@@ -456,8 +462,10 @@ async def test_real_online_engine_graph_query_does_not_change_learning_or_pendin
     before = disk_state(engine._graph_reader)
     pending = dict(engine._pending)
     result = engine.inspect_graph("graph.overview", {})
-    assert result["totals"]["turns"] == 4
-    assert result["included_through"]["id"] == node_id("turn", 3)
+    totals, included_through = result["totals"], result["included_through"]
+    assert isinstance(totals, dict) and isinstance(included_through, dict)
+    assert totals["turns"] == 4
+    assert included_through["id"] == node_id("turn", 3)
     assert before == disk_state(engine._graph_reader) and engine._pending == pending
     engine._source_invalidated_error = RuntimeError("source revoked")
     with pytest.raises(GraphUnavailable):
