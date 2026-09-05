@@ -8,6 +8,7 @@ import sqlite3
 import time
 from contextlib import closing
 from pathlib import Path
+from typing import Any
 
 from session.memory_policy import excludes_memory
 
@@ -50,14 +51,14 @@ def text_page(text: str, start: int, count: int) -> str:
 
 
 def source_excluded(session_key: str, raw: str | None) -> bool:
-    metadata = json.loads(raw) if raw else {}
+    metadata: dict[str, Any] = json.loads(raw) if raw else {}
     if not isinstance(metadata, dict):
         raise ValueError("session metadata must be an object")
     return excludes_memory(session_key, metadata)
 
 
 def message_skipped(raw: str | None) -> bool:
-    extra = json.loads(raw) if raw else {}
+    extra: dict[str, Any] = json.loads(raw) if raw else {}
     if not isinstance(extra, dict):
         raise ValueError("message extra must be an object")
     return bool(extra.get("skip_post_memory"))
