@@ -18,10 +18,19 @@ export function TopBar({ view, onBack, onRefresh, loading, onHelp, detailBack = 
 }
 
 export function SearchField({ value, onChange }) {
-  return <div className="search-field"><Search size={19}/><input aria-label="搜索记忆" value={value} onChange={e => onChange(e.target.value)} placeholder="搜索一段记忆…" autoComplete="off" spellCheck="false"/>
+  return <div className="search-field"><Search size={19}/><input aria-label="搜索记忆" value={value} onChange={e => onChange(e.target.value)} placeholder="搜索全部示例记忆…" autoComplete="off" spellCheck="false"/>
     {value && <IconButton label="清空搜索" onClick={() => onChange('')}><X size={17}/></IconButton>}
     {!value && <span className="search-hint">关键词</span>}
   </div>;
+}
+
+export function Pager({ batch, onPage, subject = '记忆' }) {
+  if (batch.pages <= 1) return null;
+  return <nav className="paging-row" aria-label={`${subject}分页`}>
+    <button type="button" disabled={!batch.hasPrevious} aria-label={`上一批${subject}`} onClick={() => onPage(batch.page-1)}><ArrowLeft size={17}/></button>
+    <span><strong>{batch.start}–{batch.end}</strong> / {batch.total}<small>{subject} · 第 {batch.page+1} / {batch.pages} 页</small></span>
+    <button type="button" disabled={!batch.hasNext} aria-label={`下一批${subject}`} onClick={() => onPage(batch.page+1)}><ChevronRight size={18}/></button>
+  </nav>;
 }
 
 export function MemoryRow({ node, subtitle, onClick, right, compact = false }) {
@@ -73,7 +82,7 @@ export function HelpSheet({ open, onClose }) {
   return <div className="sheet-backdrop" onClick={onClose}><section className="help-sheet" role="dialog" aria-modal="true" aria-labelledby="help-title" ref={ref} tabIndex={-1} onClick={e => e.stopPropagation()}>
     <div className="sheet-handle"/><div className="sheet-heading"><h2 id="help-title">怎样阅读这张图</h2><IconButton label="关闭说明" onClick={onClose}><X size={20}/></IconButton></div>
     <dl className="legend-explanation"><div><dt><i className="legend-turn"/>回合记忆</dt><dd>一段已完成的对话，详情保留它的原始表达。</dd></div><div><dt><i className="legend-hub"/>关联组</dt><dd>共同激活形成的模式节点，它本身不是一段原话。</dd></div><div><dt><span className="sample-line"/>实线 · 共同关联</dt><dd>表示一段记忆属于一个关联组。</dd></div><div><dt><span className="sample-line temporal"/>箭头虚线 · 时间关联</dt><dd>表示已保存的有向时间关系，不证明因果。</dd></div></dl>
-    <p className="help-note">关联强度不是事实可信度。浏览和拖动只改变显示，不改变记忆。</p><button type="button" className="primary-button full" onClick={onClose}>明白了</button>
+    <p className="help-note">组内数字是成员数。同一段记忆可以属于多个关联组，各组数量不能直接相加。折叠、翻页和聚焦只改变显示；搜索覆盖完整示例集合。关联强度不是事实可信度。</p><button type="button" className="primary-button full" onClick={onClose}>明白了</button>
   </section></div>;
 }
 

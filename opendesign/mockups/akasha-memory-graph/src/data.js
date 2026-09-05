@@ -33,10 +33,11 @@ const edge = (source, target, type, weight) => ({ id: `${type}:${source}:${targe
 
 export function createFixture(scenario = 'standard', revision = 12) {
   if (scenario === 'empty') return { nodes: [], edges: [], totalNodes: 0, totalEdges: 0, revision, truncated: false };
-  if (scenario === 'dense') return denseFixture(revision);
+  if (scenario === 'dense' || scenario === 'large') return denseFixture(revision, scenario === 'large');
   const turns = examples.map(turn);
   const hubs = ['h1', 'h2', 'h3'].map((id, i) => ({ id, type: 'hub', title: `关联组 0${i + 1}`, short: `组 0${i + 1}`, date: '09-05', time: '10:24', position: positions[id], creatorId: ['t1', 't5', 't9'][i] }));
   const edges = turns.map((n, i) => edge(n.id, n.group, 'membership', [0.86, 0.72, 0.88, 0.58, 0.81, 0.67, 0.76, 0.61, 0.79, 0.74, 0.45, 0.57, 0.80][i]));
+  edges.push(edge('t3', 'h2', 'membership', 0.62));
   edges.push(edge('t2', 't1', 'temporal', 0.71), edge('t3', 't1', 'temporal', 0.82), edge('t4', 't3', 'temporal', 0.48), edge('t8', 't5', 'temporal', 0.76), edge('t6', 't5', 'temporal', 0.62), edge('t7', 't1', 'temporal', 0.54), edge('t10', 't9', 'temporal', 0.66), edge('t12', 't11', 'temporal', 0.31), edge('t13', 't5', 'temporal', 0.63));
   if (revision > 12) {
     turns.push({ ...turn(['t14', '为记忆图补充版本', '09-05', '10:32', '怎样知道当前看到的是哪次更新？', '在概览和详情显示同一个快照版本，刷新时再一起切换。页面里的布局变化不应该改变记忆图。', 'h1']), position: [202, 51], short: '补充版本' });
@@ -46,18 +47,30 @@ export function createFixture(scenario = 'standard', revision = 12) {
   return { nodes, edges, totalNodes: nodes.length, totalEdges: edges.length, revision, truncated: false };
 }
 
-function denseFixture(revision) {
-  const hubs = Array.from({ length: 4 }, (_, i) => ({ id: `dh${i}`, type: 'hub', title: `关联组 ${String(i + 1).padStart(2, '0')}`, short: `组 ${i + 1}`, date: '09-05', time: '10:24', position: [[102,105],[265,110],[105,285],[266,278]][i] }));
-  const turns = Array.from({ length: 96 }, (_, i) => {
+function denseFixture(revision, large = false) {
+  const groupCount = large ? 8 : 4;
+  const count = (large ? 1000 : 160) + (revision > 12 ? 1 : 0);
+  const prefix = large ? 'large' : 'dense';
+  const hubs = Array.from({ length: groupCount }, (_, i) => ({ id: `${large ? 'lh' : 'dh'}${i}`, type: 'hub', title: `关联组 ${String(i + 1).padStart(2, '0')}`, short: `组 ${i + 1}`, date: '09-05', time: '10:24' }));
+  const turns = Array.from({ length: count }, (_, i) => {
     const seed = turn(examples[i % examples.length]);
-    const group = hubs[i % 4];
-    const angle = i * 2.399963;
-    const radius = 24 + Math.sqrt(Math.floor(i / 4)) * 15;
-    return { ...seed, id: `dense-${i + 1}`, group: group.id, title: `${seed.title} · ${String(i + 1).padStart(2, '0')}`, short: `${i + 1}`, position: [Math.max(24, Math.min(336, group.position[0] + Math.cos(angle)*radius)), Math.max(24, Math.min(366, group.position[1] + Math.sin(angle)*radius))] };
+    const group = hubs[i % groupCount];
+    const node = { ...seed, id: `${prefix}-${i + 1}`, group: group.id, title: `${seed.title} · ${String(i + 1).padStart(2, '0')}`, short: `${i + 1}` };
+    delete node.position;
+    if (i === (large ? 912 : 142)) Object.assign(node, { title: large ? '纸飞机项目的复盘' : '北极星计划的复盘', short: large ? '纸飞机项目' : '北极星计划', user: large ? '纸飞机项目复盘里最想保留的经验是什么？' : '北极星计划复盘里最想保留的经验是什么？', assistant: '先保留原始观察，再整理共同关联。这个示例特意放在尚未展开的成员中，用来检验能否通过全范围搜索找到来源。' });
+    return node;
   });
-  const edges = turns.map((n, i) => edge(n.id, n.group, 'membership', Number((0.4 + (i % 11)*0.05).toFixed(2))));
+  const edgeMap = new Map();
+  const add = e => edgeMap.set(e.id, e);
+  turns.forEach((n, i) => {
+    add(edge(n.id, n.group, 'membership', Number((0.4 + (i % 11)*0.05).toFixed(2))));
+    if (i < Math.floor(count * 0.6) && n.group !== hubs[0].id) add(edge(n.id, hubs[0].id, 'membership', 0.63));
+    if (i % 11 === 0) add(edge(n.id, hubs[(i + 1) % groupCount].id, 'membership', 0.57));
+  });
+  const edges = [...edgeMap.values()];
   for (let i = 1; i < turns.length; i++) edges.push(edge(turns[i].id, turns[i-1].id, 'temporal', 0.55));
-  return { nodes: [...turns, ...hubs], edges, totalNodes: 164 + (revision > 12 ? 1 : 0), totalEdges: 319, revision, truncated: true };
+  const nodes = [...turns, ...hubs];
+  return { nodes, edges, totalNodes: nodes.length, totalEdges: edges.length, revision, truncated: false };
 }
 
 export function neighbors(fixture, id, filter = 'all') {

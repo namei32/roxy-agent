@@ -7,6 +7,6 @@
     "esbuild": "0.25.12"
   },
   "networkRuntimeDependencies": [],
-  "outputBytes": 246129,
+  "outputBytes": 256317,
   "fixtureOnly": true
 }

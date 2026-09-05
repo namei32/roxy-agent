@@ -69,6 +69,7 @@ lucide-react/dist/esm/icons/arrow-right.mjs:
 lucide-react/dist/esm/icons/arrow-up-right.mjs:
 lucide-react/dist/esm/icons/battery-full.mjs:
 lucide-react/dist/esm/icons/check.mjs:
+lucide-react/dist/esm/icons/chevron-down.mjs:
 lucide-react/dist/esm/icons/chevron-right.mjs:
 lucide-react/dist/esm/icons/circle-dot.mjs:
 lucide-react/dist/esm/icons/circle-question-mark.mjs:

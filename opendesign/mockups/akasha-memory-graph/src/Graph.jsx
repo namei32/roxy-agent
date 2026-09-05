@@ -13,7 +13,7 @@ function localPositions(nodes, rootId) {
   return result;
 }
 
-export default function Graph({ nodes, edges, rootId, selectedId, onSelect, mode = 'overview', dense = false, filter = 'all' }) {
+export default function Graph({ nodes, edges, rootId, selectedId, onSelect, mode = 'overview', dense = false, filter = 'all', focusOnly = false, layoutKey = '' }) {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const gesture = useRef(null);
@@ -26,7 +26,8 @@ export default function Graph({ nodes, edges, rootId, selectedId, onSelect, mode
   const marker = useId().replace(/:/g, '');
   const height = mode === 'overview' ? 390 : 300;
   const positions = mode === 'local' ? localPositions(nodes, rootId) : Object.fromEntries(nodes.map(n => [n.id, n.position]));
-  useEffect(() => { setZoom(1); setPan({ x: 0, y: 0 }); }, [rootId, mode, dense, filter]);
+  useEffect(() => { setZoom(1); setPan({ x: 0, y: 0 }); }, [rootId, mode, dense, filter, layoutKey]);
+  const focusedIds = new Set([selectedId, ...edges.filter(e => e.source === selectedId || e.target === selectedId).flatMap(e => [e.source,e.target])]);
 
   // Resolve in screen pixels: transparent hit circles must not steal taps,
   // and the minimum 44px touch diameter stays constant while zooming out.
@@ -40,7 +41,7 @@ export default function Graph({ nodes, edges, rootId, selectedId, onSelect, mode
       if (!position) continue;
       const point = new DOMPoint(...position).matrixTransform(matrix);
       const distance = Math.hypot(point.x-clientX, point.y-clientY);
-      const visualRadius = node.id === rootId ? 17 : node.id === selectedId ? 12 : node.type === 'hub' ? 11 : dense ? 4.5 : 7;
+      const visualRadius = node.aggregate ? (selectedId && node.id !== selectedId ? 17 : 26) : node.id === rootId ? 17 : node.id === selectedId ? 12 : node.type === 'hub' ? 11 : dense ? 4.5 : 7;
       if (distance <= Math.max(22, visualRadius*scale) && distance < bestDistance) {
         closest = node.id; bestDistance = distance;
       }
@@ -101,7 +102,7 @@ export default function Graph({ nodes, edges, rootId, selectedId, onSelect, mode
     if (target) onSelect(target);
   };
 
-  return <div className={`graph-panel ${mode} ${dense ? 'dense' : ''}`}>
+  return <div className={`graph-panel ${mode} ${dense ? 'dense' : ''} ${focusOnly ? 'focus-only' : ''}`}>
     <svg ref={svgRef} viewBox={`0 0 360 ${height}`} className="memory-graph" aria-label={mode === 'overview' ? '记忆图概览，可点选节点' : '一跳记忆关联图，可点选节点和拖动'} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onClick={click} onPointerCancel={() => { gesture.current = null; pinch.current = null; pendingTap.current = null; pointerMap.current.clear(); }}>
       <defs><pattern id={`dots-${marker}`} width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="0.75" fill="currentColor"/></pattern><marker id={`arrow-${marker}`} markerWidth="6" markerHeight="6" refX="4.8" refY="3" orient="auto"><polygon points="0,0 6,3 0,6" fill="currentColor"/></marker></defs>
       <rect width="360" height={height} fill={`url(#dots-${marker})`} className="graph-grid"/>
@@ -119,14 +120,15 @@ export default function Graph({ nodes, edges, rootId, selectedId, onSelect, mode
           if (!point) return null;
           const selected = node.id === selectedId;
           const center = node.id === rootId && mode === 'local';
-          const radius = center ? 17 : selected ? 12 : node.type === 'hub' ? 11 : dense ? 4.5 : 7;
+          const radius = node.aggregate ? (selectedId && !selected ? 17 : 26) : center ? 17 : selected ? 12 : node.type === 'hub' ? 11 : dense ? 4.5 : 7;
           const showLabel = !dense || selected || node.type === 'hub' || mode === 'local' && nodes.length <= 12;
-          return <g key={node.id} transform={`translate(${point[0]},${point[1]})`} className={`graph-node ${node.type} ${selected ? 'selected' : ''} ${center ? 'center' : ''}`} role="button" tabIndex={0} aria-label={`${node.type === 'hub' ? '关联组' : '记忆'}：${node.title}`} aria-pressed={selected} data-node={node.id} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(node.id); } }}>
+          return <g key={node.id} transform={`translate(${point[0]},${point[1]})`} className={`graph-node ${node.type} ${selected ? 'selected' : ''} ${center ? 'center' : ''} ${node.aggregate ? 'aggregate' : ''} ${focusOnly && !focusedIds.has(node.id) ? 'muted-node' : ''}`} role="button" tabIndex={0} aria-label={`${node.type === 'hub' ? '关联组' : '记忆'}：${node.title}${node.aggregate ? `，${node.memberCount} 段记忆，点击展开或收起` : ''}`} aria-pressed={selected} data-node={node.id} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(node.id); } }}>
             <circle r="30" className="node-hit"/>
             {(selected || center) && <circle r={radius+10} className="node-halo"/>}
             {node.type === 'hub' ? <rect x={-radius+2} y={-radius+2} width={(radius-2)*2} height={(radius-2)*2} rx="3" transform="rotate(45)" className="node-shape"/> : <circle r={radius} className="node-shape"/>}
-            {center && <circle r="5" fill="white" opacity="0.96"/>}
-            {showLabel && <text y={radius+21} textAnchor="middle" className="node-label">{mode === 'local' && center ? '当前中心' : node.short}</text>}
+            {node.aggregate && <text y="4" textAnchor="middle" className="group-count">{node.memberCount}</text>}
+            {center && !node.aggregate && <circle r="5" fill="white" opacity="0.96"/>}
+            {showLabel && <text y={radius+21} textAnchor="middle" className="node-label">{node.aggregate ? node.title : mode === 'local' && center ? '当前中心' : node.short}</text>}
           </g>;
         })}
       </g>
