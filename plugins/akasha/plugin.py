@@ -13,6 +13,7 @@ from core.memory.engine import MemoryRecord
 from .engine import AkashaFeedbackPersistModule, AkashaMemoryEngine
 from .inspector import AkashaInspectorReader, mobile_summary
 from .memory_plugin import MemoryPlugin
+from .graph_contract import GraphUnavailable, response, validate_request
 
 _MOBILE_RECALL_SCHEMA = "akasha.recall-card.v1"
 _MOBILE_RECALL_USER_PREVIEW_CHARS = 100
@@ -41,8 +42,8 @@ class AkashaPlugin(Plugin):
             module="mobile_ui.js",
             stylesheet="mobile_ui.css",
             navigation=MobileUiNavigation(
-                label="Akasha Inspector",
-                description="查看每轮线索、激活与模式补全",
+                label="Akasha 记忆",
+                description="浏览记忆图、来源与检索记录",
             ),
             slots=("turn.before_reasoning",),
         )
@@ -63,6 +64,18 @@ class AkashaPlugin(Plugin):
         turn_id: str | None,
     ) -> dict[str, object]:
         """Serve versioned read-only recall and Inspector projections."""
+
+        if method.startswith("graph."):
+            try:
+                validate_request(method, payload)
+                engine = self.context.memory_engine
+                if engine is None or engine.describe().name != "akasha":
+                    return response("disabled", message="当前尚未启用 Akasha 记忆")
+                return cast(AkashaMemoryEngine, engine).inspect_graph(method, payload)
+            except GraphUnavailable as exc:
+                return response("unavailable", message=str(exc))
+            except ValueError as exc:
+                raise MobileUiRpcInvalidRequest(str(exc)) from exc
 
         # 1. Resolve the memory that affected one assistant response.
         if method == "recall.current":

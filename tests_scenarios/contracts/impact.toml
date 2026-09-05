@@ -220,6 +220,20 @@ paths = [
 depends_on = ["session_persistence"]
 scenarios = ["memory_persistence_contract"]
 
+[groups.akasha_graph]
+priority = "p0"
+requirements = ["MOB-006", "PLG-011", "MEM-009", "SES-005", "TST-002", "TST-003"]
+paths = ["plugins/akasha/**", "tests/test_akasha_graph.py", "tests/test_akasha_plugin.py", "tests/test_akasha_mobile_ui.mjs"]
+depends_on = ["mobile_realtime", "memory"]
+scenarios = ["akasha_graph_readonly"]
+
+[groups.akasha_graph_ui]
+priority = "p1"
+requirements = ["MOB-006", "PLG-011"]
+paths = ["plugins/akasha/mobile*.js", "plugins/akasha/mobile_ui.css", "tests/test_akasha_mobile_ui.mjs"]
+depends_on = ["mobile_realtime"]
+scenarios = ["akasha_graph_mobile_ui"]
+
 [groups.jobs]
 priority = "p1"
 requirements = ["SCH-001", "SCH-002"]
@@ -469,6 +483,7 @@ paths = [
   "docs/templates/**",
   "mise.toml",
   "package.json",
+  "opendesign/**",
   "pytest.ini",
   "pyproject.toml",
   "pyrightconfig*.json",

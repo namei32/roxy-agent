@@ -1,9 +1,10 @@
 # Akasha 手机端记忆图：首版功能约定
 
-- 状态：proposed；已完成 Read、Ownership、Isolate、Contract，并提供合成数据三屏原型；正式插件功能尚未实现。
+- 状态：已实现插件代码与隔离验收工具；本地交付不代表正式实例部署或 Android 真机验收。
 - 日期：2026-09-05
 - 调查、源码身份、隔离环境和验证记录：[准备记录](akasha-mobile-memory-graph-readiness.md)。
 - 三屏原型、启动方式与交互范围：[原型说明](../../opendesign/mockups/akasha-memory-graph/README.md)。
+- 已接受决策：[1004 · 版本化只读投影](../decisions/1004-akasha-mobile-graph-is-a-versioned-read-only-projection.md)。
 - 关联：MOB-001、MOB-006、PLG-003、PLG-011、STA-001～STA-003、MEM-009～MEM-010、TST-002。
 
 ## 1. 用户结果
@@ -23,13 +24,13 @@
 | MG-06 | 手动刷新保持身份与版本一致 | 同一响应中的节点、边、详情属于声明的发布版本；扩展或详情请求遇到版本过期时明确要求刷新；迟到结果不能覆盖新视图，旧内部编号不能指向另一段记忆 |
 | MG-07 | 只读、失败可识别 | 浏览请求没有数据库写入尝试，不触发 embedding、检索学习、重建或反馈；空图、引擎未启用、版本过期、数据不可用和请求失败分别展示 |
 
-MG-05 是供下一步原型和数据探针验证的初始产品预算，尚无手机性能实测；调整时同步修改本约定及验收样例。
+MG-05 已由实际 SQLite 样例和响应校验实现，另有 1000 回合的手机尺寸浏览器验证；尚无 Android 真机性能实测。
 图查询的有界选择是新增领域查询的范围定义，不改变既有 recall lane 的数量、顺序或完整投影合同。
 “当前”指读取时最近的有效发布边界；若无法证明源数据仍有效，返回不可用，不能用撤销前的旧快照兜底。
 
 ## 3. 能力归属
 
-以下是拟实施功能的归属；当前交付为设计文档和独立演示原型，未改变生产运行语义。
+实现遵循以下归属；生产变更集中在 canonical Akasha 包与其宿主镜像，未修改 Core 或 Android 协议。
 
 ```yaml
 change_type: feature
@@ -70,21 +71,83 @@ client_only_alternative: 现有 Inspector DTO 不含拓扑，客户端无法可�
 既有增改减路径引用[持久化状态地图](persistence-state-map.md)，不能因它们可重建而取得写权限。
 首版不包含记忆纠错/删除、调权、图重建、历史扩散回放、自动总结或独立持久图缓存。
 
-## 5. 进入下一步的边界
+## 5. 实现与接口
 
-现行 [ADR 0006](../decisions/0006-akasha-v2-is-the-canonical-explicit-memory-engine.md) 第 7 项、
-[运行设计 §9.1](akasha-v2-runtime-migration.md#91-inspector-合同) 和
-[移动 UI 测试](../../tests/test_akasha_mobile_ui.mjs) 仍约定不暴露图。
-拟议变化是增加有界、只读、版本化的图查询；任意 SQL、记忆写入与旧私有图入口仍不属于该能力。
-本提案记录这一差异，不把现行决策改成“已经支持”；后续实现需配套决策和语义测试，保留 recall lane 合同。
+入口仍是手机插件列表中的 `akasha`，导航名改为 **Akasha 记忆**。默认打开记忆图，页签可切换到 Inspector；
+`before_reasoning` 的召回卡片继续使用原有挂载和查询。页面依赖宿主的 `https` 查询能力，所有图请求指定
+`{ cache: "none", transport: "https" }`，关闭页面时清理本页状态，迟到结果由页面请求序号丢弃。
 
-第二轮三屏原型使用完整合成集合演示关联组折叠、全范围搜索、共享成员、分批一跳探索、来源详情和刷新状态。
-分批只改变明确声明的显示范围；总记忆数按身份去重，组内成员数允许重叠。原型目录保留第一轮对照。
-下一步以原型评审和小规模真实数据探针收敛概览选择规则、Hub 稳定身份、发布版本校验、长正文详情分段和上述预算。
-具体 API 名称与字段待数据探针后固定；原型中的身份、版本和延迟不构成后端实现保证。
-正式实现前先解决[准备记录中的镜像漂移](akasha-mobile-memory-graph-readiness.md#3-基线问题镜像漂移)，以对齐后的源码身份重新建立实现基线。
+所有响应包含 `schema: "akasha.memory-graph.v1"` 和 `status`。读取到发布文件的响应包含 64 位十六进制
+`revision`；它是已发布 `akasha.db` 文件的 SHA-256。该字段与宿主插件资源 revision 是两个不同边界。
+除概览外，请求必须携带图 revision。页码从 0 开始；未知参数、无效身份和宽松类型转换在数据库 I/O 前拒绝。
 
-验收使用有明确期望节点与边的隔离样例，观察完整 write set 和持久状态，覆盖并发发布、取消及版本失效。
-只读检查在固定输入场景进行；并发学习场景按请求归因，不能把正常学习写入误算为浏览副作用。
-功能实现后的测试、构建、完整公开 Gate 与手机实测分层报告；此时尚无上述功能验证结果。
-当前交付的回滚只涉及设计文档、索引链接和独立原型资产；后续代码回滚恢复插件版本，不恢复或覆盖用户数据库。
+| 方法 | 参数 | 返回范围 |
+|---|---|---|
+| `graph.overview` | 可选 `page` | 每页 8 个关联组、最近 3 段记忆、去重总数和最后纳入时间 |
+| `graph.group` | `revision`, `node_id`，可选 `page` | 关联组与每页 8 个成员，返回当前端点间的全部关系 |
+| `graph.neighbors` | `revision`, `node_id`，可选 `page`, `filter` | 根节点与每页 10 个一跳邻居；filter 为 `all`、`membership` 或 `temporal` |
+| `graph.search` | `revision`, `query`，可选 `page` | 全部已发布回合的文本子串与 turn ID 搜索，每页 12 条 |
+| `graph.detail` | `revision`, `node_id`，可选 `page` | 节点、成员关系页、输入/回复的首个原文分段 |
+| `graph.source` | `revision`, `node_id`, `field`, `offset` | `user` 或 `assistant` 原文，从 code point offset 开始最多 2048 字符 |
+
+分页 `scope` 返回 `page/page_size/total/start/end/next_page`，其中 start/end 为半开区间。
+来源分段返回 `field/offset/text/total_chars/next_offset`，`next_offset: null` 表示读完。
+复制全文只在两个字段均完整时启用，emoji 和内嵌 NUL 不会破坏分段连续性。
+Hub 没有独立原文，详情显示成员关系；共享成员按稳定身份计为同一段记忆。
+
+`turn:<sha256(turn_id)>` 是回合身份；`hub:<sha256(创建该 hub 的 turn_id)>` 是关联组身份。
+图扩容移动数组槽位后仍可识别相同节点。刷新取得新 revision，再用相同公共身份定位；
+若节点不再存在则显示 `not_found`。分页选择完整子图，不给超预算结果套截断兜底。
+
+读取链路为 `AkashaPlugin.mobile_ui_query → AkashaMemoryEngine.inspect_graph → AkashaGraphReader → GraphQueries`。
+引擎锁与来源失效 fence 约束发布并发；三个数据库以只读 URI 连接，在读事务中核对所有已发布回合的来源身份、
+正文、时间、角色、session 排除策略和多输入完整性。已提交但尚未发布的 sparse suffix 不进入图。
+读取前后检查文件身份，原子替换不能混入同一响应；撤销后的来源不能由旧发布兜底。
+SQLite authorizer 仅允许读查询操作，设置查询时限；查询不读取 embedding 矩阵、不调用学习或重建。
+
+## 6. 源码维护与运行
+
+- 真源是 `akasha-v2-engine/src/akasha`；当前固定 commit、subtree 和摘要见 [UPSTREAM.json](../../plugins/akasha/UPSTREAM.json)。
+  先在 canonical 仓库提交，再按完整文件集合镜像，运行 [镜像检查](../../scripts/check_akasha_v2_mirror.py)。
+- `mobile_inspector.js` 保留原 Inspector/召回实现；`mobile_graph_canvas.js` 负责 SVG 与手势；
+  `mobile_graph.js` 负责路由和请求；`mobile_ui_entry.js` 负责页签和 slot。
+  在 canonical 仓库运行 `python3 scripts/build_mobile_ui.py`，生成并提交无外部 import 的 `mobile_ui.js`，适配宿主 blob 资源加载。
+- 安装入口与 Akasha 引擎选择沿用现有机制。已使用 Akasha 的实例发布新版宿主与插件后，在手机重新打开插件页面即可读取当前已发布图。
+  本功能不需要 schema 升级、模型调用、图重建或新增配置。首次切换引擎仍遵循[既有迁移流程](akasha-first-adoption-migration.md)。
+- 回滚代码时恢复成对的 canonical pin 与宿主镜像；不恢复或覆盖用户数据库。
+
+本地预览使用真实插件资产和 SQLite 读取链路，创建自己拥有的一次性样例目录：
+
+```bash
+python scripts/serve_akasha_graph_fixture.py --turns 1000
+# 将上一步输出的本机 URL 和独立报告目录传给浏览器检查；需要 playwright-core 和 Chromium。
+node scripts/check_akasha_mobile_graph.mjs http://127.0.0.1:PORT/ /tmp/akasha-graph-browser-report
+```
+
+此预览明确标记为隔离样例，不连接正式记忆；它的本机 HTTP 桥不构成认证 HTTPS 或真实 Android WebView 验证。
+
+## 7. 验证与限制
+
+[图查询测试](../../tests/test_akasha_graph.py) 使用生产 SQLite schema、确定的成员/有向边和 SessionDB 来源，
+覆盖千条记忆、完整分页、Unicode 原文、源撤销、文件替换、身份稳定、无写入尝试和实际在线引擎发布。
+写入 mutant 必须被 authorizer 拒绝，数据库内容与 mtime 保持不变；在线测试同时核对 pending ticket。
+[浏览器检查](../../scripts/check_akasha_mobile_graph.mjs) 使用 390×844 触摸环境，验证三屏、分页返回、缩放、
+最小命中范围、无点击穿透、原文全文复制、HTML 转义、过期刷新与页签关闭后的迟到响应。
+
+```bash
+python -m pytest -q tests/test_akasha_graph.py tests/test_akasha_plugin.py tests/test_plugin_mobile_ui.py
+node --test tests/test_akasha_mobile_ui.mjs
+npm run typecheck
+npm run build:mobile-web
+python scripts/check_akasha_v2_mirror.py --upstream /path/to/akasha-v2-engine
+python docker/debug/gate.py run --base origin/main
+```
+
+Gate 新增 P0 只读图场景与写入 mutant；旧场景和 accepted gaps 保持，UI 场景单列 P1。
+生产代码与受保护合同一起变化时执行完整公开场景。最终结果以当前源码对应报告中的 sourceDigest、planDigest 为准。
+上游另运行完整 unit/integration/parity/replay suite；这些记录与远端 CI、真机、部署证据分别交付。
+
+目前的限制：每次读取会校验整个已发布来源前缀，首次新 revision 会计算文件摘要；这些工作在引擎锁内，
+大量历史或慢磁盘下可能增加延迟，SQL 超时会明确报不可用。千条样例验证不证明百万级性能。
+搜索是文本子串搜索；关联组使用中性编号，没有主题总结；只显示当前发布的一跳范围，没有历史版本或编辑纠错功能。
+Android 真机触摸、生命周期、实际网络和部署状态需要独立环境验收，浏览器模拟不能代替。

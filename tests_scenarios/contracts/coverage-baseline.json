@@ -1,7 +1,7 @@
 {
   "acceptedGaps": [],
   "base": "683b4791b0c25e3e899d65fe7c028514240414b3",
-  "catalogDigest": "60234093702a1e7a1ef1185c2301d3da80e2ebc05f3043ef2af395fe769216f5",
+  "catalogDigest": "ce1ec724a08197d05fdaa0ee7f6b470a748493063ee0fc1522133d1673fd7f1e",
   "purpose": "approved_contract_mapping",
   "coveredP0": {
     "companion_control": [
@@ -72,6 +72,9 @@
     "shell_finality": [
       "shell_privileged_cleanup_contract",
       "shell_turn_finality_contract"
+    ],
+    "akasha_graph": [
+      "akasha_graph_readonly"
     ]
   },
   "version": 1

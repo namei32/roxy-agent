@@ -2,7 +2,7 @@
 
 - 日期：2026-09-05
 - 范围：用户要求完成 Read → Ownership → Isolate → Contract；功能约定见[首版功能约定](akasha-mobile-memory-graph.md)。
-- 状态：调查、归属、隔离与约定已准备；功能尚未实现；已有镜像漂移是后续正式实现的前置问题。
+- 状态：第 1～4 步的历史记录；下文保留当时的基线失败和未实施范围。后续源码对齐与实现见第 6 节。
 
 本页保存第 1～4 步的调查和验证状态。后续三屏设计原型的运行、写入范围和验证见
 [原型说明](../../opendesign/mockups/akasha-memory-graph/README.md)，不替代本页记录的正式实现前置检查。
@@ -136,3 +136,16 @@ Inspector 失败项为 `recall lanes use distinct shared-theme tonal semantics`�
 其未知项是 Hub 身份、发布中/撤销后的来源校验、概览选择策略、长正文分段、密集图和手机预算。
 这些未知不妨碍当前只读功能约定；在固定接口前必须用实际样例验证，不能写成现有实现保证。
 源码镜像对齐是正式实现的前置事项；本轮只记录证据，不扩展为算法迁移或修复任务。
+
+## 6. 后续实现的对齐基线
+
+用户随后明确要求完整实现插件。实现先核对 19 处宿主差异的 Git 来源，再将现有宿主字节纳入 canonical，
+形成上游 `87d110d1a64658c0d309e0236cf4b54af4128dc9`；这一步保留宿主既有算法、schema 和主题行为。
+宿主 pin 对齐提交为 `b7b8d74b`，31 个文件的镜像检查通过。主题断言按既有 Roxy token 归属对齐，
+没有更改召回集合、数量和顺序预期。上游陈旧样例也更新为当前 SessionDB/index schema，保留重放与 hash-seed 断言。
+
+生产功能在该对齐基线上实现，再按 canonical commit 镜像；当前身份由
+[UPSTREAM.json](../../plugins/akasha/UPSTREAM.json) 固定。
+[ADR 1004](../decisions/1004-akasha-mobile-graph-is-a-versioned-read-only-projection.md) 替代旧决策中的手机不展示图限制，
+[功能与接口说明](akasha-mobile-memory-graph.md#5-实现与接口) 是当前实现入口。
+本页第 1～5 节继续作为准备阶段收据，不应被解读为当前代码仍未实现或镜像仍漂移。

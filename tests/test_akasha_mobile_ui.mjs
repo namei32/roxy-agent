@@ -42,7 +42,7 @@ test("recall entries survive the Akasha user field migration", () => {
   );
 });
 
-test("mobile UI keeps graph out and uses restrained interaction styles", () => {
+test("mobile UI excludes retired graph write endpoints and uses restrained styles", () => {
   assert.doesNotMatch(source, /akasha-graph|graph\.(global|query|rebuild)/);
   assert.doesNotMatch(source, /\.slice\(/);
   assert.doesNotMatch(styles, /linear-gradient|radial-gradient|backdrop-filter/);
@@ -57,8 +57,8 @@ test("mobile UI keeps graph out and uses restrained interaction styles", () => {
 test("recall lanes use distinct shared-theme tonal semantics", () => {
   assert.match(source, /left,\s*"precise"/);
   assert.match(source, /right,\s*"completion"/);
-  assert.match(styles, /--akasha-mobile-precise:\s*var\(--ak-color-action-primary\)/);
-  assert.match(styles, /--akasha-mobile-completion:\s*var\(--ak-color-status-trace\)/);
+  assert.match(styles, /--akasha-mobile-precise:\s*var\(--roxy-color-action-primary\)/);
+  assert.match(styles, /--akasha-mobile-completion:\s*var\(--roxy-color-status-trace\)/);
   assert.match(styles, /var\(--akasha-mobile-lane\) 10%/);
   assert.match(styles, /var\(--akasha-mobile-lane\) 28%/);
   assert.doesNotMatch(styles, /--m-primary|--m-trace/);

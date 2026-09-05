@@ -1,6 +1,7 @@
 version = 1
 
 [mutant_tests]
+akasha_graph_write_attempt = "tests/test_akasha_graph.py::test_browsing_has_no_write_attempt_and_mutant_is_denied"
 async_accepted_before_visible = "tests/semantic/test_contract_oracles.py::test_call_finality_rejects_background_refresh_mutant"
 candidate_visible_before_activation = "tests/semantic/test_contract_oracles.py::test_plugin_publication_oracle_rejects_early_switch_mutant"
 derived_state_overwrites_session_source = "tests/semantic/test_contract_oracles.py::test_memory_oracle_rejects_derived_state_overwrite_mutant"
@@ -43,6 +44,24 @@ timeout_seconds = 60
 command = ["python", "-m", "pytest", "-q", "tests/semantic/test_change_gate.py"]
 observes = ["requirements", "path_owners", "scenario_references", "p0_mutants"]
 mutants = ["unmapped_executable_file", "missing_p0_mutant"]
+
+[scenarios.akasha_graph_readonly]
+requirements = ["MOB-006", "PLG-011", "MEM-009", "SES-005", "TST-002", "TST-003"]
+groups = ["akasha_graph"]
+environment = "public_clean_workspace"
+timeout_seconds = 120
+command = ["python", "-m", "pytest", "-q", "tests/test_akasha_graph.py", "tests/test_akasha_plugin.py"]
+observes = ["published_revision", "source_validity", "complete_neighbor_pages", "unicode_source_ranges", "database_write_attempts", "pending_ticket_identity", "recall_lane_regression"]
+mutants = ["akasha_graph_write_attempt"]
+
+[scenarios.akasha_graph_mobile_ui]
+requirements = ["MOB-006", "PLG-011"]
+groups = ["akasha_graph_ui"]
+environment = "public_clean_workspace"
+timeout_seconds = 60
+command = ["node", "--test", "tests/test_akasha_mobile_ui.mjs"]
+observes = ["mobile_assets", "recall_lane_completeness", "shared_theme", "retired_write_endpoints"]
+mutants = []
 
 [scenarios.workspace_bootstrap]
 requirements = ["WSP-001", "WSP-004", "TST-005"]
