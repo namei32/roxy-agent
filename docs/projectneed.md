@@ -228,6 +228,10 @@ candidate 在 10 秒健康提交前必须由 process-scope attempt lease 持有�
 
 颜色必须表达动作、选择、状态或层级：primary 只突出当前主要动作，容器色表达选择和低强度强调，error、warning、success、trace 不能互相借色。布局优先使用留白和 tonal surface 建立层级，边框只表达结构或状态；卡片、胶囊和阴影不得作为所有内容的默认容器。引入 Material 组件不能改变 WEBUI-001～WEBUI-006 的源码、平台能力、状态 owner 与发布边界。
 
+### HOME-001 小屋作为移动端沉浸首页
+
+存在唯一声明首页能力的小屋插件时，移动 WebUI 默认展示以 Roxy 和房间为主体的全屏首页，保留小屋、对话和工具三个入口。当前心情由情绪 owner 提供，已送达主动消息可以精确打开原会话和消息。观看、已读和实际回复不得互相替代，展示不得改写主动策略或反馈权威事实。缺少插件、数据或连接时须明确显示状态并保持现有对话与工具可达。详细合同见 [Roxy 小屋首页](design/roxy-home.md)。
+
 ## 5. Agent 任务合同
 
 本节参考 [OpenAI · Prompting guidance for GPT-5.6](https://developers.openai.com/api/docs/guides/prompt-guidance-gpt-5p6)，并按本项目的数据与权限边界收窄。外部指南提供设计依据，不会自动覆盖本文件条款；指南更新需要评审后再修改 PRM 条款。

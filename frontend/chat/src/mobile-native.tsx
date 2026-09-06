@@ -74,6 +74,9 @@ import {
 } from "@/components/ui/dialog";
 import {
   MobilePluginDashboard,
+  MobilePluginHostProvider,
+  type MobilePluginHostActions,
+  type MobileMessageTarget,
   MobilePluginSlot,
   receiveMobilePluginCatalog,
   receiveMobilePluginResult,
@@ -128,11 +131,17 @@ import {
   type MobileTurnSourceProbe,
 } from "./mobile-turn-trace";
 import {
+  isMobileDialogHistoryState,
+  pushMobileDialog,
+  mobileSurfaceHistoryDepth,
   pushMobileSurface,
   readMobileSurfaceHistoryState,
   replaceMobileSurface,
   type MobileSurface,
 } from "./mobile-surface-history";
+import { resolveHomeMessage } from "./mobile-home-state";
+import { MobileRootNavigation, MobileHomeConversations, MobileHomeTools } from "./mobile-home-surfaces";
+import "./mobile-home.css";
 import "./mobile-native.css";
 import "./message-view.css";
 
@@ -1044,7 +1053,11 @@ function MobileNativeApp() {
   const pluginDashboards = useMobilePluginDashboards();
   const [snapshot, setSnapshot] = useState<MobileSnapshot | null>(null);
   const [streamStore] = useState(() => new StreamProjectionStore<MobileMessage>());
-  const [surface, setSurface] = useState<MobileSurface>({ kind: "chat" });
+  const [surface, setSurface] = useState<MobileSurface>({ kind: "home" });
+  const pluginDialogRef = useRef<HTMLDialogElement | null>(null);
+  const [homePluginId, setHomePluginId] = useState<string | null>(null);
+  const [homeTarget, setHomeTarget] = useState<MobileMessageTarget | null>(null);
+  const [homeNavigationError, setHomeNavigationError] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [commandsOpen, setCommandsOpen] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
@@ -1088,7 +1101,7 @@ function MobileNativeApp() {
     draft: MobileComposerDraftWrite;
   } | null>(null);
   const pendingShareRequestRef = useRef<string | null>(null);
-  const surfaceRef = useRef<MobileSurface>({ kind: "chat" });
+  const surfaceRef = useRef<MobileSurface>({ kind: "home" });
   const selectionActiveRef = useRef(false);
   const appliedSharedTextIdsRef = useRef(new Set<string>());
   const pendingSharedTextRef = useRef<{ id: string; sessionId: string; text: string } | null>(null);
@@ -1119,6 +1132,44 @@ function MobileNativeApp() {
     pendingComposerDraftRef.current = null;
     if (pending) saveComposerDraft(pending);
   }, [saveComposerDraft]);
+
+  const homeActions = useMemo<MobilePluginHostActions>(() => ({
+    showDialog(dialog) {
+      if (pluginDialogRef.current?.open) throw new Error("请先关闭当前面板");
+      dialog.showModal();
+      pluginDialogRef.current = dialog;
+      pushMobileDialog(window.history, surfaceRef.current);
+      window.RoxyNative?.setWebHistoryActive(true);
+      dialog.addEventListener("close", () => {
+        if (pluginDialogRef.current !== dialog) return;
+        pluginDialogRef.current = null;
+        if (isMobileDialogHistoryState(window.history.state)) window.history.back();
+      }, { once: true });
+    },
+    sessions: () => (streamSnapshotRef.current?.sessions ?? []).filter((session) => session.isAvailable).map(({ id, title }) => ({ id, title })),
+    openSession(target) {
+      const session = streamSnapshotRef.current?.sessions.find((item) => item.id === target.sessionId);
+      if (!session?.isAvailable) throw new Error("这个会话目前无法打开，请先同步会话列表");
+      flushComposerDraft();
+      setHomeNavigationError(null);
+      setHomeTarget(target.messageId ? target : null);
+      window.RoxyNative?.selectSession(target.sessionId);
+      pushMobileSurface(window.history, { kind: "chat" });
+      pluginDialogRef.current?.close();
+      window.RoxyNative?.setWebHistoryActive(true);
+      surfaceRef.current = { kind: "chat" };
+      setSurface({ kind: "chat" });
+    },
+    openSurface(kind) {
+      flushComposerDraft();
+      setHomeTarget(null);
+      pushMobileSurface(window.history, { kind });
+      pluginDialogRef.current?.close();
+      window.RoxyNative?.setWebHistoryActive(true);
+      surfaceRef.current = { kind };
+      setSurface({ kind });
+    },
+  }), [flushComposerDraft]);
 
   const scheduleComposerDraft = useCallback((draft: MobileComposerDraftWrite) => {
     pendingComposerDraftRef.current = draft;
@@ -1243,9 +1294,15 @@ function MobileNativeApp() {
     };
     const previousScrollRestoration = window.history.scrollRestoration;
     window.history.scrollRestoration = "manual";
-    replaceMobileSurface(window.history, { kind: "chat" });
+    replaceMobileSurface(window.history, { kind: "home" });
     const handlePopState = (event: PopStateEvent) => {
       const next = readMobileSurfaceHistoryState(event.state);
+      const dialog = pluginDialogRef.current;
+      pluginDialogRef.current = null;
+      dialog?.close();
+      window.RoxyNative?.setWebHistoryActive(mobileSurfaceHistoryDepth(event.state) > 0);
+      setHomeTarget(null);
+      setHomeNavigationError(null);
       surfaceRef.current = next;
       setSurface(next);
     };
@@ -1465,7 +1522,7 @@ function MobileNativeApp() {
           window.history.back();
           return true;
         }
-        if (surfaceRef.current.kind === "chat") return false;
+        if (mobileSurfaceHistoryDepth(window.history.state) === 0) return false;
         window.history.back();
         return true;
       },
@@ -1528,7 +1585,7 @@ function MobileNativeApp() {
   }, [snapshot]);
 
   // 渲染期调整：停止中/不可停止/连接错误时立即复位 stopRequested，无需等待 effect 提交
-  if (snapshot?.composer.isStopping || !snapshot?.composer.canStop || snapshot?.connection.error) {
+  if (stopRequested && (snapshot?.composer.isStopping || !snapshot?.composer.canStop || snapshot?.connection.error)) {
     setStopRequested(false);
   }
 
@@ -1646,6 +1703,8 @@ function MobileNativeApp() {
   useEffect(() => {
     if (surface.kind !== "dashboard") return;
     if (!pluginDashboards.some((plugin) => plugin.id === surface.pluginId)) {
+      replaceMobileSurface(window.history, { kind: "plugins" });
+      surfaceRef.current = { kind: "plugins" };
       setSurface({ kind: "plugins" });
     }
   }, [pluginDashboards, surface]);
@@ -1693,10 +1752,38 @@ function MobileNativeApp() {
     const key = `${target.sessionId}\u001f${target.messageId}`;
     if (handledNavigationTargetRef.current === key) return;
     if (!snapshot.messages.some((message) => message.id === target.messageId)) return;
-    handledNavigationTargetRef.current = key;
-    jumpToMessage(target.messageId, true);
-    window.RoxyNative?.navigationTargetHandled(target.messageId);
+    setHomeTarget(null);
+    replaceMobileSurface(window.history, { kind: "chat" });
+    surfaceRef.current = { kind: "chat" };
+    setSurface({ kind: "chat" });
+    const timeout = window.setTimeout(() => {
+      handledNavigationTargetRef.current = key;
+      jumpToMessage(target.messageId, true);
+      window.RoxyNative?.navigationTargetHandled(target.messageId);
+    }, 120);
+    return () => window.clearTimeout(timeout);
   }, [jumpToMessage, snapshot?.messages, snapshot?.navigationTarget, snapshot?.selectedSessionId]);
+
+  // 精确消息目标等待原生同步；离开任务面或换一个目标时自动取消。
+  useEffect(() => {
+    if (!homeTarget || surface.kind !== "chat") return;
+    const timeout = window.setTimeout(() => {
+      setHomeTarget(null);
+      setHomeNavigationError("原消息尚未同步到手机。请等待同步完成后从信箱重试，或在当前会话中查看。");
+    }, 15_000);
+    return () => window.clearTimeout(timeout);
+  }, [homeTarget, surface.kind]);
+
+  const homeMessageId = homeTarget && snapshot ? resolveHomeMessage(homeTarget, snapshot.selectedSessionId, snapshot.messages) : undefined;
+  useEffect(() => {
+    if (!homeTarget || surface.kind !== "chat" || !homeMessageId) return;
+    // 等原阅读恢复完成再定位，防止被尾部滚动覆盖。
+    const timeout = window.setTimeout(() => {
+      jumpToMessage(homeMessageId, true);
+      setHomeTarget(null);
+    }, 120);
+    return () => window.clearTimeout(timeout);
+  }, [homeTarget, homeMessageId, jumpToMessage, surface.kind]);
 
   // 必要 effect：搜索目标自动选中（维护有效 searchTargetId，渲染期调整会改变“仍有效则不动”语义）
   useEffect(() => {
@@ -1975,15 +2062,25 @@ function MobileNativeApp() {
     updateComposerDraft(input, target);
     requestAnimationFrame(() => textareaRef.current?.focus());
   };
-  const navigateToSurface = (next: Exclude<MobileSurface, { kind: "chat" }>) => {
+  const navigateToSurface = (next: MobileSurface) => {
+    flushComposerDraft();
+    setHomeTarget(null);
+    setHomeNavigationError(null);
     pushMobileSurface(window.history, next);
+    pluginDialogRef.current?.close();
+    window.RoxyNative?.setWebHistoryActive(true);
     surfaceRef.current = next;
     setSurface(next);
   };
 
+  const homeCandidates = pluginDashboards.filter((plugin) => plugin.home);
+  const selectedHome = homeCandidates.find((plugin) => plugin.id === homePluginId) ?? (homeCandidates.length === 1 ? homeCandidates[0] : undefined);
+  const rootKind = surface.kind === "home" ? "home" : ["chat", "conversations"].includes(surface.kind) ? "conversations" : "tools";
+
   return (
     <TooltipProvider>
-      <main className={`mobile-shell surface-${surface.kind}`}>
+      <MobilePluginHostProvider value={homeActions}>
+      <main className={`mobile-shell has-root-navigation surface-${surface.kind}`}>
         {surface.kind === "chat" ? (
           <MobileTopBar
             status={snapshot.connection.status}
@@ -2013,7 +2110,7 @@ function MobileNativeApp() {
             onShareSelection={shareSelection}
             onReplyToSelection={replyToSelection}
           />
-        ) : (
+        ) : ["home", "conversations", "tools"].includes(surface.kind) ? null : (
           <MobilePluginTopBar
             title={surface.kind === "plugins"
               ? "插件"
@@ -2021,7 +2118,7 @@ function MobileNativeApp() {
                 ? "知识与运行"
                 : surface.kind === "runtime-detail"
                   ? snapshot.runtimeInspection.detail?.title ?? "详情"
-                  : pluginDashboards.find((plugin) => plugin.id === surface.pluginId)?.label ?? "插件看板"}
+                  : surface.kind === "dashboard" ? pluginDashboards.find((plugin) => plugin.id === surface.pluginId)?.label ?? "插件看板" : "Roxy"}
             onBack={() => window.history.back()}
           />
         )}
@@ -2053,8 +2150,9 @@ function MobileNativeApp() {
         <span className="mobile-a11y-announcement" aria-live="polite" aria-atomic="true">
           {replyNavigationAnnouncement}
         </span>
-        {(snapshot.connection.error || pluginLoadError) ? (
+        {(snapshot.connection.error || pluginLoadError || homeNavigationError) ? (
           <div className="mobile-surface-errors" aria-live="assertive">
+            {homeNavigationError ? <div className="mobile-snackbar" role="alert"><AlertCircle size={20} /><span>{homeNavigationError}</span><button type="button" onClick={() => setHomeNavigationError(null)}>关闭</button></div> : null}
             {snapshot.connection.error ? (
               <div className="mobile-snackbar" role="alert">
                 <AlertCircle className="mobile-snackbar__mark" size={19} />
@@ -2077,6 +2175,21 @@ function MobileNativeApp() {
             ) : null}
           </div>
         ) : null}
+
+        {surface.kind === "home" ? (
+          <section className="mobile-home-scene" aria-label="小屋">
+            {selectedHome ? <MobilePluginDashboard pluginId={selectedHome.id} /> : <div className="mobile-home-placeholder">
+              <Sparkles size={36} /><h1>Roxy 小屋</h1><p>{homeCandidates.length ? "选择要打开的小屋" : "小屋暂时不可用。你可以先进入对话，或在工具中查看插件状态。"}</p>
+              {homeCandidates.map((plugin) => <button type="button" key={plugin.id} onClick={() => setHomePluginId(plugin.id)}>{plugin.label}</button>)}
+              <button type="button" onClick={() => navigateToSurface({ kind: "conversations" })}>打开对话</button>
+            </div>}
+          </section>
+        ) : surface.kind === "conversations" ? <MobileHomeConversations sessions={snapshot.sessions} selectedId={snapshot.selectedSessionId}
+          onOpen={(id) => { flushComposerDraft(); window.RoxyNative?.selectSession(id); navigateToSurface({ kind: "chat" }); }}
+          onCreate={() => { flushComposerDraft(); window.RoxyNative?.createSession(); navigateToSurface({ kind: "chat" }); }} />
+          : surface.kind === "tools" ? <MobileHomeTools connectionLabel={snapshot.connection.label}
+            onRuntime={() => { window.RoxyNative?.refreshRuntimeInspection(); navigateToSurface({ kind: "runtime" }); }}
+            onPlugins={() => navigateToSurface({ kind: "plugins" })} onSettings={() => window.RoxyNative?.openSettings()} onDiagnostics={() => window.RoxyNative?.exportDiagnostics()} /> : null}
 
         {surface.kind === "runtime" ? (
           <RuntimeInspectionDirectory
@@ -2123,7 +2236,7 @@ function MobileNativeApp() {
             highlightedMessageId={highlightedMessageId}
             copiedMessageId={copiedMessageId}
             missingReplySourceId={missingReplySourceId}
-            suspended={searchOpen || selectionActive}
+            suspended={searchOpen || selectionActive || surface.kind !== "chat" || drawerOpen || homeTarget !== null}
             forceScrollToken={sendScrollRequest}
             unread={unreadState}
             unreadAnchorVisited={unreadAnchorVisited}
@@ -2169,7 +2282,13 @@ function MobileNativeApp() {
             />
           )}
         </div>
+        <MobileRootNavigation current={rootKind} onSelect={(kind) => {
+          closeDrawer();
+          if (surface.kind === kind) return;
+          navigateToSurface({ kind });
+        }} />
       </main>
+      </MobilePluginHostProvider>
     </TooltipProvider>
   );
 }
@@ -3555,14 +3674,14 @@ function MobileMessageAttachment({ attachment }: { attachment: MobileAttachment 
       if (!viewerOpenRef.current) return;
       viewerOpenRef.current = false;
       setViewerOpen(false);
-      window.RoxyNative?.setWebHistoryActive(false);
+      window.RoxyNative?.setWebHistoryActive(mobileSurfaceHistoryDepth(window.history.state) > 0);
     };
     window.addEventListener("popstate", closeFromHistory);
     return () => {
       window.removeEventListener("popstate", closeFromHistory);
       if (!viewerOpenRef.current) return;
       viewerOpenRef.current = false;
-      window.RoxyNative?.setWebHistoryActive(false);
+      window.RoxyNative?.setWebHistoryActive(mobileSurfaceHistoryDepth(window.history.state) > 0);
       if (isMobileImageViewerHistoryState(window.history.state, attachment.id)) window.history.back();
     };
   }, [attachment.id]);
@@ -3580,13 +3699,13 @@ function MobileMessageAttachment({ attachment }: { attachment: MobileAttachment 
     if (isMobileImageViewerHistoryState(window.history.state, attachment.id)) {
       viewerOpenRef.current = false;
       setViewerOpen(false);
-      window.RoxyNative?.setWebHistoryActive(false);
+      window.RoxyNative?.setWebHistoryActive(mobileSurfaceHistoryDepth(window.history.state) > 0);
       window.history.back();
       return;
     }
     viewerOpenRef.current = false;
     setViewerOpen(false);
-    window.RoxyNative?.setWebHistoryActive(false);
+    window.RoxyNative?.setWebHistoryActive(mobileSurfaceHistoryDepth(window.history.state) > 0);
   };
   const status = attachment.state === "pending"
     ? "等待下载"
