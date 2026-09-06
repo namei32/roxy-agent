@@ -354,6 +354,14 @@ export function useMobilePluginDashboards(): MobilePluginDashboardEntry[] {
     : []);
 }
 
+export function useMobilePluginCatalogReady(): boolean {
+  useSyncExternalStore(
+    (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
+    () => registryVersion,
+  );
+  return !catalog.updating && !catalog.error && catalog.plugins.every((plugin) => definitions.get(plugin.id)?.revision === plugin.revision);
+}
+
 export function MobilePluginDashboard({ pluginId }: { pluginId: string }) {
   useSyncExternalStore(
     (listener) => { listeners.add(listener); return () => listeners.delete(listener); },

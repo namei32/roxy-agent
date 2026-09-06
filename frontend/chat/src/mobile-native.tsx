@@ -83,6 +83,7 @@ import {
   type MobilePluginCatalog,
   type MobilePluginDashboardEntry,
   useMobilePluginDashboards,
+  useMobilePluginCatalogReady,
 } from "./mobile-plugin-runtime";
 import {
   applyMobileStreamPatch,
@@ -1051,6 +1052,8 @@ declare global {
 
 function MobileNativeApp() {
   const pluginDashboards = useMobilePluginDashboards();
+  const pluginCatalogReady = useMobilePluginCatalogReady();
+  const initialHomePending = useRef(true);
   const [snapshot, setSnapshot] = useState<MobileSnapshot | null>(null);
   const [streamStore] = useState(() => new StreamProjectionStore<MobileMessage>());
   const [surface, setSurface] = useState<MobileSurface>({ kind: "home" });
@@ -1148,6 +1151,7 @@ function MobileNativeApp() {
     },
     sessions: () => (streamSnapshotRef.current?.sessions ?? []).filter((session) => session.isAvailable).map(({ id, title }) => ({ id, title })),
     openSession(target) {
+      initialHomePending.current = false;
       const session = streamSnapshotRef.current?.sessions.find((item) => item.id === target.sessionId);
       if (!session?.isAvailable) throw new Error("这个会话目前无法打开，请先同步会话列表");
       flushComposerDraft();
@@ -1161,6 +1165,7 @@ function MobileNativeApp() {
       setSurface({ kind: "chat" });
     },
     openSurface(kind) {
+      initialHomePending.current = false;
       flushComposerDraft();
       setHomeTarget(null);
       pushMobileSurface(window.history, { kind });
@@ -1699,6 +1704,17 @@ function MobileNativeApp() {
     });
   }, [snapshot?.messages]);
 
+  // 默认首页只在首次目录就绪时决定；后续安装/卸载不会抢走当前任务面。
+  useEffect(() => {
+    if (!pluginCatalogReady || !initialHomePending.current) return;
+    initialHomePending.current = false;
+    if (surfaceRef.current.kind === "home" && !pluginDashboards.some((plugin) => plugin.home)) {
+      replaceMobileSurface(window.history, { kind: "chat" });
+      surfaceRef.current = { kind: "chat" };
+      setSurface({ kind: "chat" });
+    }
+  }, [pluginCatalogReady, pluginDashboards]);
+
   // 必要 effect：外部插件列表变化时校正 surface 指向（保留 effect 避免渲染期新对象引用触发循环）
   useEffect(() => {
     if (surface.kind !== "dashboard") return;
@@ -2063,6 +2079,7 @@ function MobileNativeApp() {
     requestAnimationFrame(() => textareaRef.current?.focus());
   };
   const navigateToSurface = (next: MobileSurface) => {
+    initialHomePending.current = false;
     flushComposerDraft();
     setHomeTarget(null);
     setHomeNavigationError(null);
