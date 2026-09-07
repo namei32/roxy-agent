@@ -1680,7 +1680,12 @@ function MobileNativeApp() {
 
   useEffect(() => {
     const flushWhenHidden = () => {
-      if (document.visibilityState === "hidden") flushComposerDraft();
+      if (document.visibilityState === "hidden") {
+        flushComposerDraft();
+        // 旧 WebView 恢复时可能重开 IME 却不更新可视区域，后台先结束编辑焦点。
+        const editor = document.activeElement;
+        if (editor instanceof HTMLElement && editor.matches("textarea, input, [contenteditable='true']")) editor.blur();
+      } else requestAnimationFrame(syncMobileViewportHeight);
     };
     document.addEventListener("visibilitychange", flushWhenHidden);
     return () => {
