@@ -1,6 +1,6 @@
 # Roxy 的日常与来信
 
-状态：candidate implemented，正在完成最终 Gate 与交付。2026-09-07，维护者确认“Roxy 的日常、成果阅读、关联来信、水晶心情和工具箱”交互方案并要求完整实现。设计入口为独立 OpenDesign 的 `roxy-home/inbox-first.html?v=3`；示例数据不进入正式实现。
+状态：implemented。2026-09-07，维护者确认“Roxy 的日常、成果阅读、关联来信、水晶心情和工具箱”交互方案并要求完整实现。设计入口为独立 OpenDesign 的 `roxy-home/inbox-first.html?v=3`；示例数据不进入正式实现。固定版本与分层交付证据集中维护在 [PR #31](https://github.com/namei32/roxy-agent/pull/31) 和独立插件的部署报告中。
 
 ## 任务合同
 
@@ -63,6 +63,10 @@ roxy_house 通过正式 `drift_skill_roots` 增加阅读札记、小创作和只
 - `house.inbox` 可选返回 `activity_id`，保持 v1 其他字段兼容；`house.activity_mail` 按 runtime 写入 `source_refs` 的 `kind=drift_activity` 与活动 ID 读取已送达消息。即使消息已不在最近 24 封中，仍可按活动找到。
 - 共享宿主增加可选 `queryProviders()` 以发现无看板的数据模块，`showDialog(dialog,{onBack})` 支持内部层级返回，`renderMarkdown(target,content)` 复用现有安全 GFM。成果内的图片转换为明确链接，避免阅读文本时自动发起外部资源请求。
 - 新首页使用 DOM 与本地资源，不包含设计稿的示例数据、状态切换器或模拟发送。数据独立加载，后台/离屏停止刷新，迟到结果受组件与请求身份约束，详情缓存限 48 项。
+
+### Android 0.8.32 返回兼容
+
+旧原生壳在 `setWebHistoryActive(true)` 时直接调用 WebView.goBack。真机证明，内部返回的 popstate 回调重新 pushState 后，原生可能已没有可返回历史；第二次返回会触发 `Web history active without a back entry`。因此插件面板打开时使用既有 `navigateBack` 回调消费内部层级，浏览器历史只保存整个面板的一项。焦点移动不能重新启用直接原生历史返回；根面板关闭后才恢复底层页面的历史状态。此修复只更新共享 WebUI，不修改 APK、bridge 或持久数据。
 
 ## 验证与交付
 
