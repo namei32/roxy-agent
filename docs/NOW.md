@@ -35,8 +35,3 @@
 - 由维护者继续确认 [`design/persistence-state-map.md`](design/persistence-state-map.md) 的 INT-009、INT-010、INT-012～INT-014，以及旧消息编辑和 turns retention；INT-001～INT-008、INT-011 已提升为 projectneed 条款。
 - 把 `mcp/servers/*.toml` 直装声明和 workspace 手工 skill 目录迁移成插件贡献；迁移现存能力后收窄 `WorkspaceMcpAdmin`、watcher 和 loader，Skill/MCP 只保留插件安装、readiness 与 generation 发布这一个 owner。
 - 把已确认的持久化状态地图转成机器可读备份 manifest，补齐目录快照、global companion state 和隔离恢复演练；确认 snapshot 能启动只读 runtime，并读取会话、记忆、调度、插件数据和主动流程连续性。
-
-
-## P1 · Roxy 小屋首页真机收尾
-
-[Roxy 小屋首页](design/roxy-home.md) 已完成源码验收并部署 WSL Preview（Core WebUI 8f2f2660 / 插件 e273b956 / Android 兼容目标 v0.8.32）。原无线 ADB 连接离线，等待维护者提供当前连接 IP 与端口；不复用过期配对码。恢复后验证真实下载激活、来信精确定位、返回键、键盘与前后台生命周期，记录实际 APK/WebView 身份及受保护数据。未经设备证据不能把浏览器验收升级成真机通过。全部完成后删除本项。
