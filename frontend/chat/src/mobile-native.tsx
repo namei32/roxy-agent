@@ -1510,6 +1510,12 @@ function MobileNativeApp() {
         }
       },
       navigateBack() {
+        // 1. 旧原生壳会先派发网页返回；编辑器先失焦，不消耗页面历史。
+        const editor = document.activeElement;
+        if (editor instanceof HTMLElement && editor.matches("textarea, input, [contenteditable='true']")) {
+          editor.blur();
+          return true;
+        }
         if (selectionActiveRef.current) {
           if (pendingShareRequestRef.current !== null) return true;
           pendingShareRequestRef.current = null;
@@ -4790,6 +4796,19 @@ syncMobileViewportHeight();
 window.addEventListener("resize", syncMobileViewportHeight);
 window.visualViewport?.addEventListener("resize", syncMobileViewportHeight);
 window.visualViewport?.addEventListener("scroll", syncMobileViewportHeight);
+// 让编辑状态走 navigateBack，避免旧壳的 goBack 抢先跳过键盘关闭。
+document.addEventListener("focusin", (event) => {
+  if (event.target instanceof HTMLElement && event.target.matches("textarea, input, [contenteditable='true']")) {
+    window.RoxyNative?.setWebHistoryActive(false);
+  }
+});
+document.addEventListener("focusout", () => {
+  queueMicrotask(() => {
+    if (!(document.activeElement instanceof HTMLElement && document.activeElement.matches("textarea, input, [contenteditable='true']"))) {
+      window.RoxyNative?.setWebHistoryActive(mobileSurfaceHistoryDepth(window.history.state) > 0);
+    }
+  });
+});
 document.title = "Roxy Mobile";
 initializeTheme();
 installMobileBridge();
