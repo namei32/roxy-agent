@@ -471,6 +471,10 @@ function MountedPlugin({
   renderer: MobilePluginRenderer;
   context: Omit<MobilePluginContext, "query" | "capabilities">;
 }) {
+  const available = useSyncExternalStore(
+    (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
+    () => !catalog.updating && !catalog.error,
+  );
   const hostActions = React.useContext(HostContext);
   const hostRef = React.useRef<HTMLDivElement>(null);
   const ownerIdRef = React.useRef(createOwnerId());
@@ -483,6 +487,12 @@ function MountedPlugin({
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
+    host.classList.remove("mobile-plugin-host--loading", "mobile-plugin-host--error");
+    if (!available) {
+      host.classList.add("mobile-plugin-host--loading");
+      host.textContent = "正在同步插件界面…";
+      return () => { host.replaceChildren(); };
+    }
     const ownerId = ownerIdRef.current;
     let mounted = true;
     let cleanup: void | (() => void);
@@ -610,7 +620,7 @@ function MountedPlugin({
       }
       host.replaceChildren();
     };
-  }, [hostActions, messageId, pluginId, pluginRevision, renderer, sessionId, slot, stableBlock, turnId]);
+  }, [available, hostActions, messageId, pluginId, pluginRevision, renderer, sessionId, slot, stableBlock, turnId]);
   return <div ref={hostRef} className="mobile-plugin-host" data-plugin={pluginId} />;
 }
 

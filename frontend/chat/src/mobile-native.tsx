@@ -140,6 +140,7 @@ import {
   replaceMobileSurface,
   type MobileSurface,
 } from "./mobile-surface-history";
+import { mobileViewportBounds } from "./mobile-viewport";
 import { resolveHomeMessage } from "./mobile-home-state";
 import { MobileRootNavigation, MobileHomeConversations, MobileHomeTools } from "./mobile-home-surfaces";
 import "./mobile-home.css";
@@ -2079,6 +2080,7 @@ function MobileNativeApp() {
     requestAnimationFrame(() => textareaRef.current?.focus());
   };
   const navigateToSurface = (next: MobileSurface) => {
+    if (next.kind !== "chat") textareaRef.current?.blur();
     initialHomePending.current = false;
     flushComposerDraft();
     setHomeTarget(null);
@@ -4770,14 +4772,24 @@ class MobileErrorBoundary extends React.Component<React.PropsWithChildren, { mes
   }
 }
 
-// Activity 的 adjustResize 已拥有 IME 高度；visualViewport 会在部分 Pixel WebView 上重复扣除键盘。
+// 原生已 resize 时使用 innerHeight；只有可视区域实际平移时才补偿其偏移。
+let viewportDiagnostic = "";
 function syncMobileViewportHeight() {
-  const viewportHeight = Math.max(1, Math.round(window.innerHeight));
-  document.documentElement.style.setProperty("--mobile-viewport-height", `${viewportHeight}px`);
+  const bounds = mobileViewportBounds(window.innerHeight, window.visualViewport);
+  const root = document.documentElement;
+  root.style.setProperty("--mobile-viewport-height", `${bounds.height}px`);
+  root.style.setProperty("--mobile-viewport-offset-top", `${bounds.top}px`);
+  const identity = `${bounds.height}:${bounds.top}`;
+  if (identity !== viewportDiagnostic) {
+    viewportDiagnostic = identity;
+    console.info("[mobile-viewport]", JSON.stringify({ inner: window.innerHeight, visual: window.visualViewport ? { height: window.visualViewport.height, top: window.visualViewport.offsetTop, scale: window.visualViewport.scale } : null, bounds }));
+  }
 }
 
 syncMobileViewportHeight();
 window.addEventListener("resize", syncMobileViewportHeight);
+window.visualViewport?.addEventListener("resize", syncMobileViewportHeight);
+window.visualViewport?.addEventListener("scroll", syncMobileViewportHeight);
 document.title = "Roxy Mobile";
 initializeTheme();
 installMobileBridge();
