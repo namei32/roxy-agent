@@ -382,6 +382,8 @@ Akasha V2 保存 turn 指针、稀疏特征、engram hub、有向关系、activa
 - `skill_journal`：按 skill、entry type 和 key 记录的连续性日志。
 - `global_note`、`self_state`：全局 note 和当前自我选择状态。
 
+日常观测（[1005](../decisions/1005-drift-owns-observable-activities-and-artifacts.md)）在同一 owner 下增加 `drift_activities`、`drift_activity_steps`、`drift_artifacts`：真实执行增加活动与公开阶段，终结和投递确认只更新对应活动状态；明确接续保留前驱引用；`leave_artifact` 只追加不可变的公开成品。旧的选择、cursor、journal 与 run 记录不因展示而重写。查询只有 SELECT，失去进程内执行 owner 的旧 running 记录投影为中断，不写入猜测的结束时间。阶段/列表窗口不拥有删除或保留期权限；当前没有自动减少协议，代码回滚保留新增表和成果。
+
 **F-010：** Drift runtime 依赖这些表在下一轮继续工作。对启用 Drift 的 workspace，它是工作流连续性状态，不是单纯可重建 trace。
 
 ### 9.4 `schedules.json` 与 `proactive_quota.json`

@@ -167,3 +167,9 @@ python main.py plugin-install \
 ```
 
 远程 source 使用其真实 URL/marketplace；先 push 安装所需 commit。安装成功返回已经说明候选身份、当前 turn 与后续动作，不要再查询 status 或运行 doctor。只有安装失败且错误明确指向结构、声明或配置时，才把 `plugin-doctor` 作为诊断工具；它不能证明新增 Tool/Skill 已经被模型真实使用。最终行为验证使用父 turn 创建的 attached programmatic child，不显式选择 runtime。Core 不支持因果候选绑定时，只能在一次性隔离环境验证，并明确报告 `safe candidate self-validation unavailable`。
+
+## 可选的移动首页上下文
+
+ESM 的 dashboard 插件可以同时声明 `home: { version: 1 }`。支持首页的共享 WebUI 向 mount context 提供可选 `host`：`sessions()`、`plugins()`、`queryPlugin(pluginId, method, payload?, options?)`、`openSession({sessionId, messageId?, deliveryId?})`、`openSurface("conversations" | "tools")`、`showDialog(dialogElement)`。对话框通过宿主关联原生返回键，关闭时由宿主恢复上一任务面。检测 `context.host` 后再使用；旧宿主保留普通 dashboard。导航只由真实用户操作触发，查询沿用现有只读、revision、owner 与取消合同。跨插件组合不直接打开其他插件数据库；查看不等于已读或反馈。完整边界见 [小屋首页](../../../docs/design/roxy-home.md)。
+
+日常组合支持可选的 `queryProviders()`，返回包括无导航项模块在内的查询 provider 身份；`plugins()` 继续表示看板目录。`showDialog` 可传 `{onBack:()=>boolean}`：内部成功退回一层时返回 true，根层返回 false 交给宿主关闭。可选的 `renderMarkdown(target,content)` 返回 cleanup，复用共享安全 Markdown，并把图片作为需点击的链接；插件必须在切换内容或卸载时调用 cleanup。旧宿主缺少这些扩展时，应提供明确能力状态或保留纯文本阅读，不改变线协议。

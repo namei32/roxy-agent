@@ -19,6 +19,8 @@ from bus.events_lifecycle import DriftFinished
 from core.error_context import current_session_key
 from plugins.default_proactive.context import AgentTickContext
 from plugins.drift_flow.state import DriftStateStore
+from plugins.drift_flow.activity_store import bounded_text
+from plugins.drift_flow.activity_tools import LeaveArtifactTool
 from plugins.default_proactive.outbound_text import normalize_outbound_text
 
 logger = logging.getLogger(__name__)
@@ -167,6 +169,8 @@ class FinishDriftTool(Tool):
                     ),
                 },
                 "briefing": {"type": "string", "description": "本轮做了什么的一句话摘要"},
+                "public_summary": {"type": "string", "maxLength": 280,
+                    "description": "可选：给用户看的实际进展，只写已经完成的动作、成果或停点，不写内部推理和工具参数；不填时日常只显示客观阶段。"},
                 "scratchpad_update": {
                     "type": "string",
                     "description": (
@@ -293,6 +297,7 @@ class FinishDriftTool(Tool):
         journal_append: list[dict[str, Any]] | dict[str, Any] | None = None,
         global_note_update: str | None = None,
         self_update: dict[str, Any] | None = None,
+        public_summary: str = "",
     ) -> str:
         skill_name = str(skill_used or "").strip()
         if skill_name not in self._store.valid_skill_names():
@@ -316,6 +321,10 @@ class FinishDriftTool(Tool):
         summary = str(briefing or "").strip()
         if not summary:
             return json.dumps({"error": "briefing is required"}, ensure_ascii=False)
+        try:
+            visible_summary = bounded_text(public_summary, 280, "公开活动摘要", empty=True)
+        except ValueError as error:
+            return json.dumps({"error": str(error)}, ensure_ascii=False)
         scratchpad_text = str(scratchpad_update or "").strip()
         if status_value == "paused" and not scratchpad_text:
             return json.dumps(
@@ -400,6 +409,7 @@ class FinishDriftTool(Tool):
         self._ctx.drift_finished = True
         self._ctx.drift_finish_status = status_value
         self._ctx.drift_finish_briefing = summary
+        self._ctx.drift_public_summary = visible_summary
         if self._event_bus is not None and not self._ctx.drift_message_staged:
             self._event_bus.enqueue(
                 DriftFinished(
@@ -562,6 +572,13 @@ class SelectSkillTool(Tool):
             reason=reason_text,
             now_utc=self._ctx.now_utc,
         )
+        if self._ctx.drift_activity_id:
+            meta = next(item for item in self._store.scan_skills() if item.name == name)
+            self._store.activities.start(
+                self._ctx.drift_activity_id, session_key=self._ctx.session_key,
+                skill=name, title=meta.activity_title or meta.description[:80],
+                category=meta.activity_category, continuing=decision_value == "continue" and meta.status == "paused",
+            )
         continuum = self._store.load_skill_continuum(name)
         journal_recent = self._store.load_skill_journal(name, limit=8)
         return json.dumps(
@@ -948,6 +965,7 @@ def build_drift_tool_registry(
     resolver = DriftPathResolver(drift_dir, deps.store)
     tools.register(SelectSkillTool(ctx, deps.store), risk="write")
     tools.register(IdleDriftTool(ctx, deps.store), risk="write")
+    tools.register(LeaveArtifactTool(ctx, deps.store.activities), risk="write")
     tools.register(
         DriftReadFileTool(resolver),
         risk="read-only",

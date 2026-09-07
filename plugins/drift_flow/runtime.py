@@ -17,12 +17,14 @@ DriftTurnPipeline — Drift 空闲时间链路顶层抽象。
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, cast
+from uuid import uuid4
 
 from agent.persona import ROXY_BEHAVIOR_RULES
 from agent.prompting import (
@@ -35,6 +37,7 @@ from agent.tool_hooks.base import ToolHook
 from bus.events_lifecycle import DriftFinished
 from plugins.default_proactive.context import AgentTickContext
 from plugins.drift_flow.state import DriftStateStore, SkillMeta
+from plugins.drift_flow.activity_store import PUBLIC_PHASES
 from plugins.drift_flow.tools import (
     DriftShellTool,
     DriftToolDeps,
@@ -109,6 +112,14 @@ class DriftTurnPipeline:
         # 3. Prepare — 构建 tool registry 与初始 messages。
         tools, messages = await self._prepare(ctx, skills)
 
+        with self._store.activities.execution() as activity_id:
+            ctx.drift_activity_id = activity_id
+            return await self._run_active(ctx, llm_fn, tools, messages)
+
+    async def _run_active(self, ctx: AgentTickContext, llm_fn: LlmFn,
+                          tools: Any, messages: list[dict]) -> bool:
+        """执行与清理共用同一日常 owner，公开状态随真实作用域收束。"""
+
         primary_error: BaseException | None = None
         try:
             # 4. Execute — LLM 工具调用循环。
@@ -128,10 +139,29 @@ class DriftTurnPipeline:
                     if not isinstance(shell, DriftShellTool):
                         raise TypeError("Drift shell 必须由 DriftShellTool 绑定 owner")
                     await shell.terminate_owner()
-            except BaseException:
+            except BaseException as cleanup_error:
                 if primary_error is None:
+                    primary_error = cleanup_error
                     raise
                 logger.exception("[drift] shell cleanup 失败，保留原始执行异常")
+            finally:
+                self._finish_activity(ctx, primary_error)
+
+    def _finish_activity(self, ctx: AgentTickContext, error: BaseException | None) -> None:
+        try:
+            if not self._store.activities.has_activity(ctx.drift_activity_id):
+                return
+            status = ("interrupted" if isinstance(error, asyncio.CancelledError) else "failed") if error else (
+                ctx.drift_finish_status if ctx.drift_finished else "failed"
+            )
+            self._store.activities.finish(
+                ctx.drift_activity_id, status=status, summary=ctx.drift_public_summary,
+                message_staged=ctx.drift_message_staged,
+            )
+        except BaseException:
+            if error is None:
+                raise
+            logger.exception("[drift] 日常封口失败，保留原始执行异常")
 
     # ── 1. Scan（扫描）───────────────────────────────────────────────
 
@@ -178,6 +208,9 @@ class DriftTurnPipeline:
         ctx.drift_selected_skill = ""
         ctx.drift_finish_status = ""
         ctx.drift_finish_briefing = ""
+        ctx.drift_activity_id = ""
+        ctx.drift_activity_call_id = ""
+        ctx.drift_public_summary = ""
 
         # 2.2 构建 drift tool registry。
         tools = build_drift_tool_registry(
@@ -307,15 +340,9 @@ class DriftTurnPipeline:
                 continue
 
             # 3.3 执行工具。
-            result = await self._tool_executor.execute(
-                ToolExecutionRequest(
-                    call_id=str(tool_call.get("id") or f"drift_{steps}"),
-                    tool_name=tool_name,
-                    arguments=tool_args,
-                    source="proactive",
-                    session_key=ctx.session_key,
-                ),
-                tools.execute,
+            result = await self._execute_activity_tool(
+                ctx, tools, tool_name, tool_args,
+                str(tool_call.get("id") or f"drift_{steps}"),
             )
 
             # 3.4 错误处理。
@@ -448,15 +475,9 @@ class DriftTurnPipeline:
                 )
                 continue
 
-            result = await self._tool_executor.execute(
-                ToolExecutionRequest(
-                    call_id=str(tool_call.get("id") or "drift_wrap_up"),
-                    tool_name=tool_name,
-                    arguments=tool_args,
-                    source="proactive",
-                    session_key=ctx.session_key,
-                ),
-                tools.execute,
+            result = await self._execute_activity_tool(
+                ctx, tools, tool_name, tool_args,
+                str(tool_call.get("id") or "drift_wrap_up"),
             )
             self._store.append_step(
                 step_index=ctx.steps_taken + attempt,
@@ -510,6 +531,27 @@ class DriftTurnPipeline:
         ctx.drift_finished = True
         ctx.drift_finish_status = "paused"
         ctx.drift_finish_briefing = "达到步数上限后模型未按要求调用 finish_drift，runtime 自动保存为 paused。"
+        ctx.drift_public_summary = "本轮先到这里，已经保存可接续的进度。"
+
+    async def _execute_activity_tool(self, ctx: AgentTickContext, tools: Any,
+                                     name: str, arguments: dict, call_id: str) -> Any:
+        """记录实际执行阶段；provider call ID 不充当新日常步骤的权威身份。"""
+        step_id = uuid4().hex
+        ctx.drift_activity_call_id = step_id
+        tracked = bool(ctx.drift_activity_id) and self._store.activities.has_activity(ctx.drift_activity_id)
+        if tracked:
+            self._store.activities.start_step(ctx.drift_activity_id, step_id, PUBLIC_PHASES.get(name, "使用活动工具"))
+        result = await self._tool_executor.execute(
+            ToolExecutionRequest(call_id=call_id, tool_name=name, arguments=arguments,
+                                 source="proactive", session_key=ctx.session_key),
+            tools.execute,
+        )
+        if tracked:
+            self._store.activities.finish_step(
+                ctx.drift_activity_id, step_id,
+                failed=result.status == "error" or (name == "finish_drift" and not ctx.drift_finished),
+            )
+        return result
 
     # ── 4. Finish（收尾）─────────────────────────────────────────────
 
@@ -525,6 +567,8 @@ class DriftTurnPipeline:
     def record_commit_result(self, ctx: AgentTickContext, sent: bool) -> None:
         message_result = "sent" if sent else "silent"
         self._store.update_last_message_result(message_result)
+        if ctx.drift_activity_id:
+            self._store.activities.record_delivery(ctx.drift_activity_id, delivered=sent)
         event_bus = self._tool_deps.event_bus
         if event_bus is not None:
             event_bus.enqueue(
@@ -836,6 +880,8 @@ class DriftTurnPipeline:
             "idle_drift 的 reason 必须写具体的时机或风险原因，不能只写 completed、无用户交互、无新信号。\n"
             "2. 选中 skill 后执行一个原子动作；需要更多上下文时，只读取 SKILL.md 声明的 working files。"
             "路径由 drift mount resolver 解析，skills/<skill_name>/... 同时适用于工作区和内建 skill。\n"
+            "有适合用户阅读的成品时，可以用 leave_artifact 显式保存完整札记、清单或小作品；"
+            "不自动公开工作文件、记忆原文、秘密或内部推理，也不要求每轮都产生成果。\n"
             "3. 有用户价值且适合打扰时可调用 message_push，单次 run 最多一次；"
             "message_push 成功后只能调用 finish_drift。\n"
             "4. 结束前必须调用 finish_drift；skill_used 必须等于 selected_skill。\n"
@@ -846,7 +892,7 @@ class DriftTurnPipeline:
             "只有本轮或它与近期多轮的对照确实显露出关于自己如何选择或行动的新证据时，才写 self_update.observation；"
             "初次发现用 question，重复证据用 reinforce，反例或变化用 revise。没有新发现就省略，不要为了显得成长而编造。\n\n"
             "【可用工具】\n"
-            "select_skill, idle_drift, read_file, list_dir, write_file, edit_file, recall_memory, web_fetch, web_search, "
+            "select_skill, idle_drift, leave_artifact, read_file, list_dir, write_file, edit_file, recall_memory, web_fetch, web_search, "
             "fetch_messages, search_messages, shell, message_push, finish_drift；"
             "若 context frame 里列出了可挂载外部能力，可用 mount_server 挂载。"
         )

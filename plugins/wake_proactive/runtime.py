@@ -15,6 +15,7 @@ from typing import Any, Awaitable, Callable, Literal, cast
 from agent.turns.result import TurnOutbound, TurnResult, TurnSideEffect, TurnTrace
 from core.clock import Clock, ReplayClock, clock_from_env
 from plugins.default_proactive.context import AgentTickContext
+from plugins.drift_flow.activity_store import activity_source_refs
 from plugins.drift_flow.factory import (
     build_drift_llm_fn,
     build_drift_pipeline,
@@ -918,7 +919,7 @@ class WakeRuntime:
             evidence=[],
             trace=TurnTrace(
                 source="proactive",
-                extra={"source_mode": "drift"},
+                extra={"source_mode": "drift", "source_refs": activity_source_refs(drift_ctx.drift_activity_id)},
             ),
         )
         delivered = await self._require_orchestrator().handle_proactive_turn(

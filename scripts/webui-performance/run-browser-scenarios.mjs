@@ -670,6 +670,8 @@ async function measureMobileHistory(browserInstance, origin) {
   await installPerformanceProbe(page);
   await page.goto(`${origin}/mobile.html`, { waitUntil: "networkidle" });
   await page.waitForFunction(() => Boolean(window.RoxyMobile));
+  // This fixture measures chat without an installed home provider.
+  await page.evaluate(() => window.RoxyMobile.receivePluginCatalog({ catalogRevision: "0".repeat(64), updating: false, plugins: [] }));
   const snapshot = mobileSnapshot(300);
   await page.evaluate(() => window.__resetRoxyPerf());
   const startedAt = await page.evaluate(() => performance.now());
@@ -687,6 +689,8 @@ async function measureMobileStream(browserInstance, origin) {
   await installPerformanceProbe(page);
   await page.goto(`${origin}/mobile.html`, { waitUntil: "networkidle" });
   await page.waitForFunction(() => Boolean(window.RoxyMobile));
+  // This fixture measures chat without an installed home provider.
+  await page.evaluate(() => window.RoxyMobile.receivePluginCatalog({ catalogRevision: "0".repeat(64), updating: false, plugins: [] }));
   const snapshot = mobileSnapshot(300, { streaming: true });
   await page.evaluate((value) => window.RoxyMobile.receiveSnapshot(value), snapshot);
   await page.locator('[data-message-id="mobile-299"]').waitFor();

@@ -17,6 +17,7 @@ export interface MobilePluginContext {
   messageId?: string;
   turnId?: string;
   block?: unknown;
+  host?: MobilePluginHost;
   capabilities: {
     queryTransports: readonly ("inline" | "https")[];
   };
@@ -26,6 +27,29 @@ export interface MobilePluginContext {
     options?: MobilePluginQueryOptions,
   ): Promise<Record<string, unknown>>;
 }
+
+export interface MobileMessageTarget {
+  sessionId: string;
+  messageId?: string;
+  deliveryId?: string;
+}
+
+export interface MobilePluginHostActions {
+  sessions(): readonly { id: string; title: string }[];
+  openSession(target: MobileMessageTarget): void;
+  openSurface(kind: "conversations" | "tools"): void;
+  showDialog(dialog: HTMLDialogElement, options?: { onBack?: () => boolean }): void;
+  renderMarkdown?(target: HTMLElement, content: string): () => void;
+}
+
+export interface MobilePluginHost extends MobilePluginHostActions {
+  plugins(): readonly MobilePluginDashboardEntry[];
+  queryProviders?(): readonly { id: string }[];
+  queryPlugin(pluginId: string, method: string, payload?: Record<string, unknown>, options?: MobilePluginQueryOptions): Promise<Record<string, unknown>>;
+}
+
+const HostContext = React.createContext<MobilePluginHostActions | undefined>(undefined);
+export const MobilePluginHostProvider = HostContext.Provider;
 
 export interface MobilePluginQueryOptions {
   cache?: "none" | "immutable";
@@ -39,6 +63,7 @@ export interface MobilePluginRenderer {
 export interface MobilePluginDefinition {
   slots: Partial<Record<Exclude<MobilePluginSlotName, "dashboard.main">, MobilePluginRenderer>>;
   dashboard?: MobilePluginRenderer;
+  home?: { version: 1 };
 }
 
 export interface MobilePluginCatalog {
@@ -67,6 +92,7 @@ export interface MobilePluginResult {
 }
 
 export interface MobilePluginDashboardEntry {
+  home?: boolean;
   id: string;
   label: string;
   description: string;
@@ -284,7 +310,7 @@ function parseDefinition(value: unknown, plugin: MobilePluginCatalogItem): Mobil
   if (!value || typeof value !== "object") {
     throw new Error(`插件界面必须默认导出定义对象: ${plugin.id}`);
   }
-  const raw = value as { slots?: unknown; dashboard?: unknown };
+  const raw = value as { slots?: unknown; dashboard?: unknown; home?: { version?: unknown } };
   const slots = raw.slots ?? {};
   if (!slots || typeof slots !== "object" || Array.isArray(slots)) {
     throw new Error(`插件界面 slots 无效: ${plugin.id}`);
@@ -306,7 +332,11 @@ function parseDefinition(value: unknown, plugin: MobilePluginCatalogItem): Mobil
   if ((dashboard !== undefined) !== (plugin.navigation !== undefined)) {
     throw new Error(`插件界面 dashboard 与 catalog navigation 不一致: ${plugin.id}`);
   }
+  if (raw.home !== undefined && (!dashboard || !raw.home || raw.home.version !== 1)) {
+    throw new Error(`插件首页声明无效: ${plugin.id}`);
+  }
   return {
+    home: raw.home as MobilePluginDefinition["home"],
     slots: slots as MobilePluginDefinition["slots"],
     dashboard: dashboard as MobilePluginRenderer | undefined,
   };
@@ -322,8 +352,16 @@ export function useMobilePluginDashboards(): MobilePluginDashboardEntry[] {
     () => registryVersion,
   );
   return catalog.plugins.flatMap((plugin) => plugin.navigation
-    ? [{ id: plugin.id, ...plugin.navigation }]
+    ? [{ id: plugin.id, ...plugin.navigation, home: definitions.get(plugin.id)?.revision === plugin.revision && definitions.get(plugin.id)?.definition.home?.version === 1 }]
     : []);
+}
+
+export function useMobilePluginCatalogReady(): boolean {
+  useSyncExternalStore(
+    (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
+    () => registryVersion,
+  );
+  return !catalog.updating && !catalog.error && catalog.plugins.every((plugin) => definitions.get(plugin.id)?.revision === plugin.revision);
 }
 
 export function MobilePluginDashboard({ pluginId }: { pluginId: string }) {
@@ -435,6 +473,11 @@ function MountedPlugin({
   renderer: MobilePluginRenderer;
   context: Omit<MobilePluginContext, "query" | "capabilities">;
 }) {
+  const available = useSyncExternalStore(
+    (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
+    () => !catalog.updating && !catalog.error,
+  );
+  const hostActions = React.useContext(HostContext);
   const hostRef = React.useRef<HTMLDivElement>(null);
   const ownerIdRef = React.useRef(createOwnerId());
   const { block, messageId, sessionId, slot, turnId } = context;
@@ -446,8 +489,107 @@ function MountedPlugin({
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
+    host.classList.remove("mobile-plugin-host--loading", "mobile-plugin-host--error");
+    if (!available) {
+      host.classList.add("mobile-plugin-host--loading");
+      host.textContent = "正在同步插件界面…";
+      return () => { host.replaceChildren(); };
+    }
     const ownerId = ownerIdRef.current;
+    let mounted = true;
     let cleanup: void | (() => void);
+    const queryPlugin = (targetId: string, method: string, payload: Record<string, unknown> = {}, options: MobilePluginQueryOptions = {}): Promise<Record<string, unknown>> => {
+      if (!mounted) return Promise.reject(new Error("插件界面已关闭"));
+      if (catalog.plugins.find((item) => item.id === pluginId)?.revision !== pluginRevision) return Promise.reject(new Error("插件版本已变化"));
+      const target = catalog.plugins.find((item) => item.id === targetId);
+      if (!target || catalog.updating || catalog.error) return Promise.reject(new Error("插件不可用或正在更新"));
+      const targetRevision = target.revision;
+      const requestId = createRequestId();
+      return new Promise((resolve, reject) => {
+        if (method.length < 1 || method.length > 256) {
+          reject(new Error("插件方法名无效"));
+          return;
+        }
+        let encoded: string;
+        try {
+          encoded = JSON.stringify(payload);
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error("插件参数无法序列化"));
+          return;
+        }
+        if (new TextEncoder().encode(encoded).byteLength > 64 * 1024) {
+          reject(new Error("插件参数超过 64 KiB"));
+          return;
+        }
+        const cacheKey = options.cache === "immutable"
+          ? pluginQueryCacheKey(targetId, targetRevision, method, encoded, sessionId, turnId)
+          : undefined;
+        const cachedJson = cacheKey === undefined ? undefined : immutableResults.get(cacheKey);
+        if (cachedJson !== undefined) {
+          resolve(JSON.parse(cachedJson) as Record<string, unknown>);
+          return;
+        }
+        const timeout = window.setTimeout(() => {
+          const request = pendingQueries.get(requestId);
+          if (!request) return;
+          request.abort?.abort();
+          window.RoxyNative?.cancelPluginUiOwner(request.ownerId);
+          rejectOwnerPending(request.ownerId, "插件请求超时");
+        }, 30_000);
+        const abort = window.RoxyNative ? undefined : new AbortController();
+        const request = {
+          resolve,
+          reject,
+          ownerId,
+          timeout,
+          cacheKey,
+          slot,
+          started: false,
+          abort,
+          send: () => {
+            if (window.RoxyNative) {
+              window.RoxyNative.queryPluginUi(
+                requestId,
+                ownerId,
+                slot,
+                sessionId ?? null,
+                turnId ?? null,
+                targetId,
+                method,
+                encoded,
+                options.cache ?? "none",
+                options.transport ?? "inline",
+              );
+              return;
+            }
+            void queryWebPluginUi({
+              pluginId: targetId,
+              pluginRevision: targetRevision,
+              method,
+              payload,
+              slot,
+              sessionId,
+              turnId,
+              signal: abort!.signal,
+            }).then(
+              (result) => receiveMobilePluginResult({ requestId, resultJson: JSON.stringify(result) }),
+              (error: unknown) => receiveMobilePluginResult({
+                requestId,
+                error: error instanceof Error ? error.message : "插件查询失败",
+              }),
+            );
+          },
+        };
+        try {
+          pendingQueries.enqueue(requestId, request);
+        } catch (error) {
+          window.clearTimeout(timeout);
+          reject(error instanceof Error ? error : new Error("插件请求无法入队"));
+          return;
+        }
+        drainQueryQueue();
+      });
+    };
     try {
       cleanup = renderer.mount(host, {
         slot,
@@ -458,99 +600,20 @@ function MountedPlugin({
         capabilities: {
           queryTransports: ["inline", "https"],
         },
-        query(method, payload = {}, options = {}) {
-          const requestId = createRequestId();
-          return new Promise((resolve, reject) => {
-            if (method.length < 1 || method.length > 256) {
-              reject(new Error("插件方法名无效"));
-              return;
-            }
-            let encoded: string;
-            try {
-              encoded = JSON.stringify(payload);
-            } catch (error) {
-              reject(error instanceof Error ? error : new Error("插件参数无法序列化"));
-              return;
-            }
-            if (new TextEncoder().encode(encoded).byteLength > 64 * 1024) {
-              reject(new Error("插件参数超过 64 KiB"));
-              return;
-            }
-            const cacheKey = options.cache === "immutable"
-              ? pluginQueryCacheKey(pluginId, pluginRevision, method, encoded, sessionId, turnId)
-              : undefined;
-            const cachedJson = cacheKey === undefined ? undefined : immutableResults.get(cacheKey);
-            if (cachedJson !== undefined) {
-              resolve(JSON.parse(cachedJson) as Record<string, unknown>);
-              return;
-            }
-            const timeout = window.setTimeout(() => {
-              const request = pendingQueries.get(requestId);
-              if (!request) return;
-              request.abort?.abort();
-              window.RoxyNative?.cancelPluginUiOwner(request.ownerId);
-              rejectOwnerPending(request.ownerId, "插件请求超时");
-            }, 30_000);
-            const abort = window.RoxyNative ? undefined : new AbortController();
-            const request = {
-              resolve,
-              reject,
-              ownerId,
-              timeout,
-              cacheKey,
-              slot,
-              started: false,
-              abort,
-              send: () => {
-                if (window.RoxyNative) {
-                  window.RoxyNative.queryPluginUi(
-                    requestId,
-                    ownerId,
-                    slot,
-                    sessionId ?? null,
-                    turnId ?? null,
-                    pluginId,
-                    method,
-                    encoded,
-                    options.cache ?? "none",
-                    options.transport ?? "inline",
-                  );
-                  return;
-                }
-                void queryWebPluginUi({
-                  pluginId,
-                  pluginRevision,
-                  method,
-                  payload,
-                  slot,
-                  sessionId,
-                  turnId,
-                  signal: abort!.signal,
-                }).then(
-                  (result) => receiveMobilePluginResult({ requestId, resultJson: JSON.stringify(result) }),
-                  (error: unknown) => receiveMobilePluginResult({
-                    requestId,
-                    error: error instanceof Error ? error.message : "插件查询失败",
-                  }),
-                );
-              },
-            };
-            try {
-              pendingQueries.enqueue(requestId, request);
-            } catch (error) {
-              window.clearTimeout(timeout);
-              reject(error instanceof Error ? error : new Error("插件请求无法入队"));
-              return;
-            }
-            drainQueryQueue();
-          });
-        },
+        host: hostActions ? {
+          ...hostActions,
+          plugins: () => catalog.plugins.flatMap((item) => item.navigation ? [{ id: item.id, ...item.navigation }] : []),
+          queryProviders: () => catalog.plugins.map(({ id }) => ({ id })),
+          queryPlugin,
+        } : undefined,
+        query: (method, payload, options) => queryPlugin(pluginId, method, payload, options),
       });
     } catch (error) {
       host.textContent = error instanceof Error ? `插件界面错误：${error.message}` : "插件界面错误";
       host.classList.add("mobile-plugin-host--error");
     }
     return () => {
+      mounted = false;
       window.RoxyNative?.cancelPluginUiOwner(ownerId);
       rejectOwnerPending(ownerId, "插件界面已卸载");
       try {
@@ -560,7 +623,7 @@ function MountedPlugin({
       }
       host.replaceChildren();
     };
-  }, [messageId, pluginId, pluginRevision, renderer, sessionId, slot, stableBlock, turnId]);
+  }, [available, hostActions, messageId, pluginId, pluginRevision, renderer, sessionId, slot, stableBlock, turnId]);
   return <div ref={hostRef} className="mobile-plugin-host" data-plugin={pluginId} />;
 }
 
