@@ -38,11 +38,13 @@ export interface MobilePluginHostActions {
   sessions(): readonly { id: string; title: string }[];
   openSession(target: MobileMessageTarget): void;
   openSurface(kind: "conversations" | "tools"): void;
-  showDialog(dialog: HTMLDialogElement): void;
+  showDialog(dialog: HTMLDialogElement, options?: { onBack?: () => boolean }): void;
+  renderMarkdown?(target: HTMLElement, content: string): () => void;
 }
 
 export interface MobilePluginHost extends MobilePluginHostActions {
   plugins(): readonly MobilePluginDashboardEntry[];
+  queryProviders?(): readonly { id: string }[];
   queryPlugin(pluginId: string, method: string, payload?: Record<string, unknown>, options?: MobilePluginQueryOptions): Promise<Record<string, unknown>>;
 }
 
@@ -601,6 +603,7 @@ function MountedPlugin({
         host: hostActions ? {
           ...hostActions,
           plugins: () => catalog.plugins.flatMap((item) => item.navigation ? [{ id: item.id, ...item.navigation }] : []),
+          queryProviders: () => catalog.plugins.map(({ id }) => ({ id })),
           queryPlugin,
         } : undefined,
         query: (method, payload, options) => queryPlugin(pluginId, method, payload, options),

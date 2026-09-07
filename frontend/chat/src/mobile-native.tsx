@@ -122,6 +122,7 @@ import {
 } from "./mobile-message-state";
 import type { AgentBlock, ChatMessage } from "./chat-message";
 import { messageNeedsMarkdown } from "./message-rendering-policy";
+import { renderStaticMarkdown } from "./static-markdown";
 import { StreamProjectionStore } from "./stream-projection";
 import {
   MobileTurnTraceRegistry,
@@ -1059,6 +1060,7 @@ function MobileNativeApp() {
   const [streamStore] = useState(() => new StreamProjectionStore<MobileMessage>());
   const [surface, setSurface] = useState<MobileSurface>({ kind: "home" });
   const pluginDialogRef = useRef<HTMLDialogElement | null>(null);
+  const pluginDialogBackRef = useRef<(() => boolean) | undefined>(undefined);
   const [homePluginId, setHomePluginId] = useState<string | null>(null);
   const [homeTarget, setHomeTarget] = useState<MobileMessageTarget | null>(null);
   const [homeNavigationError, setHomeNavigationError] = useState<string | null>(null);
@@ -1138,15 +1140,45 @@ function MobileNativeApp() {
   }, [saveComposerDraft]);
 
   const homeActions = useMemo<MobilePluginHostActions>(() => ({
-    showDialog(dialog) {
+    renderMarkdown(target, content) {
+      // 复用共享安全 GFM；文本成果里的图片必须经用户点击，不能自动发起外部请求。
+      const template = document.createElement("template");
+      template.innerHTML = renderStaticMarkdown(content);
+      for (const picture of template.content.querySelectorAll("img")) {
+        const link = document.createElement("a");
+        const src = picture.getAttribute("src") ?? "";
+        if (/^https?:\/\//i.test(src)) {
+          link.href = src;
+          link.rel = "noopener noreferrer";
+          link.target = "_blank";
+        }
+        link.textContent = `[图片：${picture.getAttribute("alt") || "查看链接"}]`;
+        picture.replaceWith(link);
+      }
+      target.classList.add("static-message-response");
+      target.replaceChildren(template.content);
+      const copy = (event: MouseEvent) => {
+        if (!(event.target instanceof Element)) return;
+        const button = event.target.closest<HTMLButtonElement>("[data-static-code-copy]");
+        const code = button?.parentElement?.querySelector("code")?.textContent;
+        if (!button || code == null) return;
+        if (window.RoxyNative) { window.RoxyNative.copyText(code); button.textContent = "已请求复制"; }
+        else void navigator.clipboard.writeText(code).then(() => { button.textContent = "已复制"; }).catch(() => { button.textContent = "复制失败"; });
+      };
+      target.addEventListener("click", copy);
+      return () => { target.removeEventListener("click", copy); target.replaceChildren(); };
+    },
+    showDialog(dialog, options) {
       if (pluginDialogRef.current?.open) throw new Error("请先关闭当前面板");
       dialog.showModal();
       pluginDialogRef.current = dialog;
+      pluginDialogBackRef.current = options?.onBack;
       pushMobileDialog(window.history, surfaceRef.current);
       window.RoxyNative?.setWebHistoryActive(true);
       dialog.addEventListener("close", () => {
         if (pluginDialogRef.current !== dialog) return;
         pluginDialogRef.current = null;
+        pluginDialogBackRef.current = undefined;
         if (isMobileDialogHistoryState(window.history.state)) window.history.back();
       }, { once: true });
     },
@@ -1304,7 +1336,14 @@ function MobileNativeApp() {
     const handlePopState = (event: PopStateEvent) => {
       const next = readMobileSurfaceHistoryState(event.state);
       const dialog = pluginDialogRef.current;
+      if (dialog?.open && pluginDialogBackRef.current?.()) {
+        // 插件先退回内部上一层，原生仍只保留一个可关闭的对话框历史项。
+        pushMobileDialog(window.history, surfaceRef.current);
+        window.RoxyNative?.setWebHistoryActive(true);
+        return;
+      }
       pluginDialogRef.current = null;
+      pluginDialogBackRef.current = undefined;
       dialog?.close();
       window.RoxyNative?.setWebHistoryActive(mobileSurfaceHistoryDepth(event.state) > 0);
       setHomeTarget(null);

@@ -11,6 +11,8 @@ from typing import Any, Iterator, cast
 
 import yaml
 
+from plugins.drift_flow.activity_store import DriftActivityStore
+
 from core.common.timekit import parse_iso
 from infra.persistence.json_store import load_json
 
@@ -44,6 +46,8 @@ class SkillMeta:
     next: str
     requires_mcp: list[str]
     builtin: bool
+    activity_title: str = ""
+    activity_category: str = "自主活动"
 
 
 class DriftStateStore:
@@ -73,6 +77,8 @@ class DriftStateStore:
         self._last_saved_run_at: str = ""
         self.skills_dir.mkdir(parents=True, exist_ok=True)
         self._ensure_db()
+        self.activities = DriftActivityStore(self.db_file)
+        self.activities.initialize()
 
     def scan_skills(self) -> list[SkillMeta]:
         skills: list[SkillMeta] = []
@@ -533,6 +539,8 @@ class DriftStateStore:
             next="",
             requires_mcp=requires_mcp,
             builtin=builtin,
+            activity_title=_clip(metadata.get("activity_title") or description, 80),
+            activity_category=_clip(metadata.get("activity_category") or "自主活动", 32),
         )
 
     def _ensure_db(self) -> None:

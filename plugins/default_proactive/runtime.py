@@ -36,6 +36,7 @@ from proactive_v2.config import ProactiveConfig
 from plugins.default_proactive.context import AgentTickContext
 from proactive_v2.frame import ProactiveFrame, ProactiveTickResult
 from plugins.drift_flow.runtime import DriftTurnPipeline
+from plugins.drift_flow.activity_store import activity_source_refs
 from plugins.default_proactive.gateway import DataGateway, GatewayDeps, GatewayResult
 from plugins.default_proactive.deliver import ProactiveDeliverer
 from plugins.default_proactive.gate import GateResult, ProactiveGateChain
@@ -429,7 +430,7 @@ class ProactiveFlowRuntime:
                     content=ctx.draft_message,
                     media=list(ctx.draft_media),
                 ),
-                trace=TurnTrace(source="proactive", extra={"source_mode": "drift"}),
+                trace=TurnTrace(source="proactive", extra={"source_mode": "drift", "source_refs": activity_source_refs(ctx.drift_activity_id)}),
             ),
         )
 
