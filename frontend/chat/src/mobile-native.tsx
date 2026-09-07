@@ -1174,7 +1174,9 @@ function MobileNativeApp() {
       pluginDialogRef.current = dialog;
       pluginDialogBackRef.current = options?.onBack;
       pushMobileDialog(window.history, surfaceRef.current);
-      window.RoxyNative?.setWebHistoryActive(true);
+      // 旧 Android 的直接 WebView.goBack 会跳过 popstate 中补建的历史项。
+      // 对话框内部返回由已有 navigateBack 回调消费，浏览器历史仅拥有整个面板。
+      window.RoxyNative?.setWebHistoryActive(false);
       dialog.addEventListener("close", () => {
         if (pluginDialogRef.current !== dialog) return;
         pluginDialogRef.current = null;
@@ -1336,12 +1338,6 @@ function MobileNativeApp() {
     const handlePopState = (event: PopStateEvent) => {
       const next = readMobileSurfaceHistoryState(event.state);
       const dialog = pluginDialogRef.current;
-      if (dialog?.open && pluginDialogBackRef.current?.()) {
-        // 插件先退回内部上一层，原生仍只保留一个可关闭的对话框历史项。
-        pushMobileDialog(window.history, surfaceRef.current);
-        window.RoxyNative?.setWebHistoryActive(true);
-        return;
-      }
       pluginDialogRef.current = null;
       pluginDialogBackRef.current = undefined;
       dialog?.close();
@@ -1553,6 +1549,11 @@ function MobileNativeApp() {
         const editor = document.activeElement;
         if (editor instanceof HTMLElement && editor.matches("textarea, input, [contenteditable='true']")) {
           editor.blur();
+          return true;
+        }
+        const dialog = pluginDialogRef.current;
+        if (dialog?.open) {
+          if (!pluginDialogBackRef.current?.()) dialog.close();
           return true;
         }
         if (selectionActiveRef.current) {
@@ -4849,7 +4850,10 @@ document.addEventListener("focusin", (event) => {
 document.addEventListener("focusout", () => {
   queueMicrotask(() => {
     if (!(document.activeElement instanceof HTMLElement && document.activeElement.matches("textarea, input, [contenteditable='true']"))) {
-      window.RoxyNative?.setWebHistoryActive(mobileSurfaceHistoryDepth(window.history.state) > 0);
+      window.RoxyNative?.setWebHistoryActive(
+        !isMobileDialogHistoryState(window.history.state)
+        && mobileSurfaceHistoryDepth(window.history.state) > 0,
+      );
     }
   });
 });
