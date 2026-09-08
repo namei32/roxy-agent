@@ -98,7 +98,7 @@ async def test_plugin_action_preserves_host_for_backend_csrf(tmp_path, monkeypat
         return original(**kwargs)
     monkeypatch.setattr(web_shell.httpx, "AsyncClient", client)
     monkeypatch.setattr(web_shell, "_is_socket", lambda path: True)
-    request = Request({"type": "http", "method": "POST", "scheme": "http", "path": "/api/chat/plugin-ui/action", "query_string": b"", "headers": [(b"host", b"localhost:2236"), (b"origin", b"http://localhost:2236"), (b"x-roxy-csrf", b"1")]}, receive=lambda: None)
+    request = Request({"type": "http", "method": "POST", "scheme": "http", "path": "/api/chat/plugin-ui/action", "query_string": b"", "headers": [(b"host", b"localhost:2236"), (b"origin", b"http://localhost:2236"), (b"x-roxy-csrf", b"1")]})
     async def receive():
         return {"type": "http.request", "body": b"{}", "more_body": False}
     request._receive = receive

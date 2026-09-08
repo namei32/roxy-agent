@@ -4,6 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -251,8 +252,8 @@ async def test_chat_http_action_requires_csrf_and_catalog_observes_committed_sta
     channel = SimpleNamespace(bind_attachment_store=lambda store: None, name="web", notify_model_catalog_changed=notify)
     app = create_chat_app(
         workspace=tmp_path,
-        channel=channel,
-        plugin_ui_provider=Provider(),
+        channel=cast(Any, channel),
+        plugin_ui_provider=cast(Any, Provider()),
         model_registry=service.registry,
     )
     body = {

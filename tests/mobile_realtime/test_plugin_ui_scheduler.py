@@ -9,6 +9,9 @@ from infra.mobile_realtime.plugin_ui import PluginUiQuery, PluginUiQuerySchedule
 
 
 class _BlockingProvider:
+    async def action(self, plugin_id: str, plugin_revision: str, method: str, payload: dict[str, object]) -> dict[str, object]:
+        raise AssertionError("只读调度器不能执行写操作")
+
     def __init__(self) -> None:
         self.release = asyncio.Event()
         self.started = asyncio.Event()
