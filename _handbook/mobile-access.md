@@ -30,7 +30,6 @@ Cloudflare Tunnel 由本机的 `cloudflared` 主动向 Cloudflare 建立出站�
 - 可用且已解锁的 Linux Secret Service。移动网关只支持 `secret_service` 保存主密钥；服务不可用或 collection 被锁定时会明确启动失败。
 - 一台能安装当前 Roxy Mobile APK 的 Android 手机。
 - 使用与当前 Roxy 服务端匹配的 Roxy Mobile APK，通过 USB 安装更新。
-  Android 发布仓暂时沿用旧名称；不要据此把新 Core 配置写回旧运行时命名空间。
 - 当前版 `cloudflared`。安装方式以 [Cloudflare 下载页](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/) 为准。
 
 先确认 Agent 可以正常启动，并且本机 Web Chat 能打开：
