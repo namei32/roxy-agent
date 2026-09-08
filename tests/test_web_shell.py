@@ -83,3 +83,26 @@ def test_runtime_socket_path_stays_short_for_deep_workspace(tmp_path: Path) -> N
     server.bind(str(path))
     server.close()
     assert (workspace / "runtime" / "web-chat.sock").is_socket()
+
+@pytest.mark.asyncio
+async def test_plugin_action_preserves_host_for_backend_csrf(tmp_path, monkeypatch):
+    import httpx
+    from starlette.requests import Request
+    seen = []
+    original = httpx.AsyncClient
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(200, json={"revision": 2})
+    def client(**kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return original(**kwargs)
+    monkeypatch.setattr(web_shell.httpx, "AsyncClient", client)
+    monkeypatch.setattr(web_shell, "_is_socket", lambda path: True)
+    request = Request({"type": "http", "method": "POST", "scheme": "http", "path": "/api/chat/plugin-ui/action", "query_string": b"", "headers": [(b"host", b"localhost:2236"), (b"origin", b"http://localhost:2236"), (b"x-roxy-csrf", b"1")]}, receive=lambda: None)
+    async def receive():
+        return {"type": "http.request", "body": b"{}", "more_body": False}
+    request._receive = receive
+    response = await web_shell._proxy_http(request, tmp_path / "socket", "/api/chat/plugin-ui/action")
+    assert seen[0].headers["host"] == "localhost:2236"
+    assert seen[0].headers["origin"] == "http://localhost:2236"
+    await response.background()

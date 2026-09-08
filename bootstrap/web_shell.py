@@ -199,6 +199,10 @@ async def _proxy_http(
         if name.lower() not in _REQUEST_HEADERS_EXCLUDED
     }
 
+    # 显式插件写操作在内部 UDS hop 仍需核对浏览器原始同源 Origin。
+    if target_path == "/api/chat/plugin-ui/action":
+        headers["host"] = request.url.netloc
+
     # 2. Stream request and response bodies without turning attachments into RAM copies.
     try:
         logger.debug("[web_shell.proxy] http relay start socket=%s target=%s method=%s", socket_path, target_path, request.method)

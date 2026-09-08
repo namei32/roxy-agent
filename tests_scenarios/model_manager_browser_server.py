@@ -5,12 +5,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import importlib.util, json, tempfile, os
+import importlib.util
+import tempfile
+import os
 
 os.environ["NO_PROXY"] = "localhost,127.0.0.1"
 os.environ["no_proxy"] = "localhost,127.0.0.1"
-from pathlib import Path
-from types import SimpleNamespace, MappingProxyType
+from types import SimpleNamespace
 from contextlib import asynccontextmanager
 import uvicorn
 from fastapi.responses import HTMLResponse, FileResponse
@@ -19,7 +20,6 @@ from agent.config_models import Config
 from agent.model_runtime.store import ModelRegistryStore
 from agent.model_runtime.management import ModelManagementService
 from agent.plugins.mobile_ui import PluginMobileUiProvider
-from agent.plugins.generation import MobileUiAsset
 from bootstrap.providers import build_model_registry
 from bootstrap.chat_api import create_chat_app
 from infra.channels.web_chat_channel import WebChatChannel
