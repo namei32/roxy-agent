@@ -13,7 +13,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from time import monotonic
 from typing import TYPE_CHECKING, cast
-from uuid import UUID, uuid4
+from uuid import UUID, NAMESPACE_URL, uuid4, uuid5
 
 from bus.events import (
     ChannelMessage,
@@ -632,6 +632,17 @@ class MobileRealtimeChannel:
                     "message": "该命令仍在执行，请等待原命令 ID 的最终收据",
                 },
             )
+        if isinstance(frame, GenericCommand) and frame.type == "session.create":
+            recovered = self._read_created_session(device_id, frame)
+            if recovered is not None:
+                completed = self._runtime.storage.complete_command(
+                    device_id=device_id, command_id=frame.id,
+                    reply_type=recovered.type,
+                    reply_payload_json=json.dumps(recovered.payload),
+                    session_id=recovered.session_id, turn_id=None,
+                    completed_at=_utc_now(),
+                )
+                return _reply_from_receipt(completed)
         if not isinstance(frame, MessageSendCommand):
             unknown = self._runtime.storage.mark_command_outcome_unknown(
                 device_id=device_id,
@@ -925,10 +936,7 @@ class MobileRealtimeChannel:
         if frame.type == "session.list":
             return await self._list_sessions(device_id, frame)
         if frame.type == "session.create":
-            raise MobileCommandError(
-                "unsupported_command",
-                "当前版本由手机本地生成 mobile session_id",
-            )
+            return await self._create_session(device_id, frame)
         if frame.type == "session.open":
             return await self._open_session(device_id, frame)
         if frame.type == "history.get":
@@ -1499,6 +1507,49 @@ class MobileRealtimeChannel:
             payload={"items": cast(list[object], items)},
         )
         return CommandReply(type="session.list.ok", payload={"total": len(items)})
+
+    def _created_session_id(self, device_id: str, frame: GenericCommand) -> str:
+        """由 Core 为同一设备命令分配可恢复的唯一会话身份。"""
+        return f"{self.name}:{uuid5(NAMESPACE_URL, f'roxy:session-create:{device_id}:{frame.id}')}"
+
+    def _read_created_session(self, device_id: str, frame: GenericCommand) -> CommandReply | None:
+        """仅从已经保存的创建事实恢复回复，绝不重建已删除会话。"""
+        _expect_keys(frame.payload, set())
+        if frame.session_id is not None or frame.turn_id is not None:
+            raise MobileCommandError("invalid_session", "新会话身份由 Core 分配")
+        session_id = self._created_session_id(device_id, frame)
+        manager = self._require_ctx().session_manager
+        if not manager.session_exists(session_id):
+            return None
+        session = manager.get_existing(session_id)
+        if session.metadata.get("mobile_session_create") != {"device_id": device_id, "command_id": frame.id}:
+            raise MobileCommandError("session_conflict", "会话创建身份发生冲突")
+        self._runtime.storage.claim_session(device_id=device_id, session_id=session_id, created_at=_utc_now())
+        return CommandReply(type="session.created", session_id=session_id, payload={"session_id": session_id})
+
+    async def _create_session(self, device_id: str, frame: GenericCommand) -> CommandReply:
+        """兼容新客户端的 Core 创建入口；旧客户端发送路径保持可用。"""
+        _expect_keys(frame.payload, set())
+        if frame.session_id is not None or frame.turn_id is not None:
+            raise MobileCommandError("invalid_session", "新会话身份由 Core 分配")
+        recovered = self._read_created_session(device_id, frame)
+        if recovered is not None:
+            return recovered
+        session_id = self._created_session_id(device_id, frame)
+        if self._runtime.storage.has_session_claim(session_id):
+            raise MobileCommandError("session_not_found", "会话已经删除，请发起新的创建请求")
+        manager = self._require_ctx().session_manager
+        session = manager.get_or_create(session_id)
+        session.metadata["mobile_session_create"] = {"device_id": device_id, "command_id": frame.id}
+        manager.save(session)
+        recovered = self._read_created_session(device_id, frame)
+        if recovered is None:
+            raise RuntimeError("新建会话未持久化")
+        await self._runtime.publish_event(
+            event_type="session.created", device_id=device_id,
+            session_id=session_id, payload={"session_id": session_id, "title": "新对话"},
+        )
+        return recovered
 
     async def _open_session(
         self,
