@@ -154,9 +154,9 @@ const MEMOH_PROVIDERS: MemohProvider[] = [
     icon: "codex",
     kind: "codex",
     clientType: "Codex OAuth",
-    description: "huayue@example.com · 订阅账号",
+    description: "已授权 · 订阅账号",
     status: "已连接",
-    account: "huayue@example.com",
+    account: "已授权账户",
     models: [
       { id: "gpt-5.2-codex", name: "gpt-5.2-codex", metadata: "400K · 视觉 · 工具", enabled: true, effort: "高" },
       { id: "gpt-5.1-codex-mini", name: "gpt-5.1-codex-mini", metadata: "400K · 快速", enabled: true, effort: "中" },

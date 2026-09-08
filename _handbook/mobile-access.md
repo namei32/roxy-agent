@@ -29,7 +29,7 @@ Cloudflare Tunnel 由本机的 `cloudflared` 主动向 Cloudflare 建立出站�
 - 一个已经接入 Cloudflare DNS 的域名，例如 `example.com`。
 - 可用且已解锁的 Linux Secret Service。移动网关只支持 `secret_service` 保存主密钥；服务不可用或 collection 被锁定时会明确启动失败。
 - 一台能安装当前 Roxy Mobile APK 的 Android 手机。
-- 当前 Roxy Mobile APK：<https://github.com/kachofugetsu09/akashic-mobile/releases/latest>。
+- 使用与当前 Roxy 服务端匹配的 Roxy Mobile APK，通过 USB 安装更新。
   Android 发布仓暂时沿用旧名称；不要据此把新 Core 配置写回旧运行时命名空间。
 - 当前版 `cloudflared`。安装方式以 [Cloudflare 下载页](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/) 为准。
 
@@ -208,7 +208,7 @@ PY
 
 ## 6. 安装并配对手机
 
-1. 从 [Roxy Mobile Releases](https://github.com/kachofugetsu09/akashic-mobile/releases/latest) 下载 APK 并安装。
+1. 通过 USB 安装与当前服务端匹配的 Roxy Mobile APK。
 2. 在电脑上打开 `http://127.0.0.1:2236`，点击“连接手机”。
 3. 在 Android 客户端选择“扫描电脑”，扫描电脑页面上的二维码。
 4. 手机和电脑会显示六位确认码。逐位核对，数字一致后在电脑上选择“确认并连接”。
