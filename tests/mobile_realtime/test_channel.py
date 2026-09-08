@@ -5605,3 +5605,66 @@ async def test_model_changed_notification_only_targets_subscribed_devices(tmp_pa
     assert runtime.events[-1]["control_type"] == "model.catalog.changed"
     assert runtime.events[-1]["device_id"] == "new-device"
     storage.close()
+
+@pytest.mark.asyncio
+async def test_core_created_mobile_session_is_durable_and_idempotent(tmp_path: Path) -> None:
+    storage = MobileRealtimeStorage(tmp_path / "mobile.db")
+    device_id = uuid4().hex
+    _register_device(storage, device_id)
+    manager = SessionManager(tmp_path / "workspace")
+    channel = MobileRealtimeChannel(cast(MobileGatewayRuntime, _Runtime(storage)))
+    channel._ctx = cast(Any, SimpleNamespace(session_manager=manager))
+    frame = GenericCommand(v=1, kind="command", type="session.create", id="01ARZ3NDEKTSV4RRFFQ69G5FAV", connection_epoch=1, payload={})
+    try:
+        first = await channel.handle_command(device_id=device_id, frame=frame)
+        second = await channel.handle_command(device_id=device_id, frame=frame)
+        assert first.type == "session.created"
+        assert first.session_id == second.session_id and second.replayed
+        assert first.session_id is not None and manager.session_exists(first.session_id)
+        assert storage.has_session_claim(first.session_id)
+        assert len(manager.list_sessions()) == 1
+        assert cast(Any, channel._runtime).events == [{"event_type": "session.created", "device_id": device_id, "session_id": first.session_id, "payload": {"session_id": first.session_id, "title": "新对话"}}]
+        wire = parse_frame(json.dumps({"v": 1, "kind": "reply", "id": frame.id, "connection_epoch": 1, "type": first.type, "session_id": first.session_id, "payload": first.payload}))
+        assert wire.type == "session.created"
+        forged = frame.model_copy(update={"id": "01ARZ3NDEKTSV4RRFFQ69G5FAW", "session_id": f"mobile:{uuid4()}"})
+        rejected = await channel.handle_command(device_id=device_id, frame=forged)
+        assert rejected.type == "session.create.error" and len(manager.list_sessions()) == 1
+    finally:
+        manager.close()
+        storage.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("delete_before_recovery", [False, True])
+async def test_session_create_recovers_persisted_result_without_resurrection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, delete_before_recovery: bool) -> None:
+    storage = MobileRealtimeStorage(tmp_path / "mobile.db")
+    device_id = uuid4().hex
+    _register_device(storage, device_id)
+    manager = SessionManager(tmp_path / "workspace")
+    channel = MobileRealtimeChannel(cast(MobileGatewayRuntime, _Runtime(storage)))
+    channel._ctx = cast(Any, SimpleNamespace(session_manager=manager))
+    frame = GenericCommand(v=1, kind="command", type="session.create", id="01ARZ3NDEKTSV4RRFFQ69G5FAV", connection_epoch=1, payload={})
+    complete = storage.complete_command
+    def crash(**kwargs: object):
+        raise RuntimeError("receipt write failed")
+    monkeypatch.setattr(storage, "complete_command", crash)
+    try:
+        with pytest.raises(RuntimeError, match="receipt write failed"):
+            await channel.handle_command(device_id=device_id, frame=frame)
+        session_id = channel._created_session_id(device_id, frame)
+        assert manager.session_exists(session_id)
+        if delete_before_recovery:
+            assert manager.delete_session(session_id)
+        monkeypatch.setattr(storage, "complete_command", complete)
+        fresh = MobileRealtimeChannel(cast(MobileGatewayRuntime, _Runtime(storage)))
+        fresh._ctx = cast(Any, SimpleNamespace(session_manager=manager))
+        result = await fresh.handle_command(device_id=device_id, frame=frame)
+        if delete_before_recovery:
+            assert result.type == "session.create.error"
+            assert not manager.session_exists(session_id)
+        else:
+            assert result.type == "session.created" and result.session_id == session_id
+            assert len(manager.list_sessions()) == 1
+    finally:
+        manager.close()
+        storage.close()

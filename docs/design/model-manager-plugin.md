@@ -34,3 +34,9 @@
 Core 测试覆盖原子变更、角色替代、并发冲突、凭据保护、旧 generation lease、HTTP CSRF、移动收据重放及新事件订阅。插件有独立读写分离测试；浏览器在隔离模型库和本地模型 HTTP 服务上验证添加、实际请求、聊天目录、启停、默认和删除。Android 同步协议快照并验证 action 路由、无缓存、通知合并与失效选择提示。
 
 部署需配套 Core、共享 WebUI 和 Android 客户端。先部署支持服务和 action 的 Core，再更新手机，最后安装插件。回滚插件只移除管理入口；如回滚 Core，应先禁用新插件并恢复兼容的客户端组合。
+
+## 新客户端会话创建兼容
+
+真机配对发现旧 Roxy 拒绝 session.create，导致新客户端没有可选择的会话。Core 现在接受空参数 session.create，为已认证设备与命令 ID 分配稳定 mobile UUID，先保存会话和创建事实，再完成持久命令收据，回复 session.created。客户端不选择 ID；旧手机的消息准入仍保持兼容。
+
+崩溃重放只恢复已保存且创建标识匹配的会话，不创建缺失或已删除的会话；跨设备/命令使用不同身份。新增的 metadata.mobile_session_create 由 Core 拥有，记录设备与命令，不包含凭据；会话删除仍由既有 SessionManager owner 执行。Android 接受 Core 返回的规范 mobile UUID，不改名、不做本地身份迁移。
