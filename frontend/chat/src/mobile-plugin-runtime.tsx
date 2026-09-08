@@ -656,6 +656,7 @@ async function queryWebPluginUi({
   signal: AbortSignal;
   action?: boolean;
 }): Promise<Record<string, unknown>> {
+  if (!action && slot === "dashboard.main") throw new Error("Web 不开放插件独立面板查询");
   const response = await fetch(`/api/chat/plugin-ui/${action ? "action" : "query"}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(action ? { "x-roxy-csrf": "1" } : {}) },

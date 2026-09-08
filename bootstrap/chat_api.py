@@ -44,22 +44,23 @@ class PairingApprovalPayload(BaseModel):
     confirmation_code: str = Field(pattern=r"^[0-9]{6}$")
 
 
-class WebPluginUiQueryPayload(BaseModel):
+class WebPluginUiPayload(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     plugin_id: str = Field(min_length=1, max_length=128)
     plugin_revision: str = Field(min_length=1, max_length=128)
     method: str = Field(pattern=r"^[a-z][a-z0-9_.-]{0,255}$")
     payload: dict[str, object]
-    slot: Literal[
-        "turn.before_reasoning",
-        "turn.before_tool",
-        "turn.after_answer",
-        "drawer.panel",
-        "dashboard.main",
-    ]
     session_id: str | None = Field(default=None, max_length=512)
     turn_id: str | None = Field(default=None, max_length=128)
+
+
+class WebPluginUiQueryPayload(WebPluginUiPayload):
+    slot: Literal["turn.before_reasoning", "turn.before_tool", "turn.after_answer", "drawer.panel"]
+
+
+class WebPluginUiActionPayload(WebPluginUiPayload):
+    slot: Literal["dashboard.main", "drawer.panel"]
 
 
 def create_chat_app(
@@ -166,7 +167,7 @@ def create_chat_app(
         )
 
     @app.post("/api/chat/plugin-ui/action")
-    async def plugin_ui_action(body: WebPluginUiQueryPayload, request: Request) -> dict[str, object]:
+    async def plugin_ui_action(body: WebPluginUiActionPayload, request: Request) -> dict[str, object]:
         # Local Web Shell 同源 CSRF 边界；移动端使用已认证的 WS 命令。
         origin = request.headers.get("origin")
         if origin != f"{request.url.scheme}://{request.url.netloc}" or request.headers.get("x-roxy-csrf") != "1":

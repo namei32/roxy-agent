@@ -195,6 +195,7 @@ def test_chat_model_catalog_reports_session_override(tmp_path: Path) -> None:
     session.metadata["model_runtime_override"] = "runtime-b"
     channel._ctx = cast(Any, SimpleNamespace(session_manager=sessions))
     registry = SimpleNamespace(
+        on_change=lambda listener: None,
         current=SimpleNamespace(
             generation_id=7,
             role_runtime_ids={"default": "runtime-a"},
