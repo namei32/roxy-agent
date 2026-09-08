@@ -30,6 +30,10 @@ class MobileUiProvider(Protocol):
         sha256: str,
     ) -> dict[str, object]: ...
 
+    async def action(
+        self, plugin_id: str, plugin_revision: str, method: str, payload: dict[str, object],
+    ) -> dict[str, object]: ...
+
     async def query(
         self,
         plugin_id: str,
@@ -97,6 +101,25 @@ class PluginMobileUiProvider:
             "sha256": expected_sha256,
             "content": content,
         }
+
+    async def action(
+        self, plugin_id: str, plugin_revision: str, method: str, payload: dict[str, object],
+    ) -> dict[str, object]:
+        """只向当前已提交的插件 generation 分派显式 action。"""
+        async with await self._manager.snapshot_store.acquire() as snapshot:
+            generation = self._active_generation(snapshot, plugin_id)
+            if generation.source_revision != plugin_revision:
+                raise MobileUiStaleRevision(plugin_id)
+            if self._available_asset(generation) is None:
+                raise MobileUiPluginUnavailable(plugin_id)
+            try:
+                result = await generation.instance.mobile_ui_action(method, payload)
+            except MobileUiRpcInvalidRequest:
+                raise
+            except Exception:
+                # 不记录异常正文：上游错误可能包含提交的 API Key。
+                raise MobileUiRpcExecutionError("插件操作失败，请刷新确认模型状态") from None
+            return _normalize_rpc_result(result, plugin_id=plugin_id, method=method)
 
     async def query(
         self,

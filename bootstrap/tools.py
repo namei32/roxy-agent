@@ -549,6 +549,11 @@ def build_core_runtime(
 
     from agent.plugins.manager import PluginManager as _PluginManager
 
+    from agent.model_runtime.management import MODEL_MANAGEMENT_SERVICE, ModelManagementService
+
+    runtime_services = dict(runtime_services or {})
+    runtime_services[MODEL_MANAGEMENT_SERVICE] = ModelManagementService(workspace, model_registry)
+
     # 3. 创建插件 manager，并把 snapshot store 绑定到 loop。
     plugin_manager = _PluginManager(
         plugin_dirs=_resolve_plugin_dirs(workspace),

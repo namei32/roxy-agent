@@ -3230,7 +3230,8 @@ function MobileComposer({
   const hasDraft = snapshot.composer.attachments.length > 0;
   const attachmentsReady = allMobileAttachmentsReady(snapshot.composer.attachments);
   const hasMessageDraft = !!input.trim() || hasDraft;
-  const canSubmit = hasOwner && snapshot.composer.canSend && !snapshot.composer.canStop && attachmentsReady && !sendPending && hasMessageDraft;
+  const modelUnavailable = !!snapshot.modelCatalog.selectedRuntimeId && !snapshot.modelCatalog.runtimes.some((item) => item.id === snapshot.modelCatalog.selectedRuntimeId);
+  const canSubmit = !modelUnavailable && hasOwner && snapshot.composer.canSend && !snapshot.composer.canStop && attachmentsReady && !sendPending && hasMessageDraft;
   const actionMode = mobileComposerActionMode({
     hasDraft: hasMessageDraft,
     canStop: snapshot.composer.canStop,
@@ -3281,6 +3282,7 @@ function MobileComposer({
       {stopping ? <div className="stop-feedback" aria-live="polite">正在中止本轮处理…</div> : null}
       {snapshot.composer.transferStatus ? <TransferBanner status={snapshot.composer.transferStatus} /> : null}
       {hasDraft ? <DraftAttachments attachments={snapshot.composer.attachments} disabled={sendPending} /> : null}
+      {snapshot.modelCatalog.errorMessage ? <p role="alert">{snapshot.modelCatalog.errorMessage}</p> : null}
       {snapshot.modelCatalog.runtimes.length > 0 ? (
         <MobileModelCapsule
           defaultRuntime={snapshot.modelCatalog.defaultRuntime}

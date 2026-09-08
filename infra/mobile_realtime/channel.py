@@ -254,6 +254,7 @@ class MobileRealtimeChannel:
         self._turn_terminals: dict[tuple[str, str], str] = {}
         self._delta_failure: BaseException | None = None
         self._attachments: AttachmentTransferService | None = None
+        self._model_subscribers: dict[str, int] = {}
         self._mobile_ui_provider: MobileUiProvider | None = None
         self._mobile_ui_scheduler: PluginUiQueryScheduler | None = None
         self._mobile_ui_catalog_identity = ""
@@ -274,6 +275,16 @@ class MobileRealtimeChannel:
         if self._model_registry is not None:
             raise RuntimeError("Model runtime registry 已绑定")
         self._model_registry = registry
+        registry.on_change(self._notify_model_catalog_changed)
+
+    async def _notify_model_catalog_changed(self) -> None:
+        """只向明确订阅的新客户端发布目录失效通知。"""
+        await asyncio.gather(*(
+            self._runtime.publish_connection_control(
+                control_type="model.catalog.changed", payload={},
+                device_id=device_id, connection_epoch=epoch,
+            ) for device_id, epoch in tuple(self._model_subscribers.items())
+        ))
 
     def bind_mobile_ui_provider(self, provider: MobileUiProvider) -> None:
         """绑定读取当前插件快照的移动 UI 提供器。"""
@@ -289,6 +300,8 @@ class MobileRealtimeChannel:
     async def refresh_mobile_ui_catalog(self) -> None:
         """目录内容变化时通知所有手机重新拉取插件 UI。"""
 
+        if self._model_registry is not None:
+            await self._model_registry.refresh()
         provider = self._mobile_ui_provider
         if provider is None:
             return
@@ -596,6 +609,7 @@ class MobileRealtimeChannel:
         if scheduler is not None:
             await scheduler.cancel_device(device_id)
         _ = self._mobile_ui_hot_connections.pop(device_id, None)
+        _ = self._model_subscribers.pop(device_id, None)
 
     def _recover_message_send_receipt(
         self,
@@ -970,8 +984,10 @@ class MobileRealtimeChannel:
                     server_name,
                 ),
             )
+        if frame.type == "plugin.ui.action":
+            return await self._plugin_ui_action(device_id, frame)
         if frame.type == "model.catalog.get":
-            return await self._model_catalog(frame)
+            return await self._model_catalog(frame, device_id=device_id)
         if frame.type == "message.send":
             return await self._send_message(device_id, frame)
         if frame.type == "turn.stop":
@@ -1030,10 +1046,15 @@ class MobileRealtimeChannel:
         )
         return CommandReply(type="device.update.ok", payload={})
 
-    async def _model_catalog(self, frame: GenericCommand) -> CommandReply:
+    async def _model_catalog(self, frame: GenericCommand, *, device_id: str = "") -> CommandReply:
         """返回当前模型 generation 和指定会话已经提交的选择。"""
 
-        _expect_keys(frame.payload, set())
+        _expect_keys(frame.payload, {"subscribe"} if "subscribe" in frame.payload else set())
+        subscribe = frame.payload.get("subscribe", False)
+        if not isinstance(subscribe, bool):
+            raise MobileCommandError("invalid_payload", "subscribe 必须为布尔值")
+        if subscribe and device_id:
+            self._model_subscribers[device_id] = frame.connection_epoch
         session_id = self._normalize_session_id(frame.session_id)
         registry = self._model_registry
         if registry is None:
@@ -1170,6 +1191,19 @@ class MobileRealtimeChannel:
             sha256,
         )
         return CommandReply(type="plugin.ui.asset.get.ok", payload=asset)
+
+    async def _plugin_ui_action(self, device_id: str, frame: GenericCommand) -> CommandReply:
+        """显式操作使用持久命令收据；只允许交互管理面板调用。"""
+        query = self.prepare_plugin_ui_query(device_id=device_id, frame=frame)
+        if query.slot not in {"dashboard.main", "drawer.panel"} or query.turn_id:
+            raise MobileCommandError("invalid_slot", "插件操作只允许从管理面板发起")
+        try:
+            result = await self._require_mobile_ui_provider().action(
+                query.plugin_id, query.plugin_revision, query.method, query.payload,
+            )
+        except (MobileUiPluginUnavailable, MobileUiStaleRevision, MobileUiRpcInvalidRequest, MobileUiRpcExecutionError) as error:
+            raise MobileCommandError("plugin_action_failed", str(error)) from None
+        return CommandReply(type="plugin.ui.action.ok", payload={"result": result})
 
     async def _plugin_ui_query(
         self,

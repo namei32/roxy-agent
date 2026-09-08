@@ -56,6 +56,7 @@ class WebPluginUiQueryPayload(BaseModel):
         "turn.before_tool",
         "turn.after_answer",
         "drawer.panel",
+        "dashboard.main",
     ]
     session_id: str | None = Field(default=None, max_length=512)
     turn_id: str | None = Field(default=None, max_length=128)
@@ -71,6 +72,8 @@ def create_chat_app(
     model_registry: ModelRegistry | None = None,
 ) -> FastAPI:
     channel.bind_attachment_store(AttachmentStore(workspace / "uploads"))
+    if model_registry is not None:
+        model_registry.on_change(channel.notify_model_catalog_changed)
     app = FastAPI(title="Roxy Chat API")
     app.state.workspace = workspace
     app.state.channel = channel
@@ -161,6 +164,23 @@ def create_chat_app(
             media_type="text/javascript" if kind == "module" else "text/css",
             headers={"Cache-Control": "private, max-age=31536000, immutable"},
         )
+
+    @app.post("/api/chat/plugin-ui/action")
+    async def plugin_ui_action(body: WebPluginUiQueryPayload, request: Request) -> dict[str, object]:
+        # Local Web Shell 同源 CSRF 边界；移动端使用已认证的 WS 命令。
+        origin = request.headers.get("origin")
+        if origin != f"{request.url.scheme}://{request.url.netloc}" or request.headers.get("x-roxy-csrf") != "1":
+            raise HTTPException(status_code=403, detail="请求来源无效")
+        if body.slot not in {"dashboard.main", "drawer.panel"} or body.turn_id:
+            raise HTTPException(status_code=400, detail="操作只允许从管理面板发起")
+        if len(json.dumps(body.payload).encode()) > 64 * 1024:
+            raise HTTPException(status_code=413, detail="插件参数超过 64 KiB")
+        try:
+            return await _require_plugin_ui_provider(plugin_ui_provider).action(
+                body.plugin_id, body.plugin_revision, body.method, body.payload,
+            )
+        except (MobileUiPluginUnavailable, MobileUiStaleRevision, MobileUiRpcInvalidRequest, MobileUiRpcExecutionError) as error:
+            raise _plugin_ui_http_error(error) from error
 
     @app.post("/api/chat/plugin-ui/query")
     async def plugin_ui_query(

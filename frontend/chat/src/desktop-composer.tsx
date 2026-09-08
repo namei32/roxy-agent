@@ -47,6 +47,7 @@ export const DesktopComposer = memo(function DesktopComposer({
   }, [onSend]);
   return (
     <>
+      {selectedRuntimeId && modelState && !modelState.runtimes.some((item) => item.id === selectedRuntimeId) ? <p role="alert">当前会话的模型已停用或删除，请重新选择</p> : null}
       {modelState ? <ModelCapsulePicker
         defaultRuntime={modelState.defaultRuntime}
         runtimes={modelState.runtimes}

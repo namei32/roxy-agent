@@ -733,6 +733,13 @@ class WebChatChannel:
                 if not sockets:
                     _ = self._connections.pop(session_key, None)
 
+    async def notify_model_catalog_changed(self) -> None:
+        """通知已连接的聊天页面使模型目录失效。"""
+        async with self._connection_lock:
+            sessions = tuple(self._connections)
+        for session_key in sessions:
+            await self._broadcast(session_key, {"type": "model.catalog.changed"})
+
     async def _broadcast(self, session_key: str, frame: dict[str, Any]) -> int:
         async with self._connection_lock:
             sockets = list(self._connections.get(session_key, set()))
