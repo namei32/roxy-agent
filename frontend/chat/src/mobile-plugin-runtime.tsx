@@ -69,6 +69,7 @@ export interface MobilePluginDefinition {
 
 export interface MobilePluginCatalog {
   catalogRevision: string;
+  scope?: string;
   updating: boolean;
   error?: string;
   plugins: MobilePluginCatalogItem[];
@@ -77,6 +78,8 @@ export interface MobilePluginCatalog {
 export interface MobilePluginCatalogItem {
   id: string;
   revision: string;
+  ready?: boolean;
+  error?: string;
   moduleUrl: string;
   stylesheetUrl?: string;
   navigation?: {
@@ -127,9 +130,8 @@ let catalog: MobilePluginCatalog = {
   plugins: [],
 };
 let registryVersion = 0;
-let activeRevision = "";
-let activation: Promise<void> = Promise.resolve();
-const quarantinedRevisions = new Map<string, Error>();
+const loadingPlugins = new Map<string, Promise<void>>();
+const pluginErrors = new Map<string, string>();
 const MODULE_LOAD_TIMEOUT_MS = 5_000;
 const SLOT_NAMES = new Set<Exclude<MobilePluginSlotName, "dashboard.main">>([
   "turn.before_reasoning",
@@ -144,30 +146,21 @@ function emitChange() {
 }
 
 export function receiveMobilePluginCatalog(next: MobilePluginCatalog): Promise<void> {
-  const revisionChanged = next.catalogRevision !== catalog.catalogRevision;
-  if (revisionChanged) immutableResults.clear();
+  const scopeChanged = next.scope !== catalog.scope;
+  const revisionChanged = scopeChanged || next.catalogRevision !== catalog.catalogRevision;
+  if (revisionChanged) { immutableResults.clear(); pluginErrors.clear(); }
   catalog = next;
   if (next.updating || revisionChanged) rejectAllPending("插件界面正在更新");
   emitChange();
-  if (next.updating || next.error || next.catalogRevision === activeRevision) {
-    return Promise.resolve();
-  }
-  const quarantined = quarantinedRevisions.get(next.catalogRevision);
-  if (quarantined) return Promise.reject(quarantined);
-  activation = activation.catch(() => undefined).then(async () => {
-    try {
-      if (await activateCatalog(next)) activeRevision = next.catalogRevision;
-    } catch (error) {
-      const normalized = error instanceof Error ? error : new Error("插件界面加载失败");
-      quarantinedRevisions.set(next.catalogRevision, normalized);
-      if (catalog.catalogRevision === next.catalogRevision) {
-        catalog = { ...catalog, error: normalized.message };
-        emitChange();
-      }
-      throw normalized;
+  for (const [id, loaded] of definitions) {
+    if (scopeChanged || !next.plugins.some(item => item.id === id && item.revision === loaded.revision)) {
+      definitions.delete(id); styleNodes.get(id)?.remove(); styleNodes.delete(id);
     }
-  });
-  return activation;
+  }
+  if (next.error) return Promise.resolve();
+  void activateCatalog(next);
+  return Promise.resolve();
+
 }
 
 /** 通过桌面适配器加载同一份内容寻址插件界面。 */
@@ -259,42 +252,32 @@ function parseNavigation(value: unknown, pluginIndex: number): MobilePluginCatal
   };
 }
 
-async function activateCatalog(next: MobilePluginCatalog): Promise<boolean> {
-  const loaded = await Promise.all(next.plugins.map(async (plugin) => {
-    const module = await withDeadline(
-      import(/* @vite-ignore */ plugin.moduleUrl) as Promise<{ default?: unknown }>,
-      MODULE_LOAD_TIMEOUT_MS,
-      `插件界面加载超时: ${plugin.id}`,
-    );
-    return [plugin, parseDefinition(module.default, plugin)] as const;
-  }));
-  if (catalog.catalogRevision !== next.catalogRevision || catalog.updating) return false;
-
-  const nextDefinitions = new Map<string, {
-    revision: string;
-    definition: MobilePluginDefinition;
-  }>();
-  const nextStyles = new Map<string, HTMLLinkElement>();
-  for (const [plugin, definition] of loaded) {
-    nextDefinitions.set(plugin.id, { revision: plugin.revision, definition });
-    if (plugin.stylesheetUrl) {
-      const node = document.createElement("link");
-      node.rel = "stylesheet";
-      node.href = plugin.stylesheetUrl;
-      node.dataset.mobilePlugin = plugin.id;
-      nextStyles.set(plugin.id, node);
-    }
-  }
-  styleNodes.forEach((node) => node.remove());
-  definitions.clear();
-  nextDefinitions.forEach((definition, id) => definitions.set(id, definition));
-  styleNodes.clear();
-  nextStyles.forEach((node, id) => {
-    document.head.appendChild(node);
-    styleNodes.set(id, node);
-  });
-  emitChange();
-  return true;
+function activateCatalog(next: MobilePluginCatalog): Promise<void> {
+  return Promise.all(next.plugins.filter(plugin => plugin.ready !== false && !plugin.error).map(plugin => {
+    if (definitions.get(plugin.id)?.revision === plugin.revision) return Promise.resolve();
+    const key = `${next.scope ?? "web"}:${plugin.id}:${plugin.revision}`;
+    if (pluginErrors.has(key)) return Promise.resolve();
+    const existing = loadingPlugins.get(key);
+    if (existing) return existing;
+    const task = withDeadline(import(/* @vite-ignore */ plugin.moduleUrl) as Promise<{ default?: unknown }>,
+      MODULE_LOAD_TIMEOUT_MS, `插件界面加载超时: ${plugin.id}`).then(module => {
+      const definition = parseDefinition(module.default, plugin);
+      if (catalog.scope !== next.scope || !catalog.plugins.some(item => item.id === plugin.id && item.revision === plugin.revision)) return;
+      definitions.set(plugin.id, { revision: plugin.revision, definition });
+      rememberHome(plugin.id, definition.home?.version === 1);
+      styleNodes.get(plugin.id)?.remove();
+      if (plugin.stylesheetUrl) {
+        const node = document.createElement("link"); node.rel = "stylesheet"; node.href = plugin.stylesheetUrl;
+        node.dataset.mobilePlugin = plugin.id; document.head.appendChild(node); styleNodes.set(plugin.id, node);
+      }
+      emitChange();
+    }).catch((error: unknown) => {
+      pluginErrors.set(key, error instanceof Error ? error.message : "插件界面加载失败");
+      emitChange();
+    }).finally(() => loadingPlugins.delete(key));
+    loadingPlugins.set(key, task);
+    return task;
+  })).then(() => undefined);
 }
 
 function withDeadline<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
@@ -347,13 +330,28 @@ function isRenderer(value: unknown): value is MobilePluginRenderer {
   return !!value && typeof value === "object" && typeof (value as { mount?: unknown }).mount === "function";
 }
 
+function cachedHome(pluginId: string): boolean {
+  try { return JSON.parse(localStorage.getItem(`roxy.plugin-homes:${catalog.scope ?? "web"}`) ?? "[]").includes(pluginId); }
+  catch { return false; }
+}
+
+function rememberHome(pluginId: string, home: boolean) {
+  try {
+    const key = `roxy.plugin-homes:${catalog.scope ?? "web"}`;
+    const previous: unknown = JSON.parse(localStorage.getItem(key) ?? "[]");
+    const ids = new Set(Array.isArray(previous) ? previous.filter(id => typeof id === "string") : []);
+    if (home) ids.add(pluginId); else ids.delete(pluginId);
+    localStorage.setItem(key, JSON.stringify([...ids].filter(id => catalog.plugins.some(plugin => plugin.id === id))));
+  } catch { /* UI preference only; unavailable storage must not block startup. */ }
+}
+
 export function useMobilePluginDashboards(): MobilePluginDashboardEntry[] {
   useSyncExternalStore(
     (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
     () => registryVersion,
   );
   return catalog.plugins.flatMap((plugin) => plugin.navigation
-    ? [{ id: plugin.id, ...plugin.navigation, home: definitions.get(plugin.id)?.revision === plugin.revision && definitions.get(plugin.id)?.definition.home?.version === 1 }]
+    ? [{ id: plugin.id, ...plugin.navigation, home: definitions.get(plugin.id)?.revision === plugin.revision ? definitions.get(plugin.id)?.definition.home?.version === 1 : cachedHome(plugin.id) }]
     : []);
 }
 
@@ -362,7 +360,7 @@ export function useMobilePluginCatalogReady(): boolean {
     (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
     () => registryVersion,
   );
-  return !catalog.updating && !catalog.error && catalog.plugins.every((plugin) => definitions.get(plugin.id)?.revision === plugin.revision);
+  return !catalog.updating && !catalog.error;
 }
 
 export function MobilePluginDashboard({ pluginId }: { pluginId: string }) {
@@ -371,7 +369,14 @@ export function MobilePluginDashboard({ pluginId }: { pluginId: string }) {
     () => registryVersion,
   );
   const plugin = catalog.plugins.find((item) => item.id === pluginId);
+  useEffect(() => {
+    if (plugin?.ready === false && !plugin.error) {
+      window.RoxyNative?.queryPluginUi(createRequestId(), createOwnerId(), "dashboard.main", null, null, pluginId, "_assets", "{}", "none", "assets");
+    }
+  }, [pluginId, plugin?.revision, plugin?.ready, plugin?.error]);
   if (!plugin?.navigation) return null;
+  const error = plugin.error ?? pluginErrors.get(`${catalog.scope ?? "web"}:${plugin.id}:${plugin.revision}`);
+  if (error) return <div className="mobile-plugin-host mobile-plugin-host--error">{error}</div>;
   if (catalog.error) return <div className="mobile-plugin-host mobile-plugin-host--error">{catalog.error}</div>;
   const loaded = definitions.get(pluginId);
   const definition = loaded?.revision === plugin.revision ? loaded.definition : undefined;
@@ -476,7 +481,7 @@ function MountedPlugin({
 }) {
   const available = useSyncExternalStore(
     (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
-    () => !catalog.updating && !catalog.error,
+    () => catalog.updating ? "connecting" : catalog.error ? "error" : "ready",
   );
   const hostActions = React.useContext(HostContext);
   const hostRef = React.useRef<HTMLDivElement>(null);
@@ -491,7 +496,7 @@ function MountedPlugin({
     const host = hostRef.current;
     if (!host) return;
     host.classList.remove("mobile-plugin-host--loading", "mobile-plugin-host--error");
-    if (!available) {
+    if (available === "error") {
       host.classList.add("mobile-plugin-host--loading");
       host.textContent = "正在同步插件界面…";
       return () => { host.replaceChildren(); };

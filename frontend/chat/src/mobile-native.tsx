@@ -77,7 +77,6 @@ import {
   type MobilePluginCatalog,
   type MobilePluginDashboardEntry,
   useMobilePluginDashboards,
-  useMobilePluginCatalogReady,
 } from "./mobile-plugin-runtime";
 import {
   applyMobileStreamPatch,
@@ -983,6 +982,8 @@ function parseMobilePluginCatalog(value: unknown): MobilePluginCatalog {
       revision: requireString(plugin.revision, `pluginCatalog.plugins[${index}].revision`),
       moduleUrl,
       stylesheetUrl,
+      ready: plugin.ready === undefined ? true : requireBoolean(plugin.ready, "plugin.ready"),
+      error: optionalString(plugin.error, "plugin.error"),
       navigation: navigation ? {
         label: requireString(navigation.label, `pluginCatalog.plugins[${index}].navigation.label`),
         description: requireString(
@@ -1004,6 +1005,7 @@ function parseMobilePluginCatalog(value: unknown): MobilePluginCatalog {
   }
   return {
     catalogRevision: revision,
+    scope: optionalString(raw.scope, "pluginCatalog.scope"),
     updating: requireBoolean(raw.updating, "pluginCatalog.updating"),
     error: optionalString(raw.error, "pluginCatalog.error"),
     plugins,
@@ -1048,7 +1050,6 @@ declare global {
 
 function MobileNativeApp() {
   const pluginDashboards = useMobilePluginDashboards();
-  const pluginCatalogReady = useMobilePluginCatalogReady();
   const initialHomePending = useRef(true);
   const [snapshot, setSnapshot] = useState<MobileSnapshot | null>(null);
   const [streamStore] = useState(() => new StreamProjectionStore<MobileMessage>());
@@ -1747,17 +1748,6 @@ function MobileNativeApp() {
     });
   }, [snapshot?.messages]);
 
-  // 默认首页只在首次目录就绪时决定；后续安装/卸载不会抢走当前任务面。
-  useEffect(() => {
-    if (!pluginCatalogReady || !initialHomePending.current) return;
-    initialHomePending.current = false;
-    if (surfaceRef.current.kind === "home" && !pluginDashboards.some((plugin) => plugin.home)) {
-      replaceMobileSurface(window.history, { kind: "chat" });
-      surfaceRef.current = { kind: "chat" };
-      setSurface({ kind: "chat" });
-    }
-  }, [pluginCatalogReady, pluginDashboards]);
-
   // 必要 effect：外部插件列表变化时校正 surface 指向（保留 effect 避免渲染期新对象引用触发循环）
   useEffect(() => {
     if (surface.kind !== "dashboard") return;
@@ -1988,9 +1978,16 @@ function MobileNativeApp() {
       );
     }
     return (
-      <main className="mobile-loading" aria-live="polite">
-        <span className="mobile-loading__mark" />
-        <span>正在载入对话</span>
+      <main className="mobile-app">
+        <section className="mobile-loading" aria-live="polite">
+          <span className="mobile-loading__mark" />
+          <span>{surface.kind === "home" ? "Roxy · 正在连接小屋" : surface.kind === "conversations" ? "正在读取本地对话" : "正在读取工具"}</span>
+        </section>
+        <MobileRootNavigation current={surface.kind === "conversations" ? "conversations" : surface.kind === "tools" ? "tools" : "home"} onSelect={(kind) => {
+          surfaceRef.current = { kind };
+          setSurface({ kind });
+          replaceMobileSurface(window.history, { kind });
+        }} />
       </main>
     );
   }
@@ -2203,7 +2200,7 @@ function MobileNativeApp() {
         {surface.kind === "home" ? (
           <section className="mobile-home-scene" aria-label="小屋">
             {selectedHome ? <MobilePluginDashboard pluginId={selectedHome.id} /> : <div className="mobile-home-placeholder">
-              <Sparkles size={36} /><h1>Roxy 小屋</h1><p>{homeCandidates.length ? "选择要打开的小屋" : "小屋暂时不可用。你可以先进入对话，或在工具中查看插件状态。"}</p>
+              <Sparkles size={36} /><h1>Roxy 小屋</h1><p>{homeCandidates.length ? "选择要打开的小屋" : "小屋正在准备。你可以先进入对话，或在工具中查看插件状态。"}</p>
               {homeCandidates.map((plugin) => <button type="button" key={plugin.id} onClick={() => setHomePluginId(plugin.id)}>{plugin.label}</button>)}
               <button type="button" onClick={() => navigateToSurface({ kind: "conversations" })}>打开对话</button>
             </div>}
