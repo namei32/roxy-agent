@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+const homeSurfacesSource = await readFile(new URL("./mobile-home-surfaces.tsx", import.meta.url), "utf8");
+
 const platformStyles = await readFile(
   new URL("./mobile-native.css", import.meta.url),
   "utf8",
@@ -137,19 +139,23 @@ test("desktop and mobile keep one shared conversation owner", () => {
   assert.match(desktopAppSource, /import "\.\/message-view\.css";/);
   assert.match(mobileSource, /import "\.\/message-view\.css";/);
   assert.match(desktopSidebarSource, /<ConversationNavigation/);
-  assert.match(mobileSource, /<ConversationNavigation/);
+  assert.match(homeSurfacesSource, /<ConversationNavigation/);
+  assert.doesNotMatch(mobileSource, /<MobileDrawer|drawer-toggle|setDrawerOpen/);
+  assert.match(mobileSource, /aria-label="返回对话列表"/);
   assert.match(desktopConversationSource, /<SharedMessageActions/);
   assert.match(mobileSource, /<SharedMessageActions/);
   assert.doesNotMatch(mobileSource, /mobile-message-actions/);
   assert.doesNotMatch(mobileSource, /SwipeToReply|useMotionValue/);
 });
 
-test("shared navigation keeps the compact mobile drawer language", () => {
+test("mobile tools preserve runtime and recovery entries without a second navigation drawer", () => {
   assert.doesNotMatch(navigationSource, /对话与知识/);
   assert.doesNotMatch(navigationSource, />Roxy</);
   assert.match(navigationSource, /conversation-navigation__heading">会话/);
   assert.match(navigationSource, /featuredDestinations/);
-  assert.match(mobileSource, /label: "知识与运行",[\s\S]*?featured: true,/);
+  assert.match(homeSurfacesSource, /知识与运行/);
+  assert.match(homeSurfacesSource, /onClick=\{onResync\} disabled=\{!canResync\}/);
+  assert.match(homeSurfacesSource, /onClick=\{onPairing\}/);
   assert.match(
     navigationStyles,
     /\.conversation-destination__icon\s*\{[^}]*width:\s*24px;[^}]*background:\s*transparent;/,

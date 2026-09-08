@@ -20,7 +20,6 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { createUuid } from "./browser-uuid.ts";
 import {
   AlertCircle,
-  ArchiveX,
   ArrowLeft,
   Check,
   ChevronRight,
@@ -29,20 +28,16 @@ import {
   Copy,
   Download,
   FileText,
-  LibraryBig,
   BookOpenText,
   Server,
   Timer,
   Menu,
-  MessageSquarePlus,
   Paperclip,
   Palette,
-  Puzzle,
   RefreshCw,
   Reply,
   RotateCcw,
   Search,
-  Settings,
   Share2,
   Sparkles,
   TimerReset,
@@ -56,7 +51,6 @@ import opencodeIcon from "./assets/provider-icons/opencode.svg";
 import openrouterIcon from "./assets/provider-icons/openrouter.svg";
 import { cycleTheme, initializeTheme, setTheme, useTheme } from "../../theme/src/theme-runtime";
 import { ComposerActionButton } from "./composer-action";
-import { ConversationNavigation } from "./conversation-navigation";
 import {
   ComposerReply,
   MessageReplyReference,
@@ -1064,7 +1058,6 @@ function MobileNativeApp() {
   const [homePluginId, setHomePluginId] = useState<string | null>(null);
   const [homeTarget, setHomeTarget] = useState<MobileMessageTarget | null>(null);
   const [homeNavigationError, setHomeNavigationError] = useState<string | null>(null);
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [commandsOpen, setCommandsOpen] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -1089,7 +1082,6 @@ function MobileNativeApp() {
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
   const [searchIndex, setSearchIndex] = useState(new Map<string, MobileSearchIndexEntry>());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const drawerToggleRef = useRef<HTMLButtonElement>(null);
   const searchButtonRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchOpenRef = useRef(false);
@@ -1301,7 +1293,6 @@ function MobileNativeApp() {
       surfaceRef.current = { kind: "chat" };
       setSurface({ kind: "chat" });
     }
-    setDrawerOpen(false);
     setSearchOpen(false);
     searchOpenRef.current = false;
     setSearchQuery("");
@@ -1924,7 +1915,6 @@ function MobileNativeApp() {
   }, []);
   const enterSelection = useCallback((messageId: string) => {
     if (pendingShareRequestRef.current !== null) return;
-    setDrawerOpen(false);
     setSearchOpen(false);
     searchOpenRef.current = false;
     setSearchQuery("");
@@ -2041,16 +2031,7 @@ function MobileNativeApp() {
     setStopRequested(true);
     window.RoxyNative?.stopTurn();
   };
-  const closeDrawer = () => {
-    setDrawerOpen(false);
-    requestAnimationFrame(() => drawerToggleRef.current?.focus());
-  };
-  const toggleDrawer = () => {
-    if (drawerOpen) closeDrawer();
-    else setDrawerOpen(true);
-  };
   const openSearch = () => {
-    setDrawerOpen(false);
     setCommandsOpen(false);
     searchOpenRef.current = true;
     normalizedSearchQueryRef.current = "";
@@ -2156,10 +2137,8 @@ function MobileNativeApp() {
             status={snapshot.connection.status}
             label={snapshot.connection.label}
             activeTaskCount={snapshot.sessions.filter((session) => session.isRunning).length}
-            drawerOpen={drawerOpen}
             searchOpen={searchOpen}
             searchQuery={searchQuery}
-            toggleRef={drawerToggleRef}
             searchButtonRef={searchButtonRef}
             searchInputRef={searchInputRef}
             selectionCount={selectedMessages.length}
@@ -2168,7 +2147,7 @@ function MobileNativeApp() {
             sharePending={sharePending}
             shareStatus={shareStatus}
             canReplyToSelection={selectedMessages.length === 1 && mobileMessageCanReply(selectedMessages[0], snapshot.selectedSessionId)}
-            onToggleDrawer={toggleDrawer}
+            onBack={() => navigateToSurface({ kind: "conversations" })}
             onOpenSearch={openSearch}
             onCloseSearch={closeSearch}
             onSearchQuery={updateSearchQuery}
@@ -2192,31 +2171,6 @@ function MobileNativeApp() {
             onBack={() => window.history.back()}
           />
         )}
-        <MobileDrawer
-          open={drawerOpen}
-          snapshot={snapshot}
-          pluginCount={pluginDashboards.length}
-          onOpenRuntime={() => {
-            window.RoxyNative?.refreshRuntimeInspection();
-            navigateToSurface({ kind: "runtime" });
-            closeDrawer();
-          }}
-          onOpenPlugins={() => {
-            navigateToSurface({ kind: "plugins" });
-            closeDrawer();
-          }}
-          onOpenSettings={() => {
-            window.RoxyNative?.openSettings();
-            closeDrawer();
-          }}
-          onRestartPairing={() => {
-            flushMobileComposerBeforePairing(
-              flushComposerDraft,
-              () => window.RoxyNative?.restartPairing(),
-            );
-          }}
-          onClose={closeDrawer}
-        />
         <span className="mobile-a11y-announcement" aria-live="polite" aria-atomic="true">
           {replyNavigationAnnouncement}
         </span>
@@ -2259,7 +2213,13 @@ function MobileNativeApp() {
           onCreate={() => { flushComposerDraft(); window.RoxyNative?.createSession(); navigateToSurface({ kind: "chat" }); }} />
           : surface.kind === "tools" ? <MobileHomeTools connectionLabel={snapshot.connection.label}
             onRuntime={() => { window.RoxyNative?.refreshRuntimeInspection(); navigateToSurface({ kind: "runtime" }); }}
-            onPlugins={() => navigateToSurface({ kind: "plugins" })} onSettings={() => window.RoxyNative?.openSettings()} onDiagnostics={() => window.RoxyNative?.exportDiagnostics()} /> : null}
+            onPlugins={() => navigateToSurface({ kind: "plugins" })} onSettings={() => window.RoxyNative?.openSettings()} onDiagnostics={() => window.RoxyNative?.exportDiagnostics()}
+            canResync={snapshot.composer.canResync} isResyncing={snapshot.composer.isResyncing}
+            onResync={() => {
+              if (window.confirm("清除本机已同步消息和附件缓存，并从电脑重新拉取？连接状态会保留。")) window.RoxyNative?.reloadFromServer();
+            }}
+            onPairing={() => flushMobileComposerBeforePairing(flushComposerDraft, () => window.RoxyNative?.restartPairing())}
+          /> : null}
 
         {surface.kind === "runtime" ? (
           <RuntimeInspectionDirectory
@@ -2293,7 +2253,7 @@ function MobileNativeApp() {
         <div
           className={`mobile-main-content ${surface.kind === "chat" ? "" : "surface-hidden"} ${replyTarget ? "replying" : ""} ${searchOpen ? "searching" : ""} ${selectionActive ? "selecting" : ""} ${queueOpen && snapshot.composer.pendingMessages.length > 1 ? "queueing" : ""} ${selectedSessionUnavailable ? "session-unavailable" : ""}`}
           aria-hidden={surface.kind === "chat" ? undefined : true}
-          inert={drawerOpen || surface.kind !== "chat" ? true : undefined}
+          inert={surface.kind !== "chat" ? true : undefined}
         >
           <MobileVirtualConversation
             ref={conversationRef}
@@ -2306,7 +2266,7 @@ function MobileNativeApp() {
             highlightedMessageId={highlightedMessageId}
             copiedMessageId={copiedMessageId}
             missingReplySourceId={missingReplySourceId}
-            suspended={searchOpen || selectionActive || surface.kind !== "chat" || drawerOpen || homeTarget !== null}
+            suspended={searchOpen || selectionActive || surface.kind !== "chat" || homeTarget !== null}
             forceScrollToken={sendScrollRequest}
             unread={unreadState}
             unreadAnchorVisited={unreadAnchorVisited}
@@ -2353,7 +2313,6 @@ function MobileNativeApp() {
           )}
         </div>
         <MobileRootNavigation current={rootKind} onSelect={(kind) => {
-          closeDrawer();
           if (surface.kind === kind) return;
           navigateToSurface({ kind });
         }} />
@@ -2655,10 +2614,8 @@ function MobileTopBar({
   status,
   label,
   activeTaskCount,
-  drawerOpen,
   searchOpen,
   searchQuery,
-  toggleRef,
   searchButtonRef,
   searchInputRef,
   selectionCount,
@@ -2667,7 +2624,7 @@ function MobileTopBar({
   sharePending,
   shareStatus,
   canReplyToSelection,
-  onToggleDrawer,
+  onBack,
   onOpenSearch,
   onCloseSearch,
   onSearchQuery,
@@ -2680,10 +2637,8 @@ function MobileTopBar({
   status: ConnectionStatus;
   label: string;
   activeTaskCount: number;
-  drawerOpen: boolean;
   searchOpen: boolean;
   searchQuery: string;
-  toggleRef: React.RefObject<HTMLButtonElement | null>;
   searchButtonRef: React.RefObject<HTMLButtonElement | null>;
   searchInputRef: React.RefObject<HTMLInputElement | null>;
   selectionCount: number;
@@ -2692,7 +2647,7 @@ function MobileTopBar({
   sharePending: boolean;
   shareStatus: string | null;
   canReplyToSelection: boolean;
-  onToggleDrawer: () => void;
+  onBack: () => void;
   onOpenSearch: () => void;
   onCloseSearch: () => void;
   onSearchQuery: (query: string) => void;
@@ -2765,9 +2720,9 @@ function MobileTopBar({
   }
   const online = status === "ready";
   return (
-    <header className={`mobile-topbar ${drawerOpen ? "drawer-open" : ""}`}>
-      <button ref={toggleRef} className="mobile-icon-button drawer-toggle" type="button" onClick={onToggleDrawer} aria-label={drawerOpen ? "收起会话" : "打开会话"} aria-expanded={drawerOpen}>
-        {drawerOpen ? <X size={25} /> : <Menu size={25} />}
+    <header className="mobile-topbar">
+      <button className="mobile-icon-button" type="button" onClick={onBack} aria-label="返回对话列表">
+        <ArrowLeft size={25} />
       </button>
       <div className={`connection-state ${status}`} aria-live="polite">
         {online ? <Wifi size={19} /> : status === "disconnected" ? <WifiOff size={19} /> : <RefreshCw className="connection-spinner" size={18} />}
@@ -2826,122 +2781,6 @@ function MobileSearchNavigator({
         </button>
       </div>
     </nav>
-  );
-}
-
-function MobileDrawer({
-  open,
-  snapshot,
-  pluginCount,
-  onOpenRuntime,
-  onOpenPlugins,
-  onOpenSettings,
-  onRestartPairing,
-  onClose,
-}: {
-  open: boolean;
-  snapshot: MobileSnapshot;
-  pluginCount: number;
-  onOpenRuntime: () => void;
-  onOpenPlugins: () => void;
-  onOpenSettings: () => void;
-  onRestartPairing: () => void;
-  onClose: () => void;
-}) {
-  const drawerRef = useRef<HTMLElement>(null);
-  // 必要 effect：抽屉打开时聚焦（DOM focus 需提交后执行），不可改为渲染期计算
-  useEffect(() => {
-    if (open) requestAnimationFrame(() => drawerRef.current?.focus());
-  }, [open]);
-  return (
-    <div className={`mobile-drawer-layer ${open ? "open" : ""}`} aria-hidden={!open}>
-      <button className="mobile-drawer-scrim" type="button" onClick={onClose} aria-label="关闭会话抽屉" tabIndex={open ? 0 : -1} />
-      <ConversationNavigation
-        className="mobile-drawer"
-        panelRef={drawerRef}
-        dialog
-        closeAction={(
-          <button className="mobile-drawer__close" type="button" onClick={onClose} aria-label="关闭会话抽屉">
-            <X size={24} />
-          </button>
-        )}
-        destinations={[
-          {
-            id: "runtime",
-            icon: <LibraryBig size={20} />,
-            label: "知识与运行",
-            description: "记忆 · MCP · 定时任务",
-            featured: true,
-            onActivate: onOpenRuntime,
-          },
-          {
-            id: "plugins",
-            icon: <Puzzle size={20} />,
-            label: "插件",
-            badge: pluginCount,
-            onActivate: onOpenPlugins,
-          },
-        ]}
-        sessions={snapshot.sessions.map((session) => ({
-          id: session.id,
-          title: session.title || "未命名会话",
-          preview: session.isAvailable
-            ? session.lastMessagePreview || "还没有消息"
-            : "电脑端已不存在 · 本机保留历史",
-          updatedLabel: session.lastMessageAt ? formatDrawerTime(session.lastMessageAt) : undefined,
-          active: session.id === snapshot.selectedSessionId,
-          unavailable: !session.isAvailable,
-          state: !session.isAvailable ? (
-            <ArchiveX size={19} aria-label="电脑端已不存在" />
-          ) : session.isRunning ? <span className="session-running" aria-label="Agent 正在处理" />
-            : session.unreadCount > 0 ? (
-              <strong className="session-unread" aria-label={`${session.unreadCount} 条未读`}>
-                {session.unreadCount > 99 ? "99+" : session.unreadCount}
-              </strong>
-            ) : session.id === snapshot.selectedSessionId ? <Check size={18} /> : null,
-        }))}
-        onSessionActivate={(sessionId) => {
-          window.RoxyNative?.selectSession(sessionId);
-          onClose();
-        }}
-        sessionAfterContent={<MobilePluginSlot name="drawer.panel" sessionId={snapshot.selectedSessionId} />}
-        actions={[
-          { id: "settings", icon: <Settings size={18} />, label: "设置", onActivate: onOpenSettings },
-          {
-            id: "diagnostics",
-            icon: <FileText size={18} />,
-            label: "导出诊断报告",
-            onActivate: () => {
-              window.RoxyNative?.exportDiagnostics();
-              onClose();
-            },
-          },
-          {
-            id: "resync",
-            icon: <RotateCcw size={18} />,
-            label: snapshot.composer.isResyncing ? "正在重新同步" : "清理缓存并同步",
-            disabled: !snapshot.composer.canResync,
-            onActivate: () => {
-              if (window.confirm("清除本机已同步消息和附件缓存，并从电脑重新拉取？连接状态会保留。")) {
-                window.RoxyNative?.reloadFromServer();
-                onClose();
-              }
-            },
-          },
-          { id: "pairing", icon: <RefreshCw size={18} />, label: "重新扫码", onActivate: onRestartPairing },
-          {
-            id: "new-chat",
-            icon: <MessageSquarePlus size={18} />,
-            label: "新聊天",
-            primary: true,
-            onActivate: () => {
-              window.RoxyNative?.createSession();
-              onClose();
-            },
-          },
-        ]}
-      />
-    </div>
   );
 }
 
@@ -4213,15 +4052,6 @@ const messageDateFormatter = new Intl.DateTimeFormat("zh-CN", {
 
 function formatMessageTime(value: number) {
   return messageTimeFormatter.format(new Date(value));
-}
-
-function formatDrawerTime(value: number) {
-  const date = new Date(value);
-  const now = new Date();
-  if (sameLocalDay(value, now.getTime())) return formatMessageTime(value);
-  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-  if (sameLocalDay(value, yesterday.getTime())) return "昨天";
-  return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
 function formatMessageDate(value: number) {
