@@ -27,6 +27,6 @@ body:
   - type: textarea
     attributes:
       label: 环境信息
-      description: 请提供操作系统、Akashic 版本或 commit，以及相关日志。
+      description: 请提供操作系统、Roxy 版本或 commit，以及相关日志。
     validations:
       required: true

@@ -1,5 +1,3 @@
-[![欢迎加入交流群](https://img.shields.io/badge/QQ%E4%BA%A4%E6%B5%81%E7%BE%A4-%E6%AC%A2%E8%BF%8E%E5%8A%A0%E5%85%A5-2ea44f?style=for-the-badge)](./COMMUNICATION.md)
-
 # Roxy Agent
 
 一个**会主动找你**的 AI 伙伴——不只是被动回答问题，还能根据你订阅的信息源主动判断"现在该不该发消息、发什么"，在空闲时自主执行后台任务。
@@ -227,8 +225,7 @@ Roxy Mobile 是一个通过独立实时网关连接 Roxy Agent 的 Android 客�
 4. 两端核对六位确认码，在电脑上批准设备
 ```
 
-- Android 安装包：<https://github.com/kachofugetsu09/akashic-mobile/releases/latest>
-  （发布仓仍沿用旧名称，不代表本仓库继续以 Akashic 作为新运行时身份）
+- Android 客户端使用与 Roxy 服务端匹配的 Roxy 构建；当前可通过 USB 安装更新。
 - 配置、Cloudflare、验证与排障：[移动端接入手册](./_handbook/mobile-access.md)
 
 首次配对成功后，手机会保存设备密钥，正常升级应用或重连无需再次扫码。
