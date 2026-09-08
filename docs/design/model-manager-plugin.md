@@ -40,3 +40,7 @@ Core 测试覆盖原子变更、角色替代、并发冲突、凭据保护、旧
 真机配对发现旧 Roxy 拒绝 session.create，导致新客户端没有可选择的会话。Core 现在接受空参数 session.create，为已认证设备与命令 ID 分配稳定 mobile UUID，先保存会话和创建事实，再完成持久命令收据，回复 session.created。客户端不选择 ID；旧手机的消息准入仍保持兼容。
 
 崩溃重放只恢复已保存且创建标识匹配的会话，不创建缺失或已删除的会话；跨设备/命令使用不同身份。新增的 metadata.mobile_session_create 由 Core 拥有，记录设备与命令，不包含凭据；会话删除仍由既有 SessionManager owner 执行。Android 接受 Core 返回的规范 mobile UUID，不改名、不做本地身份迁移。
+
+## USB 聊天失败终态修复
+
+2026-09-08 真机发现 provider_connection_error 被发送为缺少 message_id 的 message.final，阻塞客户端有序重放。Core failed 现在使用既有 turn.interrupted，保留权威 retryable；手机将旧无 canonical identity、已绑定 attempt 且无附件的 final 明确投影为 failed，保留原 ID/seq，不伪造历史 ID、不清空消息/游标。失败提示留在聊天页；新 canonical 回复正常完成。后端消息事实仍由 Core 拥有，协议 schema 不增加字段。

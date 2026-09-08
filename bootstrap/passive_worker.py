@@ -474,6 +474,7 @@ class PassiveMessageWorker:
             )
         if result.status is not TurnStatus.FAILED:
             raise ValueError(f"不支持的 terminal 状态: {result.status.value}")
+        metadata["retryable"] = bool(result.error and result.error.retryable)
         return OutboundMessage(
             channel=item.channel,
             chat_id=item.chat_id,
