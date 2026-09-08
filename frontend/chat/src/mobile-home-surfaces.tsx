@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { BookOpenText, House, MessageCircle, MessageSquarePlus, Puzzle, Search, Settings, Wrench, FileText, LibraryBig, Wifi } from "lucide-react";
+import { BookOpenText, House, MessageCircle, MessageSquarePlus, Puzzle, Search, Settings, Wrench, FileText, LibraryBig, Wifi, RefreshCw, ScanLine } from "lucide-react";
 import { ConversationNavigation } from "./conversation-navigation";
 
 interface Session {
@@ -39,8 +39,9 @@ export function MobileHomeConversations({ sessions, selectedId, onOpen, onCreate
   </section>;
 }
 
-export function MobileHomeTools({ onRuntime, onPlugins, onSettings, onDiagnostics, connectionLabel }: {
+export function MobileHomeTools({ onRuntime, onPlugins, onSettings, onDiagnostics, connectionLabel, onResync, onPairing, canResync, isResyncing }: {
   onRuntime: () => void; onPlugins: () => void; onSettings: () => void; onDiagnostics: () => void; connectionLabel: string;
+  onResync: () => void; onPairing: () => void; canResync: boolean; isResyncing: boolean;
 }) {
   return <section className="mobile-root-page mobile-home-tools" aria-label="工具">
     <header><div><small>需要的时候，都在这里</small><h1>工具</h1></div><BookOpenText size={30} aria-hidden="true" /></header>
@@ -49,6 +50,10 @@ export function MobileHomeTools({ onRuntime, onPlugins, onSettings, onDiagnostic
       <button type="button" onClick={onPlugins}><Puzzle /><strong>插件</strong><small>心情、主动反馈与所有看板</small></button>
       <button type="button" onClick={onSettings}><Settings /><strong>设置</strong><small>模型 · 主题 · 通知 · 连接</small></button>
       <button type="button" onClick={onDiagnostics}><FileText /><strong>诊断报告</strong><small>连接与运行状态</small></button>
+    </div>
+    <div className="mobile-home-tool-grid" aria-label="连接维护">
+      <button type="button" onClick={onResync} disabled={!canResync}><RefreshCw /><strong>{isResyncing ? "正在重新同步" : "重新同步"}</strong><small>从电脑重新读取聊天记录</small></button>
+      <button type="button" onClick={onPairing}><ScanLine /><strong>重新配对</strong><small>扫描电脑上的配对码</small></button>
     </div>
     <p className="mobile-home-connection"><Wifi size={18} aria-hidden="true" />{connectionLabel}</p>
   </section>;
