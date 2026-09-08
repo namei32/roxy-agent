@@ -2287,6 +2287,7 @@ class MobileRealtimeChannel:
             field="mobile final.client_message_id",
         )
         if message.terminal_status in (
+            TurnTerminalStatus.FAILED,
             TurnTerminalStatus.INTERRUPTED,
             TurnTerminalStatus.CANCELLED,
         ):
@@ -2298,6 +2299,11 @@ class MobileRealtimeChannel:
                 "message": message.content or "本轮已中断。",
                 "control_turn_id": message.control_turn_id,
             }
+            if message.terminal_status is TurnTerminalStatus.FAILED:
+                retryable = source_metadata.get("retryable", False)
+                if not isinstance(retryable, bool):
+                    raise RuntimeError("mobile failed terminal retryable 必须是布尔值")
+                payload["retryable"] = retryable
             if client_message_id is not None:
                 payload["client_message_id"] = client_message_id
             started_at = self._turn_started_at.get(key)
@@ -2946,6 +2952,8 @@ class MobileRealtimeChannel:
             "message": message,
             "control_turn_id": control_turn_id,
         }
+        if status == "failed":
+            payload["retryable"] = bool(turn and turn.error and turn.error.retryable)
         if reason is not None:
             payload["reason"] = reason
         state = self._process_turns.get((session_id, turn_id))

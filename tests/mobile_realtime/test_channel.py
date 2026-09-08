@@ -5668,3 +5668,35 @@ async def test_session_create_recovers_persisted_result_without_resurrection(tmp
     finally:
         manager.close()
         storage.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retryable", [True, False])
+async def test_failed_outbound_is_a_failure_terminal_without_canonical_message(
+    tmp_path: Path, retryable: bool,
+) -> None:
+    """Provider 失败保留重试语义，不产生会毒化客户端游标的成功 final。"""
+    runtime, channel, manager, storage, session_id, turn_id = await _race_channel(tmp_path)
+    try:
+        message = OutboundMessage(
+            channel="mobile", chat_id=session_id.removeprefix("mobile:"),
+            content="处理消息时出错，请稍后再试。",
+            control_turn_id=turn_id, execution_attempt_id=turn_id,
+            terminal_status=TurnTerminalStatus.FAILED,
+            metadata={"client_message_id": "01ARZ3NDEKTSV4RRFFQ69G5FAE", "retryable": retryable},
+        )
+        await channel._on_response(message)
+        await channel._on_response(message)
+        terminals = [e for e in runtime.events if e["event_type"] in {"message.final", "turn.interrupted"}]
+        assert len(terminals) == 1
+        assert terminals[0]["event_type"] == "turn.interrupted"
+        payload = cast(dict[str, object], terminals[0]["payload"])
+        assert payload["status"] == "failed"
+        assert payload["retryable"] is retryable
+        assert payload["client_message_id"] == "01ARZ3NDEKTSV4RRFFQ69G5FAE"
+        assert "message_id" not in payload
+        assert session_id not in channel._active_turn_ids
+    finally:
+        await channel.stop()
+        manager.close()
+        storage.close()
