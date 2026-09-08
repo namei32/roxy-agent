@@ -84,6 +84,8 @@ export function useDesktopChatController() {
   const [selectedRuntimeId, setSelectedRuntimeId] = useState("");
   const [selectedReasoningEffort, setSelectedReasoningEffort] = useState("");
   const [modelSelectionDirty, setModelSelectionDirty] = useState(false);
+  const modelSelectionDirtyRef = useRef(false);
+  useEffect(() => { modelSelectionDirtyRef.current = modelSelectionDirty; }, [modelSelectionDirty]);
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const reconnectAttemptRef = useRef(0);
@@ -190,7 +192,7 @@ export function useDesktopChatController() {
   const loadSessionsSafely = useCallback(() => loadSessions().catch((error: unknown) => reportError(error)), [loadSessions, reportError]);
   const loadMessagesSafely = useCallback((sessionId: string) => loadMessages(sessionId).catch((error: unknown) => reportError(error)), [loadMessages, reportError]);
 
-  const loadModels = useCallback(async (sessionId: string) => {
+  const loadModels = useCallback(async (sessionId: string, preserveLocal = false) => {
     modelsRequestRef.current?.abort();
     const controller = new AbortController();
     modelsRequestRef.current = controller;
@@ -198,9 +200,11 @@ export function useDesktopChatController() {
     try {
       const next = chatModelState(await fetchChatJson<unknown>(`/api/chat/models${query}`, { signal: controller.signal }));
       setModelState(next);
-      setSelectedRuntimeId(next.sessionOverride);
-      setSelectedReasoningEffort(next.sessionSelection.reasoningEffort);
-      setModelSelectionDirty(false);
+      if (!preserveLocal || !modelSelectionDirtyRef.current) {
+        setSelectedRuntimeId(next.sessionOverride);
+        setSelectedReasoningEffort(next.sessionSelection.reasoningEffort);
+        setModelSelectionDirty(false);
+      }
     } finally {
       if (modelsRequestRef.current === controller) modelsRequestRef.current = null;
     }
@@ -219,8 +223,15 @@ export function useDesktopChatController() {
       ) return;
       void loadModels(activeSessionRef.current).catch((error: unknown) => reportError(error));
     };
+    const refresh = () => void loadModels(activeSessionRef.current, true).catch((error: unknown) => reportError(error));
     window.addEventListener("message", handleModelsChanged);
-    return () => window.removeEventListener("message", handleModelsChanged);
+    window.addEventListener("roxy.models.changed", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.removeEventListener("message", handleModelsChanged);
+      window.removeEventListener("roxy.models.changed", refresh);
+      window.removeEventListener("focus", refresh);
+    };
   }, [loadModels, reportError]);
 
   const scheduleReconnect = useCallback(() => {
@@ -253,6 +264,10 @@ export function useDesktopChatController() {
       console.debug("[chat-ui] ws message", typeof event.data);
       try {
         const frame = parseChatFrame(JSON.parse(String(event.data)));
+        if (frame.type === "model.catalog.changed") {
+          window.dispatchEvent(new Event("roxy.models.changed"));
+          return;
+        }
         const traceKind = traceKindForChatFrame(frame);
         if (traceKind !== undefined && "session_id" in frame && "turn_id" in frame) {
           webTurnTrace.observeFrame(frame.session_id, frame.turn_id, traceKind);

@@ -21,6 +21,7 @@ export interface MobilePluginContext {
   capabilities: {
     queryTransports: readonly ("inline" | "https")[];
   };
+  action(method: string, payload?: Record<string, unknown>): Promise<Record<string, unknown>>;
   query(
     method: string,
     payload?: Record<string, unknown>,
@@ -53,7 +54,7 @@ export const MobilePluginHostProvider = HostContext.Provider;
 
 export interface MobilePluginQueryOptions {
   cache?: "none" | "immutable";
-  transport?: "inline" | "https";
+  transport?: "inline" | "https" | "action";
 }
 
 export interface MobilePluginRenderer {
@@ -471,7 +472,7 @@ function MountedPlugin({
   pluginId: string;
   pluginRevision: string;
   renderer: MobilePluginRenderer;
-  context: Omit<MobilePluginContext, "query" | "capabilities">;
+  context: Omit<MobilePluginContext, "query" | "action" | "capabilities">;
 }) {
   const available = useSyncExternalStore(
     (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
@@ -521,7 +522,7 @@ function MountedPlugin({
           reject(new Error("插件参数超过 64 KiB"));
           return;
         }
-        const cacheKey = options.cache === "immutable"
+        const cacheKey = options.transport !== "action" && options.cache === "immutable"
           ? pluginQueryCacheKey(targetId, targetRevision, method, encoded, sessionId, turnId)
           : undefined;
         const cachedJson = cacheKey === undefined ? undefined : immutableResults.get(cacheKey);
@@ -571,6 +572,7 @@ function MountedPlugin({
               sessionId,
               turnId,
               signal: abort!.signal,
+              action: options.transport === "action",
             }).then(
               (result) => receiveMobilePluginResult({ requestId, resultJson: JSON.stringify(result) }),
               (error: unknown) => receiveMobilePluginResult({
@@ -606,6 +608,12 @@ function MountedPlugin({
           queryProviders: () => catalog.plugins.map(({ id }) => ({ id })),
           queryPlugin,
         } : undefined,
+        action(method, payload = {}) {
+          return queryPlugin(pluginId, method, payload, { transport: "action", cache: "none" }).then((result) => {
+            window.dispatchEvent(new Event("roxy.models.changed"));
+            return result;
+          });
+        },
         query: (method, payload, options) => queryPlugin(pluginId, method, payload, options),
       });
     } catch (error) {
@@ -636,6 +644,7 @@ async function queryWebPluginUi({
   sessionId,
   turnId,
   signal,
+  action = false,
 }: {
   pluginId: string;
   pluginRevision: string;
@@ -645,11 +654,12 @@ async function queryWebPluginUi({
   sessionId?: string;
   turnId?: string;
   signal: AbortSignal;
+  action?: boolean;
 }): Promise<Record<string, unknown>> {
-  if (slot === "dashboard.main") throw new Error("Web 不开放插件独立面板");
-  const response = await fetch("/api/chat/plugin-ui/query", {
+  if (!action && slot === "dashboard.main") throw new Error("Web 不开放插件独立面板查询");
+  const response = await fetch(`/api/chat/plugin-ui/${action ? "action" : "query"}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(action ? { "x-roxy-csrf": "1" } : {}) },
     body: JSON.stringify({
       plugin_id: pluginId,
       plugin_revision: pluginRevision,

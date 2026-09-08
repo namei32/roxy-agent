@@ -237,6 +237,9 @@ class _RuntimeInspection:
 
 
 class _ModelRegistry:
+    def on_change(self, listener):
+        self.listener = listener
+
     async def refresh(self) -> SimpleNamespace:
         return SimpleNamespace(
             generation_id=3,
@@ -5563,4 +5566,42 @@ async def test_flush_batch_middle_segment_failure_consumes_only_successful_prefi
     assert channel._delta_failure is None
     await channel.stop()
     manager.close()
+    storage.close()
+
+@pytest.mark.asyncio
+async def test_plugin_action_uses_receipt_and_rejects_turn_slot(tmp_path):
+    storage = MobileRealtimeStorage(tmp_path / "mobile.db")
+    device_id = uuid4().hex
+    _register_device(storage, device_id)
+    channel = MobileRealtimeChannel(cast(MobileGatewayRuntime, _Runtime(storage)))
+    calls = []
+    class Provider:
+        def catalog(self):
+            return {"catalog_revision": "1" * 64, "items": []}
+        async def action(self, plugin_id, revision, method, payload):
+            calls.append(method)
+            return {"revision": 2}
+    channel.bind_mobile_ui_provider(cast(Any, Provider()))
+    frame = GenericCommand(v=1, kind="command", type="plugin.ui.action", id="01ARZ3NDEKTSV4RRFFQ69G5FAV", connection_epoch=1, payload={"owner_id": "owner", "plugin_id": "model-manager@local", "plugin_revision": "sha", "method": "add", "payload": {"expected_revision": 1, "api_key": "private-key"}, "slot": "dashboard.main"})
+    first = await channel.handle_command(device_id=device_id, frame=frame)
+    second = await channel.handle_command(device_id=device_id, frame=frame)
+    assert first.type == second.type == "plugin.ui.action.ok"
+    assert second.replayed and calls == ["add"]
+    invalid = frame.model_copy(update={"id": "01ARZ3NDEKTSV4RRFFQ69G5FAW", "payload": {**frame.payload, "slot": "turn.after_answer"}})
+    rejected = await channel.handle_command(device_id=device_id, frame=invalid)
+    assert rejected.type == "plugin.ui.action.error" and calls == ["add"]
+    storage.close()
+
+
+@pytest.mark.asyncio
+async def test_model_changed_notification_only_targets_subscribed_devices(tmp_path):
+    storage = MobileRealtimeStorage(tmp_path / "mobile.db")
+    runtime = _Runtime(storage)
+    channel = MobileRealtimeChannel(cast(MobileGatewayRuntime, runtime))
+    registry = _ModelRegistry()
+    channel.bind_model_registry(cast(Any, registry))
+    channel._model_subscribers["new-device"] = 2
+    await registry.listener()
+    assert runtime.events[-1]["control_type"] == "model.catalog.changed"
+    assert runtime.events[-1]["device_id"] == "new-device"
     storage.close()

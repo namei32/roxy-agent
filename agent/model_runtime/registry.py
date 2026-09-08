@@ -101,6 +101,7 @@ class ModelRegistry:
         self._config_path = config.config_path
         self._workspace_path = config.workspace_path
         self._store = ModelRegistryStore.for_workspace(self._workspace_path)
+        self._change_listeners: list[Callable[[], Awaitable[None]]] = []
 
     @property
     def current(self) -> ModelGeneration:
@@ -203,6 +204,12 @@ class ModelRegistry:
                 previous.retired = True
                 if previous.lease_count:
                     self._retired[previous.generation_id] = previous
+
+        await asyncio.gather(*(listener() for listener in self._change_listeners))
+
+    def on_change(self, listener: Callable[[], Awaitable[None]]) -> None:
+        """订阅已提交目录的刷新通知。"""
+        self._change_listeners.append(listener)
 
     async def refresh(self) -> ModelGeneration:
         """Refresh from canonical storage and return the visible generation."""

@@ -763,11 +763,11 @@ def test_boot_guardian_reaps_adopted_zombie_while_gateway_runs(
         "if middle == 0:\n"
         "    child = os.fork()\n"
         "    if child == 0:\n"
-        "        Path(os.environ['ZOMBIE_PID']).write_text(str(os.getpid()))\n"
+        "        Path(os.environ['ZOMBIE_PID']+'.tmp').write_text(str(os.getpid())); os.replace(os.environ['ZOMBIE_PID']+'.tmp', os.environ['ZOMBIE_PID'])\n"
         "        os._exit(0)\n"
         "    os._exit(0)\n"
         "os.waitpid(middle, 0)\n"
-        "Path(os.environ['GATEWAY_PID']).write_text(str(os.getpid()))\n"
+        "Path(os.environ['GATEWAY_PID']+'.tmp').write_text(str(os.getpid())); os.replace(os.environ['GATEWAY_PID']+'.tmp', os.environ['GATEWAY_PID'])\n"
         "while True:\n"
         "    time.sleep(60)\n",
         encoding="utf-8",

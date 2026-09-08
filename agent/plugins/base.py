@@ -130,6 +130,12 @@ class Plugin(ABC):
     def mobile_ui_available(self) -> bool:
         return True
 
+    async def mobile_ui_action(
+        self, method: str, payload: dict[str, object],
+    ) -> dict[str, object]:
+        """显式写操作；默认拒绝，不能经只读 query 调用。"""
+        raise RuntimeError("插件未实现 mobile UI action")
+
     def mobile_ui_query(
         self,
         method: str,

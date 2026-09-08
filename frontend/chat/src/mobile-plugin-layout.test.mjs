@@ -121,8 +121,9 @@ test("desktop shares plugin shell slots without exposing mobile dashboards", () 
   assert.doesNotMatch(desktopControllerSource, /MobilePluginDashboard|useMobilePluginDashboards/);
   assert.doesNotMatch(desktopConversationSource, /MobilePluginDashboard|useMobilePluginDashboards/);
   assert.match(pluginRuntimeSource, /fetch\("\/api\/chat\/plugin-ui\/catalog"/);
-  assert.match(pluginRuntimeSource, /fetch\("\/api\/chat\/plugin-ui\/query"/);
-  assert.match(pluginRuntimeSource, /slot === "dashboard\.main"/);
+  assert.match(pluginRuntimeSource, /fetch\(`\/api\/chat\/plugin-ui\/\$\{action \? "action" : "query"\}/);
+  assert.match(pluginRuntimeSource, /"x-roxy-csrf": "1"/);
+  assert.match(pluginRuntimeSource, /action\(method, payload = \{\}\)/);
 });
 
 test("desktop and mobile keep one shared conversation owner", () => {

@@ -369,3 +369,32 @@ async def test_mobile_ui_rpc_invalid_result_isolated_from_transport(
             session_id="mobile:test",
             turn_id="turn-1",
         )
+
+@pytest.mark.asyncio
+async def test_action_rejects_stale_revision_and_holds_committed_lease():
+    provider = _provider()
+    generation = provider._manager.current_snapshot.generations["sample@github"]
+    calls = []
+    async def action(method, payload):
+        calls.append(method)
+        assert provider._manager.snapshot_store.entered > provider._manager.snapshot_store.exited
+        return {"revision": 2}
+    generation.instance.mobile_ui_action = action
+    with pytest.raises(MobileUiStaleRevision):
+        await provider.action("sample@github", "stale", "add", {})
+    assert calls == []
+    assert await provider.action("sample@github", "revision-1", "add", {}) == {"revision": 2}
+    assert provider._manager.snapshot_store.entered == provider._manager.snapshot_store.exited
+
+
+@pytest.mark.asyncio
+async def test_action_does_not_log_or_return_upstream_secret(caplog):
+    provider = _provider()
+    generation = provider._manager.current_snapshot.generations["sample@github"]
+    async def action(method, payload):
+        raise RuntimeError("credential-must-not-leak")
+    generation.instance.mobile_ui_action = action
+    with pytest.raises(MobileUiRpcExecutionError) as error:
+        await provider.action("sample@github", "revision-1", "add", {})
+    assert "credential-must-not-leak" not in str(error.value)
+    assert "credential-must-not-leak" not in caplog.text
