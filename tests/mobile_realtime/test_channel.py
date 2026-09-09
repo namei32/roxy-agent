@@ -5711,16 +5711,19 @@ async def test_discuss_letter_creates_one_referenced_conversation_without_sendin
     source.add_message("assistant", "值得讨论的发现", proactive=True, delivery_id="letter-1")
     manager.save(source)
     original = dict(source.messages[0])
+    source_message_id = original["id"]
+    assert isinstance(source_message_id, str)
     runtime = _Runtime(storage)
     channel = MobileRealtimeChannel(cast(MobileGatewayRuntime, runtime))
     channel._ctx = cast(Any, SimpleNamespace(session_manager=manager))
     frame = GenericCommand(v=1, kind="command", type="session.create", id="01ARZ3NDEKTSV4RRFFQ69G5FAV", connection_epoch=1,
-                           payload={"source_session_id": source.key, "source_message_id": original["id"]})
+                           payload={"source_session_id": source.key, "source_message_id": source_message_id})
     try:
         first = await channel.handle_command(device_id=device_id, frame=frame)
         second = await channel.handle_command(device_id=device_id, frame=frame)
         assert first.type == "session.created" and second.replayed
         assert first.session_id == second.session_id != source.key
+        assert first.session_id is not None
         target = manager.get_existing(first.session_id)
         assert target.metadata["discussion_source"] == {"session_id": source.key, "message_id": original["id"]}
         assert len(target.messages) == 1 and target.messages[0]["content"] == "引用的 Roxy 来信：\n\n值得讨论的发现"
@@ -5754,7 +5757,9 @@ async def test_explicit_task_push_is_addressable_and_delivery_retry_is_idempoten
         assert active_session.messages == []  # No mutation of an active turn's captured Session.
         rows = manager.get_existing(session_id).messages
         assert len(rows) == 1 and rows[0]["proactive"] is True
-        assert rows[0]["delivery_id"] == runtime.events[0]["payload"]["delivery_id"]
+        event_payload = runtime.events[0]["payload"]
+        assert isinstance(event_payload, dict)
+        assert rows[0]["delivery_id"] == event_payload["delivery_id"]
         assert runtime.events[0]["session_id"] == session_id
         with pytest.raises(ValueError, match="另一条消息"):
             await channel._deliver_message(ChannelMessage(channel="mobile", chat_id=session_id, content="另一条内容", metadata={"delivery_id": "task-result"}))

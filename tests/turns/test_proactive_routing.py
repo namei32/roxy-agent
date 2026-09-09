@@ -1,5 +1,4 @@
 from concurrent.futures import ThreadPoolExecutor
-from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
