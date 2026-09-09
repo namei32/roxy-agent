@@ -78,3 +78,17 @@ roxy_house 通过正式 `drift_skill_roots` 增加阅读札记、小创作和只
 ## 回滚
 
 撤回新的 WebUI Preview，插件按正式父回合恢复 0.3.2。Core 通过部署 controller 恢复上一不可变 release。保留新产生的日常记录、成果和消息；恢复入口、原会话、配对及未变更的插件组合。不得手改正式 cache、发布指针或业务数据库来制造回滚成功。
+
+## 主动来信的会话路由（2026-09-09，实施中）
+
+用户批准四类路由：明确聊天任务回原会话；持续自主活动使用活动关联会话；普通问候、分享和无任务来源提醒进入“Roxy 来信”；用户点击“单独讨论”时创建带来源引用的新会话。日常仍由 Drift 的真实活动、阶段、成果驱动。
+
+`change_type=feature; semantic_delta=changed; capability_owner=SessionStore/TurnOrchestrator, Drift, Mobile channel, shared WebUI; consumer_scope=mobile proactive delivery and inbox; runtime_patch=required`。SessionStore 是会话绑定和消息权威 owner；Drift 只提供活动接续链身份与公开标题；渠道发送和会话持久化必须使用同一个已解析的目标。客户端单独改展示无法修正消息归属，因此需要 Core 路由。手机外的渠道及显式 message_push 目标保持其原有路由。
+
+允许增加路由绑定、新会话和用户触发的来源引用；不移动、回填、复制整段旧历史，不改旧消息身份，不变更学习/记忆或主动触发频率。重复推送复用同一绑定；已删除目标不可复活，下一次新来信可创建一个新身份的会话。消息仅在真实送达成功后进入可见历史；投递失败不得伪装为来信。单独讨论不自动发送用户输入或调用模型，来源明确标注为被引用的来信。
+
+验收覆盖绑定重用/并发/重启/删除、任务目标优先、Drift 接续链、不同活动隔离、投递与保存身份一致、失败无消息、创建讨论幂等/越界/来源身份、信箱点击与回退。一次性 workspace 测试，不给真实用户发送测试通知。回滚保留新增路由表与会话，不宣称撤销已经送达的消息。
+
+实现落点：SessionStore 的 proactive_session_routes 负责原子绑定；DriftActivityStore 解析 continues_id 链根并通过执行上下文传出活动主题；TurnOrchestrator 在 dispatch 前解析目标，发送与成功后的消息保存使用同一个 session。Presence 的主动调度节奏仍归配置来源会话。显式 mobile message_push 保留调用者指定目标，成功后追加可定位来信，并以 delivery_id/请求摘要去重，不改写运行中的父 Prompt。
+
+session.create 增加可选 source_session_id/source_message_id。服务端只接受所属移动会话中真实 assistant proactive 消息；同命令 ID 重试复用已创建会话。Android 79 和 WebUI 提供可选 createDiscussion 桥接；旧客户端不显示不支持的按钮。创建期间禁止从编辑器向旧会话发送，完成后由原有 session.created 处理选中新会话。

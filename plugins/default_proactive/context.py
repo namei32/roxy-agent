@@ -45,6 +45,8 @@ class AgentTickContext:
     drift_finish_status: str = ""
     drift_finish_briefing: str = ""
     drift_activity_id: str = ""
+    drift_activity_topic: str = ""
+    drift_activity_title: str = ""
     drift_activity_call_id: str = ""
     drift_public_summary: str = ""
     llm_call_count: int = 0

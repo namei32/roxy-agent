@@ -38,6 +38,7 @@ export interface MobileMessageTarget {
 export interface MobilePluginHostActions {
   sessions(): readonly { id: string; title: string }[];
   openSession(target: MobileMessageTarget): void;
+  startDiscussion?(target: MobileMessageTarget): void;
   openSurface(kind: "conversations" | "tools"): void;
   showDialog(dialog: HTMLDialogElement, options?: { onBack?: () => boolean }): void;
   renderMarkdown?(target: HTMLElement, content: string): () => void;

@@ -43,6 +43,22 @@ class TurnOrchestrator:
         if result.outbound is None:
             raise ValueError("proactive reply result requires outbound")
 
+        owner_session_key = session_key
+        if channel == "mobile":
+            origin = result.outbound.origin_session_key
+            if origin is not None:
+                if not origin.startswith("mobile:") or not self._session.session_manager.session_exists(origin):
+                    raise ValueError("主动消息的来源会话不存在或渠道不匹配")
+                session_key = origin
+            else:
+                activity = result.outbound.activity_key
+                session_key = self._session.session_manager.control_store.resolve_proactive_session(
+                    owner_session_key=owner_session_key,
+                    route_key=f"activity:{activity}" if activity else "inbox",
+                    title=result.outbound.activity_title if activity else "Roxy 来信",
+                )
+            chat_id = session_key.removeprefix("mobile:")
+
         content = result.outbound.content
         media = list(result.outbound.media or [])
         delivery_id = uuid4().hex
@@ -56,7 +72,7 @@ class TurnOrchestrator:
                     channel=channel,
                     chat_id=chat_id,
                     content=content,
-                    metadata={"delivery_id": delivery_id},
+                    metadata={"delivery_id": delivery_id, "_canonical_history_owner": "turn_orchestrator"},
                     media=media,
                     control_turn_id=control_turn_id,
                 )
@@ -81,7 +97,7 @@ class TurnOrchestrator:
                 session, session.messages[-1:]
             )
             if self._session.presence:
-                self._session.presence.record_proactive_sent(session_key)
+                self._session.presence.record_proactive_sent(owner_session_key)
             await self._run_effects(result.success_side_effects)
         else:
             await self._run_effects(result.failure_side_effects)

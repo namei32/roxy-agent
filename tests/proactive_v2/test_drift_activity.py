@@ -324,3 +324,18 @@ async def test_activity_origin_is_in_sessiondb_only_after_confirmed_delivery(tmp
         assert reader.activity(ctx.drift_activity_id, None)["item"]["status"] == "completed"
     finally:
         manager.close()
+
+
+def test_continuing_activity_keeps_original_conversation_topic(tmp_path):
+    store, _, _ = setup_store(tmp_path)
+    activities = store.activities
+    with activities.execution() as first:
+        activities.start(first, session_key="mobile:owner", skill="reading-note", title="读书札记", category="阅读", continuing=False)
+        activities.finish(first, status="paused", summary="下次继续", message_staged=False)
+    with activities.execution() as second:
+        activities.start(second, session_key="mobile:owner", skill="reading-note", title="继续阅读", category="阅读", continuing=True)
+        assert activities.conversation_topic(second) == (first, "读书札记")
+        activities.finish(second, status="paused", summary="仍待继续", message_staged=False)
+    with activities.execution() as third:
+        activities.start(third, session_key="mobile:owner", skill="reading-note", title="第三次阅读", category="阅读", continuing=True)
+        assert activities.conversation_topic(third)[0] == first

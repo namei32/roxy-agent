@@ -619,6 +619,14 @@ class SessionManager:
             _ = self._persist_session(session, msgs_copy, updated_at=updated_at)
             self._cache[session.key] = session
 
+    async def append_delivered_message(self, key: str, content: str, *, media: list[str], metadata: dict[str, object]) -> None:
+        """Append outbound history without mutating a Session held by an active turn."""
+        async with self._lock(key):
+            session = self._load(key) or Session(key)
+            row = session.add_message("assistant", content, media=media or None, **metadata)
+            _ = self._persist_session(session, [row], updated_at=datetime.now(UTC))
+            self.invalidate(key)
+
     def invalidate(self, key: str) -> None:
         _ = self._cache.pop(key, None)
 

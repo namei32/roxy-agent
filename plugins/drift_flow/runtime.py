@@ -154,6 +154,7 @@ class DriftTurnPipeline:
             status = ("interrupted" if isinstance(error, asyncio.CancelledError) else "failed") if error else (
                 ctx.drift_finish_status if ctx.drift_finished else "failed"
             )
+            ctx.drift_activity_topic, ctx.drift_activity_title = self._store.activities.conversation_topic(ctx.drift_activity_id)
             self._store.activities.finish(
                 ctx.drift_activity_id, status=status, summary=ctx.drift_public_summary,
                 message_staged=ctx.drift_message_staged,
@@ -209,6 +210,8 @@ class DriftTurnPipeline:
         ctx.drift_finish_status = ""
         ctx.drift_finish_briefing = ""
         ctx.drift_activity_id = ""
+        ctx.drift_activity_topic = ""
+        ctx.drift_activity_title = ""
         ctx.drift_activity_call_id = ""
         ctx.drift_public_summary = ""
 

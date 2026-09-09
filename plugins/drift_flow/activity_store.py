@@ -141,6 +141,26 @@ class DriftActivityStore:
                  previous["id"] if previous else None),
             )
 
+    def conversation_topic(self, activity_id: str) -> tuple[str, str]:
+        """Return the continuation root and public title without changing activity ownership."""
+        with self._connection() as db:
+            current = activity_id
+            seen: set[str] = set()
+            title = ""
+            owner = None
+            while True:
+                if current in seen:
+                    raise ValueError("日常接续链存在循环")
+                seen.add(current)
+                row = db.execute("SELECT id,session_key,title,continues_id FROM drift_activities WHERE id=?", (current,)).fetchone()
+                if row is None or (owner is not None and row["session_key"] != owner):
+                    raise ValueError("日常接续链缺失或跨越会话 owner")
+                owner = row["session_key"]
+                title = row["title"]
+                if not row["continues_id"]:
+                    return current, title
+                current = row["continues_id"]
+
     def has_activity(self, activity_id: str) -> bool:
         with self._connection() as db:
             return db.execute("SELECT 1 FROM drift_activities WHERE id=?", (activity_id,)).fetchone() is not None

@@ -371,6 +371,7 @@ interface NativeBridge {
   selectSession(sessionId: string): void;
   removeUnavailableSession(sessionId: string): void;
   createSession(): void;
+  createDiscussion?(sourceSessionId: string, sourceMessageId: string): void;
   restartPairing(): void;
   reloadFromServer(): void;
   exportDiagnostics(): void;
@@ -1192,6 +1193,18 @@ function MobileNativeApp() {
       surfaceRef.current = { kind: "chat" };
       setSurface({ kind: "chat" });
     },
+    startDiscussion: window.RoxyNative?.createDiscussion ? (target) => {
+      if (!target.messageId || !streamSnapshotRef.current?.sessions.some(item => item.id === target.sessionId && item.isAvailable)) throw new Error("来信来源暂不可用，请先同步会话");
+      if (streamSnapshotRef.current?.connection.status !== "ready") throw new Error("连接后才能单独讨论");
+      flushComposerDraft();
+      setHomeTarget(null);
+      window.RoxyNative?.createDiscussion?.(target.sessionId, target.messageId);
+      pushMobileSurface(window.history, { kind: "chat" });
+      pluginDialogRef.current?.close();
+      window.RoxyNative?.setWebHistoryActive(true);
+      surfaceRef.current = { kind: "chat" };
+      setSurface({ kind: "chat" });
+    } : undefined,
     openSurface(kind) {
       initialHomePending.current = false;
       flushComposerDraft();

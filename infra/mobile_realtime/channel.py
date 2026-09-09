@@ -796,6 +796,32 @@ class MobileRealtimeChannel:
         await self.send(chat_id, message)
 
     async def _deliver_message(self, message: ChannelMessage) -> DeliveryReceipt:
+        """Direct pushes keep their explicit target and become addressable inbox messages."""
+        if message.metadata.get("_channel_commit_role") == "passive" or message.metadata.get("_canonical_history_owner") == "turn_orchestrator":
+            return await self._deliver_channel_message(message)
+        delivery_id = message.metadata.get("delivery_id") or uuid4().hex
+        if not isinstance(delivery_id, str) or not 1 <= len(delivery_id) <= 128:
+            raise ValueError("mobile proactive delivery_id 无效")
+        manager = self._require_ctx().session_manager
+        session_id = self._session_id(message.chat_id)
+        request_digest = hashlib.sha256(json.dumps({"content": message.content, "attachments": [
+            {"kind": item.kind.value, "source": item.source, "filename": item.filename} for item in message.attachments
+        ]}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        existing = manager.control_store.get_message_by_delivery_id(session_id, delivery_id)
+        if existing is not None:
+            if existing.get("push_request_digest") != request_digest:
+                raise ValueError("投递身份已被另一条消息使用")
+            return DeliveryReceipt(DeliveryStatus.SUCCESS, canonical_media=tuple(existing.get("media") or []))
+        message = replace(message, metadata={**message.metadata, "delivery_id": delivery_id},
+                          control_turn_id=message.control_turn_id or f"turn:{uuid4().hex}")
+        receipt = await self._deliver_channel_message(message)
+        if receipt.status is DeliveryStatus.SUCCESS:
+            await manager.append_delivered_message(session_id, message.content, media=list(receipt.canonical_media),
+                metadata={"proactive": True, "delivery_id": delivery_id, "control_turn_id": message.control_turn_id,
+                          "tools_used": ["message_push"], "push_request_digest": request_digest})
+        return receipt
+
+    async def _deliver_channel_message(self, message: ChannelMessage) -> DeliveryReceipt:
         """把完整主动消息原子提交为一个 Mobile durable event。"""
 
         self._raise_delta_failure()
@@ -1486,12 +1512,15 @@ class MobileRealtimeChannel:
                     sort_order="asc",
                 )
             )
+            metadata = (ctx.session_manager.control_store.get_session_meta(session_id) or {}).get("metadata", {})
+            if total == 0 and metadata.get("proactive_route"):
+                continue
             first_content = str(messages[0]["content"]).strip() if messages else ""
             items.append(
                 {
                     "session_id": session_id,
                     "title": (
-                        first_content.splitlines()[0][:32]
+                        str(metadata.get("title") or first_content).splitlines()[0][:32]
                         if first_content
                         else "新对话"
                     ),
@@ -1514,7 +1543,7 @@ class MobileRealtimeChannel:
 
     def _read_created_session(self, device_id: str, frame: GenericCommand) -> CommandReply | None:
         """仅从已经保存的创建事实恢复回复，绝不重建已删除会话。"""
-        _expect_keys(frame.payload, set())
+        _expect_keys(frame.payload, {"source_session_id", "source_message_id"})
         if frame.session_id is not None or frame.turn_id is not None:
             raise MobileCommandError("invalid_session", "新会话身份由 Core 分配")
         session_id = self._created_session_id(device_id, frame)
@@ -1529,7 +1558,7 @@ class MobileRealtimeChannel:
 
     async def _create_session(self, device_id: str, frame: GenericCommand) -> CommandReply:
         """兼容新客户端的 Core 创建入口；旧客户端发送路径保持可用。"""
-        _expect_keys(frame.payload, set())
+        _expect_keys(frame.payload, {"source_session_id", "source_message_id"})
         if frame.session_id is not None or frame.turn_id is not None:
             raise MobileCommandError("invalid_session", "新会话身份由 Core 分配")
         recovered = self._read_created_session(device_id, frame)
@@ -1539,8 +1568,22 @@ class MobileRealtimeChannel:
         if self._runtime.storage.has_session_claim(session_id):
             raise MobileCommandError("session_not_found", "会话已经删除，请发起新的创建请求")
         manager = self._require_ctx().session_manager
+        source = None
+        if frame.payload:
+            source_session = self._require_mobile_session(cast(str | None, frame.payload.get("source_session_id")))
+            source_id = frame.payload.get("source_message_id")
+            if not isinstance(source_id, str) or not source_id or len(source_id) > 256:
+                raise MobileCommandError("invalid_source", "单独讨论需要来信身份")
+            source = manager.control_store.get_message(source_id)
+            if source is None or source["session_key"] != source_session or source["role"] != "assistant" or source.get("proactive") is not True:
+                raise MobileCommandError("invalid_source", "来信不存在或与来源会话不匹配")
         session = manager.get_or_create(session_id)
         session.metadata["mobile_session_create"] = {"device_id": device_id, "command_id": frame.id}
+        if source is not None:
+            session.metadata["title"] = "讨论：" + str(source["content"]).strip().split("\n", 1)[0][:28]
+            session.metadata["discussion_source"] = {"session_id": source["session_key"], "message_id": source["id"]}
+            session.add_message("assistant", "引用的 Roxy 来信：\n\n" + str(source["content"]),
+                source_refs=[{"kind": "discussion_source", "session_id": source["session_key"], "message_id": source["id"]}])
         manager.save(session)
         recovered = self._read_created_session(device_id, frame)
         if recovered is None:
