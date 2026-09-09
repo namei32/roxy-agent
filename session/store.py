@@ -564,6 +564,14 @@ class SessionStore:
                     metadata          TEXT
                 )
                 """)
+            self._conn.execute("""
+                CREATE TABLE IF NOT EXISTS proactive_session_routes (
+                    owner_session_key TEXT NOT NULL,
+                    route_key TEXT NOT NULL,
+                    session_key TEXT NOT NULL,
+                    PRIMARY KEY (owner_session_key, route_key)
+                )
+            """)
             self._ensure_session_columns()
             self._conn.execute("""
                 CREATE TABLE IF NOT EXISTS session_admissions (
@@ -1050,6 +1058,40 @@ class SessionStore:
                 "SELECT 1 FROM sessions WHERE key = ?", (key,)
             ).fetchone()
         return row is not None
+
+    def resolve_proactive_session(self, *, owner_session_key: str, route_key: str, title: str) -> str:
+        """Atomically bind a mobile notification topic to a durable conversation."""
+        if not owner_session_key.startswith("mobile:") or not route_key or len(route_key) > 256:
+            raise ValueError("主动会话路由身份无效")
+        if not title.strip() or len(title) > 80:
+            raise ValueError("主动会话标题无效")
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                row = self._conn.execute(
+                    "SELECT r.session_key FROM proactive_session_routes r JOIN sessions s ON s.key=r.session_key "
+                    "WHERE r.owner_session_key=? AND r.route_key=?", (owner_session_key, route_key),
+                ).fetchone()
+                if row is not None:
+                    self._conn.commit()
+                    return str(row["session_key"])
+                key = f"mobile:{uuid4()}"
+                now = datetime.now(UTC).isoformat()
+                metadata = {"title": title, "proactive_route": {"owner_session_key": owner_session_key, "key": route_key}}
+                self._conn.execute(
+                    "INSERT INTO sessions(key,created_at,updated_at,last_consolidated,metadata) VALUES (?,?,?,0,?)",
+                    (key, now, now, json.dumps(metadata, ensure_ascii=False)),
+                )
+                self._conn.execute(
+                    "INSERT INTO proactive_session_routes(owner_session_key,route_key,session_key) VALUES (?,?,?) "
+                    "ON CONFLICT(owner_session_key,route_key) DO UPDATE SET session_key=excluded.session_key",
+                    (owner_session_key, route_key, key),
+                )
+                self._conn.commit()
+                return key
+            except BaseException:
+                self._conn.rollback()
+                raise
 
     def upsert_session(
         self,

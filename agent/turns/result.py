@@ -9,6 +9,10 @@ class TurnOutbound:
     session_key: str
     content: str
     media: list[str] = field(default_factory=list)
+    # Trusted execution owner supplies a task target or a stable activity topic.
+    origin_session_key: str | None = None
+    activity_key: str | None = None
+    activity_title: str = "Roxy 的日常"
 
 
 @dataclass

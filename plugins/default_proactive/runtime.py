@@ -429,6 +429,8 @@ class ProactiveFlowRuntime:
                     session_key=self._session_key,
                     content=ctx.draft_message,
                     media=list(ctx.draft_media),
+                    activity_key=ctx.drift_activity_topic or None,
+                    activity_title=ctx.drift_activity_title or "Roxy 的日常",
                 ),
                 trace=TurnTrace(source="proactive", extra={"source_mode": "drift", "source_refs": activity_source_refs(ctx.drift_activity_id)}),
             ),

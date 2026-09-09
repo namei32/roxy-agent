@@ -648,3 +648,9 @@ INT-001～INT-008 和 INT-011 已由花月哥哥确认，其中长期语义已�
 7. 是否同意下一步把本地图转成机器可读 manifest，并补目录快照与隔离 restore smoke？
 
 确认后的结论再进入 `projectneed.md` 或新的 accepted 决策。不同意的条目保留在本文件并标记 rejected/更正理由，不用删除历史推理。
+
+## 主动会话路由绑定
+
+2026-09-09 用户批准来信按任务/活动/默认来信会话路由及显式单独讨论。SessionStore 在 sessions.db 增加 proactive_session_routes，唯一键为配置来源会话与路由主题，事务内创建新 session 并绑定。绑定仅决定新主动消息目标，不搬移既有消息。删除目标后旧绑定指向的身份不会被重建；下次新消息原子换绑一个新 UUID。该表纳入完整 sessions.db 备份，代码回滚保留它。
+
+显式讨论沿用 session.create 的设备命令幂等身份，在同一次会话保存中写入 discussion_source 元数据与一条有明确来源标记的引用，不创建用户消息或执行 attempt。直接 mobile message_push 的成功历史追加从独立 Session 快照提交，不修改正在执行的 turn 所持有的 Session 对象；稳定 delivery_id 与请求摘要用于相同投递的重试去重。

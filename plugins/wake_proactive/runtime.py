@@ -912,6 +912,8 @@ class WakeRuntime:
                     session_key=state.ctx.session_key,
                     content=drift_ctx.draft_message,
                     media=list(drift_ctx.draft_media),
+                    activity_key=drift_ctx.drift_activity_topic or None,
+                    activity_title=drift_ctx.drift_activity_title or "Roxy 的日常",
                 )
                 if has_outbound
                 else None
