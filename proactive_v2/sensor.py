@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import cast
+from datetime import datetime, timezone
+from typing import Any, cast
 
 from agent.prompting import is_context_frame
 from proactive_v2.config import ProactiveConfig
@@ -16,6 +16,8 @@ class RecentProactiveMessage:
     timestamp: datetime | None = None
     state_summary_tag: str = "none"
     source_refs: list[object] = field(default_factory=list[object])
+    session_key: str = ""
+    message_id: str = ""
 
 
 class Sensor:
@@ -35,7 +37,58 @@ class Sensor:
         chat_id = self._cfg.default_chat_id.strip()
         return f"{channel}:{chat_id}" if channel and chat_id else ""
 
+    def context_view(self, now: datetime | None = None) -> dict[str, Any]:
+        return self._sessions.control_store.proactive_context_view(
+            channel=self._cfg.default_channel, target=self.target_session_key(),
+            now=(now or datetime.now(timezone.utc)).isoformat(),
+        )
+
+    def context_candidates(self, query: str = "", *, now: datetime | None = None) -> list[dict[str, Any]]:
+        from session.proactive_context import text_terms
+        cards = self.context_view(now)["sessions"]
+        terms = text_terms(query)
+        if terms:
+            cards = [{**card, "matched_terms": sorted(terms & text_terms(card['title'] + " " + card['summary']))[:12]} for card in cards]
+            cards = sorted(cards, key=lambda c: len(c["matched_terms"]), reverse=True)
+        return cards[:8]
+
+    def read_context(self, *, session_id: str | None = None, query: str = "", n: int = 20, now: datetime | None = None) -> dict[str, Any]:
+        from session.proactive_context import choose_context, content_digest
+        view = self.context_view(now)
+        chosen = choose_context(view["sessions"], query=query, session_id=session_id)
+        if chosen is None:
+            return {"session_id": None, "messages": [], "references": [], "candidates": self.context_candidates(query)}
+        rows = self._sessions.control_store.proactive_context_messages(
+            session_ids=[chosen["session_id"]], now=view["observed_at"], limit=max(1, min(n, 20)))
+        messages = []; references = []; budget = 8000
+        for row in reversed(rows):
+            if row.get("proactive") or is_context_frame(str(row["content"])):
+                continue
+            content = str(row["content"])
+            excerpt = content[:min(1200, budget)]
+            if not excerpt:
+                break
+            budget -= len(excerpt)
+            messages.append({"id": row["id"], "session_id": row["session_key"], "role": row["role"],
+                             "content": excerpt, "timestamp": row["timestamp"]})
+            references.append({"message_id": row["id"], "session_id": row["session_key"], "sha256": content_digest(content)})
+        return {"session_id": chosen["session_id"], "messages": list(reversed(messages)), "references": references + chosen["references"],
+                "summary": chosen, "observed_at": view["observed_at"],
+                "selection_reason": "explicit_session" if session_id else "keyword_relevance" if query else "recent_user_interaction"}
+
+    def is_busy(self, busy_fn: Any = None) -> bool:
+        view = self.context_view()
+        if view["busy"]:
+            return True
+        keys = self._sessions.list_sessions() if self._cfg.default_channel == "mobile" else [{"key": self.target_session_key()}]
+        return bool(busy_fn and any(busy_fn(row["key"]) for row in keys if str(row["key"]).startswith(self._cfg.default_channel + ":")))
+
+    def last_proactive_at(self) -> datetime | None:
+        return self._parse_timestamp(self.context_view()['last_proactive_at'])
+
     def last_user_at(self) -> datetime | None:
+        if self._cfg.default_channel == "mobile":
+            return self._parse_timestamp(self.context_view()["last_user_at"])
         if self._presence is None:
             return None
         return self._presence.get_last_user_at(self.target_session_key())
@@ -43,6 +96,8 @@ class Sensor:
     def collect_recent(self) -> list[dict[str, object]]:
         """读取并筛选近期用户与助手消息。"""
 
+        if self._cfg.default_channel == "mobile":
+            return self.read_context()["messages"]
         # 1. 定位目标会话
         session_key = self.target_session_key()
         if not session_key:
@@ -69,9 +124,15 @@ class Sensor:
             )
         return results
 
-    def collect_recent_proactive(self, n: int = 5) -> list[RecentProactiveMessage]:
+    def collect_recent_proactive(self, n: int = 5, *, now: datetime | None = None) -> list[RecentProactiveMessage]:
         """按时间顺序返回最近已发送的主动消息。"""
 
+        if self._cfg.default_channel == "mobile":
+            view = self.context_view(now)
+            rows = self._sessions.control_store.proactive_recent_messages(
+                channel=self._cfg.default_channel, target=self.target_session_key(), now=view["observed_at"], limit=max(1, min(n, 64)))
+            return [RecentProactiveMessage(content=str(row["content"])[:3000], timestamp=self._parse_timestamp(row["timestamp"]),
+                    source_refs=list(row.get("source_refs") or []), session_key=row["session_key"], message_id=row["id"]) for row in rows]
         # 1. 定位目标会话
         session_key = self.target_session_key()
         if not session_key:

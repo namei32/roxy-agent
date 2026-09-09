@@ -25,7 +25,7 @@ from plugins.default_proactive.anyaction import AnyActionGate, QuotaStore
 from plugins.default_proactive.deduper import MessageDeduper
 from plugins.proactive_flow.tools import ToolDeps
 from proactive_v2.runtime_scope import ProactiveRuntimeScope
-from proactive_v2.sensor import RecentProactiveMessage
+from proactive_v2.sensor import RecentProactiveMessage, Sensor
 
 
 RecentProactiveFn = Callable[[], list[RecentProactiveMessage]] | None
@@ -63,7 +63,8 @@ class AgentTickFactory:
             state_store=self._deps.state_store,
             any_action_gate=any_action_gate,
             last_user_at_fn=last_user_at_fn,
-            passive_busy_fn=self._deps.passive_busy_fn,
+            last_proactive_at_fn=self._deps.sense.last_proactive_at if isinstance(self._deps.sense, Sensor) else None,
+            passive_busy_fn=(lambda _key: self._deps.sense.is_busy(self._deps.passive_busy_fn)) if isinstance(self._deps.sense, Sensor) else self._deps.passive_busy_fn,
             turn_orchestrator=self._deps.turn_orchestrator,
             deduper=deduper,
             tool_deps=tool_deps,
@@ -83,6 +84,8 @@ class AgentTickFactory:
         return self._deps.sense.target_session_key()
 
     def _build_last_user_at_fn(self, session_key: str) -> Callable[[], Any | None]:
+        if isinstance(self._deps.sense, Sensor):
+            return self._deps.sense.last_user_at
         presence = self._deps.presence
         if presence is None:
             return lambda: None
@@ -131,6 +134,8 @@ class AgentTickFactory:
             ack_fn=source.ack_fn,
             alert_ack_fn=source.alert_ack_fn,
             max_chars=self._deps.cfg.agent_tick_web_fetch_max_chars,
+            context_candidates_fn=self._deps.sense.context_candidates if isinstance(self._deps.sense, Sensor) else None,
+            context_read_fn=self._deps.sense.read_context if isinstance(self._deps.sense, Sensor) else None,
         )
 
     def _build_recent_proactive_fn(self) -> RecentProactiveFn:

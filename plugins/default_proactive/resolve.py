@@ -392,6 +392,9 @@ class ProactiveResolver:
                 outbound=TurnOutbound(
                     session_key=self._session_key,
                     content=ctx.final_message,
+                    origin_session_key=ctx.related_session_id,
+                    context_started_at=ctx.now_utc.isoformat(),
+                    context_references=[ref for card in ctx.context_summaries for ref in card["references"]] + [reference for refs in ctx.context_reads.values() for reference in refs],
                 ),
                 evidence=list(ctx.cited_item_ids),
                 trace=TurnTrace(

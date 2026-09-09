@@ -36,6 +36,8 @@ class ToolDeps:
     web_fetch_tool: Any = None          # WebFetchTool（降级用）
     web_search_tool: Any = None         # WebSearchTool（可选）
     memory: "MemoryProfileApi | MemoryRetrievalApi | None" = None
+    context_candidates_fn: Any = None
+    context_read_fn: Any = None
     recent_chat_fn: Any = None          # async (n) -> list[dict]
     ack_fn: Any = None                  # async (compound_key: str, feedback: str) -> None
     alert_ack_fn: Any = None            # async (compound_key: str) -> None
@@ -106,10 +108,14 @@ TOOL_SCHEMAS: list[dict] = [
                 "type": {"type": "string", "description": "可选搜索模式"},
             }, "required": ["query"]}),
 
+    _schema("list_context_sessions", "查看允许参与主动判断的会话摘要及原消息身份；可按候选内容检索相关会话。摘要是摘录，不代表用户尚未完成任务。",
+            {"type": "object", "properties": {"query": {"type": "string", "maxLength": 500}}, "required": []}),
     _schema("get_recent_chat",
-            "获取最近 n 条聊天记录，用于判断用户当前是否在忙。",
+            "读取选定会话的必要上下文；先查看 list_context_sessions。明确延续该会话时 message_push.related_session_id 必须使用读过的身份。",
             {"type": "object", "properties": {
                 "n": {"type": "integer", "description": "返回条数，默认 20", "default": 20},
+                "session_id": {"type": "string", "description": "摘要列表中的原会话身份"},
+                "query": {"type": "string", "maxLength": 500, "description": "内容主题；无相关会话时不强行匹配"},
             }, "required": []}),
 
     _schema("message_push",
@@ -122,6 +128,8 @@ TOOL_SCHEMAS: list[dict] = [
             ),
             {"type": "object", "properties": {
                 "message": {"type": "string", "description": "要发送给用户的消息内容，必须非空"},
+                "related_session_id": {"type": "string", "description": "明确延续某个已读取会话时填写；通用订阅分享省略"},
+                "context_mode": {"type": "string", "enum": ["general", "linked"], "description": "读取了聊天背景但只是通用问候时明确选 general；延续话题时填写 related_session_id"},
                 "evidence": {
                     "type": "array",
                     "items": {"type": "string"},
@@ -293,8 +301,19 @@ async def _get_context_data(ctx: AgentTickContext, args: dict) -> str:
     return json.dumps(ctx.fetched_context, ensure_ascii=False)
 
 
-async def _get_recent_chat(ctx: AgentTickContext, args: dict, *, recent_chat_fn) -> str:
+async def _get_recent_chat(ctx: AgentTickContext, args: dict, *, recent_chat_fn, context_read_fn=None) -> str:
     n = args.get("n", 20)
+    if context_read_fn is not None:
+        if type(n) is not int or not 1 <= n <= 20:
+            raise ValueError("n 必须是 1 到 20 的整数")
+        import asyncio
+        session_id = args.get("session_id")
+        if len(ctx.context_reads) >= 3 and session_id not in ctx.context_reads:
+            raise ValueError("本轮最多读取三个会话")
+        data = await asyncio.to_thread(context_read_fn, session_id=session_id, query=str(args.get("query") or "")[:500], n=n)
+        if data["session_id"]:
+            ctx.context_reads[data["session_id"]] = data["references"]
+        return json.dumps(data, ensure_ascii=False)
     messages = await recent_chat_fn(n=n) if recent_chat_fn else []
     # 过滤规则：
     #   role=user           → 保留（判断用户是否在忙、最近关心什么）
@@ -422,6 +441,15 @@ def _message_push(ctx: AgentTickContext, args: dict) -> str:
     if not message.strip():
         raise ValueError("message_push requires non-empty message")
     evidence = _parse_evidence(ctx, args.get("evidence", []))
+    related = args.get("related_session_id")
+    mode = args.get('context_mode')
+    if mode not in (None, 'general', 'linked') or (mode == 'general' and related is not None) or (mode == 'linked' and related is None):
+        raise ValueError("context_mode 与关联会话不一致")
+    if related is not None and related not in ctx.context_reads:
+        raise ValueError("只能关联本轮已经读取的会话")
+    if related is None and not evidence and (ctx.context_reads or ctx.context_summaries) and args.get('context_mode') != 'general':
+        raise ValueError("请明确通用交流 context_mode=general，或填写已读取的 related_session_id")
+    ctx.related_session_id = related
     ctx.draft_message = message
     ctx.draft_evidence = evidence
     return json.dumps({"ok": True}, ensure_ascii=False)
@@ -430,6 +458,10 @@ def _message_push(ctx: AgentTickContext, args: dict) -> str:
 # ── 工具分发 ──────────────────────────────────────────────────────────────
 
 async def dispatch(tool_name: str, args: dict, ctx: AgentTickContext, deps: ToolDeps) -> str:
+    if tool_name == "list_context_sessions":
+        import asyncio
+        cards = await asyncio.to_thread(deps.context_candidates_fn, str(args.get("query") or "")[:500]) if deps.context_candidates_fn else []
+        return json.dumps(cards, ensure_ascii=False)
     if tool_name == "get_alert_events":
         return await _get_alert_events(ctx, args)
 
@@ -452,7 +484,7 @@ async def dispatch(tool_name: str, args: dict, ctx: AgentTickContext, deps: Tool
         return await _web_search(ctx, args, web_search_tool=deps.web_search_tool)
 
     if tool_name == "get_recent_chat":
-        return await _get_recent_chat(ctx, args, recent_chat_fn=deps.recent_chat_fn)
+        return await _get_recent_chat(ctx, args, recent_chat_fn=deps.recent_chat_fn, context_read_fn=deps.context_read_fn)
 
     if tool_name == "message_push":
         return _message_push(ctx, args)

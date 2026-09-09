@@ -110,6 +110,8 @@ def build_drift_pipeline(
                 workspace_dir=workspace,
                 memory=scope.memory,
                 recent_chat_fn=recent_chat_fn,
+                context_candidates_fn=getattr(scope.sense, "context_candidates", None),
+                context_read_fn=getattr(scope.sense, "read_context", None),
                 shared_tools=scope.shared_tools,
                 event_bus=scope.event_bus,
             ),

@@ -255,11 +255,7 @@ class ProactiveLoop:
         raise RuntimeError(f"主动 Lifecycle 不存在: {self._cfg.lifecycle}")
 
     def _build_initial_slots(self, session_key: str) -> dict[str, Any]:
-        last_user_at = (
-            self._presence.get_last_user_at(session_key)
-            if self._presence is not None
-            else None
-        )
+        last_user_at = self._sense.last_user_at()
         return {
             "proactive:cfg": self._cfg,
             "proactive:session_key": session_key,
@@ -283,6 +279,7 @@ class ProactiveLoop:
             presence=self._presence,
             rng=self._rng,
             target_session_key_fn=self._target_session_key,
+            last_user_at_fn=self._sense.last_user_at,
             trace_fn=self._trace_proactive_rate_decision,
         )
         if self._runtime_snapshot_store is None:

@@ -40,7 +40,7 @@
     {
       "id": "proactive_feedback",
       "repository": "https://github.com/roxy-plugins/proactive_feedback",
-      "commit": "d5227249f5ad195ab7693ae8c72690ee7db32e28",
+      "commit": "2f2fe700247b157c1168774f69849aad7aaaca12",
       "plugin_class": "ProactiveFeedbackPlugin",
       "module": "mobile_panel.js",
       "stylesheet": "mobile_panel.css",

@@ -19,6 +19,8 @@ ProactiveFlowRuntime — 主动回复链路业务执行服务。
 
 from __future__ import annotations
 
+import asyncio
+
 import logging
 import random as _random_module
 import time
@@ -127,6 +129,7 @@ class ProactiveFlowDeps:
     drift_pipeline: DriftTurnPipeline | None
     schedule_fn: Callable[[float | None], int] | None = None
     event_bus: EventBus | None = None
+    last_proactive_at_fn: Callable[[], Any] | None = None
     tool_hooks: list[ToolHook] | None = None
 
 
@@ -180,6 +183,7 @@ class ProactiveFlowRuntime:
             last_user_at_fn=self._last_user_at_fn,
             passive_busy_fn=self._passive_busy_fn,
             rng=self._rng,
+            last_proactive_at_fn=deps.last_proactive_at_fn,
         )
         self._prompt_builder = ProactivePromptBuilder(
             cfg=self._cfg,
@@ -296,6 +300,9 @@ class ProactiveFlowRuntime:
             return
         with diagnostic_context(phase="gateway"):
             state.gateway = await self._fetch_gateway(state.ctx)
+            if self._tool_deps.context_candidates_fn is not None:
+                query = " ".join(str(item.get('title', '')) for item in state.gateway.content_meta)[:500]
+                state.ctx.context_summaries = await asyncio.to_thread(self._tool_deps.context_candidates_fn, query)
 
     def select_route(self, state: ProactiveRunState) -> None:
         if state.finished:
@@ -369,7 +376,16 @@ class ProactiveFlowRuntime:
         if state.finished:
             return
         if state.route == "drift":
-            state.decision = self._resolve_drift(state.ctx)
+            drift = self._resolve_drift(state.ctx)
+            if drift.result.outbound is not None:
+                checked = await self._resolver.resolve(state.ctx)
+                if checked.result.outbound is not None:
+                    checked.result.outbound = drift.result.outbound
+                    if checked.result.trace is not None and drift.result.trace is not None:
+                        checked.result.trace.extra.update(drift.result.trace.extra)
+                state.decision = checked
+            else:
+                state.decision = drift
             return
         with diagnostic_context(phase="resolve"):
             state.decision = await self._resolve_decide(state.ctx)
@@ -429,6 +445,9 @@ class ProactiveFlowRuntime:
                     session_key=self._session_key,
                     content=ctx.draft_message,
                     media=list(ctx.draft_media),
+                    origin_session_key=ctx.related_session_id,
+                    context_started_at=ctx.now_utc.isoformat(),
+                    context_references=[ref for card in ctx.context_summaries for ref in card["references"]] + [reference for refs in ctx.context_reads.values() for reference in refs],
                     activity_key=ctx.drift_activity_topic or None,
                     activity_title=ctx.drift_activity_title or "Roxy 的日常",
                 ),

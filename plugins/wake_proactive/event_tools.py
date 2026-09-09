@@ -12,7 +12,7 @@ EVENT_TOOL_SCHEMAS: list[dict[str, Any]] = [
             "description": "发送根据本轮单条 alert 或 context 写成的自然主动消息。",
             "parameters": {
                 "type": "object",
-                "properties": {"message": {"type": "string"}},
+                "properties": {"message": {"type": "string"}, "related_session_id": {"type": "string", "description": "仅明确延续所提供会话时填写，通用提醒省略"}},
                 "required": ["message"],
                 "additionalProperties": False,
             },

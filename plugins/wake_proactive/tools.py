@@ -107,6 +107,7 @@ TOOL_SCHEMAS = [
         {
             "type": "object",
             "properties": {
+                "related_session_id": {"type": "string", "description": "明确针对已提供详细上下文的会话时填写，通用分享省略"},
                 "message": {
                     "type": "string",
                     "description": "基于已验证正文写成的一条自然主动消息，不使用固定资讯模板。",
@@ -453,6 +454,10 @@ def _share_content(ctx: WakeContext, args: dict[str, Any], deps: ToolDeps) -> st
         closing=str(args.get("closing") or ""),
         events=ctx.content_events,
     )
+    related = args.get("related_session_id")
+    if related is not None and related not in ctx.context_reads:
+        raise ValueError("Only a verified context session may be selected")
+    ctx.related_session_id = related
     ctx.final_message = rendered.message
     ctx.cited_item_ids = rendered.evidence
     ctx.display_event_map = rendered.display_event_map
