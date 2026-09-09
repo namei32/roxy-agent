@@ -7,7 +7,7 @@ ProactiveLoop/AgentTick 在发送前调用 is_busy(session_key) 检查目标会�
 
 设计约束：
 - 只在单一 asyncio 事件循环中使用，enter/exit 之间无 await，操作是原子的。
-- session_key 作用域：A 会话 busy 不影响 B 会话的 proactive 判断。
+- 此层保持 session_key 级计数；主动流程在授权用户范围内聚合信号，不在此层混合不同用户。
 """
 
 from __future__ import annotations

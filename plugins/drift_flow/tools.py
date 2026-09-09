@@ -40,9 +40,38 @@ class DriftToolDeps:
     workspace_dir: Path | None = None
     builtin_skills_dir: Path | None = None
     memory: Any = None
+    context_candidates_fn: Any = None
+    context_read_fn: Any = None
     recent_chat_fn: Any = None
     shared_tools: ToolRegistry | None = None
     event_bus: Any = None
+
+
+class DriftContextTool(Tool):
+    def __init__(self, name: str, ctx: AgentTickContext, deps: DriftToolDeps) -> None:
+        from plugins.proactive_flow.tools import TOOL_SCHEMAS
+        self._name = name
+        self._schema = next(s['function'] for s in TOOL_SCHEMAS if s['function']['name'] == name)
+        self._ctx = ctx
+        self._deps = deps
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def description(self) -> str:
+        return self._schema['description']
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return self._schema['parameters']
+
+    async def execute(self, **kwargs: Any) -> str:
+        from plugins.proactive_flow.tools import ToolDeps, dispatch
+        return await dispatch(self._name, kwargs, self._ctx, ToolDeps(
+            context_candidates_fn=self._deps.context_candidates_fn, context_read_fn=self._deps.context_read_fn,
+            recent_chat_fn=self._deps.recent_chat_fn))
 
 
 class SendMessageTool(Tool):
@@ -68,6 +97,7 @@ class SendMessageTool(Tool):
         return {
             "type": "object",
             "properties": {
+                "related_session_id": {"type": "string", "description": "明确延续本轮读过的会话时填写；普通活动成果省略，使用活动关联会话"},
                 "message": {"type": "string", "description": "要发送的消息内容"},
                 "image": {"type": "string", "description": "要发送的一张图片本地路径或 URL"},
                 "media": {
@@ -94,6 +124,7 @@ class SendMessageTool(Tool):
         media: list[str] | str | None = None,
         target_channel: str = "",
         target_chat_id: str = "",
+        related_session_id: str | None = None,
     ) -> str:
         _ = (target_channel, target_chat_id)
         text = normalize_outbound_text(message or "").strip()
@@ -107,6 +138,9 @@ class SendMessageTool(Tool):
         if not text and not media_paths:
             logger.info("[drift_tools] message_push rejected: empty message and media")
             return json.dumps({"error": "message or media is required"}, ensure_ascii=False)
+        if related_session_id is not None and related_session_id not in self._ctx.context_reads:
+            raise ValueError("只能关联本轮已读取的会话")
+        self._ctx.related_session_id = related_session_id
         self._ctx.draft_message = text
         self._ctx.draft_media = media_paths
         self._ctx.drift_message_staged = True
@@ -963,6 +997,9 @@ def build_drift_tool_registry(
     )
     drift_dir = deps.drift_dir
     resolver = DriftPathResolver(drift_dir, deps.store)
+    if deps.context_candidates_fn is not None and deps.context_read_fn is not None:
+        for name in ("list_context_sessions", "get_recent_chat"):
+            tools.register(DriftContextTool(name, ctx, deps), risk="read-only")
     tools.register(SelectSkillTool(ctx, deps.store), risk="write")
     tools.register(IdleDriftTool(ctx, deps.store), risk="write")
     tools.register(LeaveArtifactTool(ctx, deps.store.activities), risk="write")

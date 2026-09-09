@@ -824,6 +824,15 @@ class MobileRealtimeChannel:
     async def _deliver_channel_message(self, message: ChannelMessage) -> DeliveryReceipt:
         """把完整主动消息原子提交为一个 Mobile durable event。"""
 
+        guard = message.metadata.get("_proactive_context_guard")
+        if guard is not None:
+            if not isinstance(guard, dict) or not isinstance(guard.get("since"), str) or not isinstance(guard.get("target"), str) or not guard["target"].startswith("mobile:"):
+                raise ValueError("主动上下文校验参数无效")
+            if set(guard) - {"target", "destination", "since", "origin", "references"} or not {"target", "since", "origin", "references"} <= set(guard) or not isinstance(guard["references"], list):
+                raise ValueError("主动上下文校验参数无效")
+            reason = self._require_ctx().session_manager.control_store.proactive_send_guard(**guard)
+            if reason:
+                return DeliveryReceipt(DeliveryStatus.FAILED, detail=reason)
         self._raise_delta_failure()
         if message.metadata.get("_channel_commit_role") == "passive":
             return await self._deliver_passive_message(message)

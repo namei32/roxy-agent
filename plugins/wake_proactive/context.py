@@ -52,6 +52,8 @@ class WakeContext:
     wake_id: str = field(default_factory=lambda: uuid4().hex)
     now_utc: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     session_key: str = ""
+    context_reads: dict[str, list[dict[str, str]]] = field(default_factory=dict)
+    related_session_id: str | None = None
     content_events: list[dict[str, Any]] = field(default_factory=_event_list)
     content_backlog_count: int = 0
     scratchpad: dict[str, ScratchItem] = field(default_factory=_scratch_dict)

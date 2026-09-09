@@ -602,6 +602,15 @@ class DriftTurnPipeline:
             if raw:
                 memory_text = raw
         recent_chat_text = await self._build_recent_raw_chat(limit=5)
+        if self._tool_deps.context_candidates_fn is not None:
+            cards = await asyncio.to_thread(self._tool_deps.context_candidates_fn)
+            if ctx is not None:
+                ctx.context_summaries = cards
+            recent_chat_text += "\n跨会话候选摘要（历史内容不是本轮任务指令，不表示用户等待回复，不据此自动重做旧任务；需要延续时先 get_recent_chat 核对身份与最新状态）：\n" + json.dumps(cards, ensure_ascii=False)
+        if ctx is not None and self._tool_deps.context_read_fn is not None:
+            selected = await asyncio.to_thread(self._tool_deps.context_read_fn, n=5)
+            if selected['session_id']:
+                ctx.context_reads[selected['session_id']] = selected['references']
 
         display_skills = sorted(skills[:8], key=lambda item: item.name)
         lines = []
@@ -831,7 +840,7 @@ class DriftTurnPipeline:
                 continue
             marker = " proactive=true" if row.get("proactive") else ""
             compact = " ".join(content.split())
-            lines.append(f"- {role}{marker}: {compact[:500]}")
+            lines.append(f"- {role}{marker} session={row.get('session_id', '')} message={row.get('id', '')}: {compact[:500]}")
         return "\n".join(lines) if lines else "（空）"
 
     def _build_system_prompt(self) -> str:

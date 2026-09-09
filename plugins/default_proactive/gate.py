@@ -30,6 +30,7 @@ class ProactiveGateChain:
         last_user_at_fn: Callable[[], datetime | None],
         passive_busy_fn: Callable[[str], bool] | None,
         rng: Any,
+        last_proactive_at_fn: Callable[[], datetime | None] | None = None,
     ) -> None:
         self._cfg = cfg
         self._session_key = session_key
@@ -38,6 +39,7 @@ class ProactiveGateChain:
         self._last_user_at_fn = last_user_at_fn
         self._passive_busy_fn = passive_busy_fn
         self._rng = rng
+        self._last_proactive_at_fn = last_proactive_at_fn
 
     def check(self, ctx: AgentTickContext) -> GateResult:
         if not str(self._cfg.default_chat_id or "").strip():
@@ -47,6 +49,10 @@ class ProactiveGateChain:
         if self._passive_busy_fn and self._passive_busy_fn(self._session_key):
             logger.debug("[proactive_v2] gate: passive_busy -> blocked")
             return GateResult(blocked=True, reason="busy", base_score=None)
+
+        latest = self._last_proactive_at_fn() if self._last_proactive_at_fn is not None else None
+        if latest is not None and (ctx.now_utc - latest).total_seconds() < self._cfg.agent_tick_delivery_cooldown_hours * 3600:
+            return GateResult(blocked=True, reason="cooldown", base_score=None)
 
         if self._state_store.count_deliveries_in_window(
             self._session_key,

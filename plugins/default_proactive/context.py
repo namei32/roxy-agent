@@ -12,6 +12,9 @@ class AgentTickContext:
     now_utc: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     session_key: str = ""
     context_as_fallback_open: bool = False
+    context_summaries: list[dict] = field(default_factory=list)
+    context_reads: dict[str, list[dict[str, str]]] = field(default_factory=dict)
+    related_session_id: str | None = None
 
     # Gateway 预取结果（_run_loop 启动前由 DataGateway 填充）
     fetched_alerts: list[dict] = field(default_factory=list)    # 含 ack_server 字段

@@ -13,6 +13,8 @@ class TurnOutbound:
     origin_session_key: str | None = None
     activity_key: str | None = None
     activity_title: str = "Roxy 的日常"
+    context_started_at: str | None = None
+    context_references: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass

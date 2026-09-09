@@ -1059,6 +1059,83 @@ class SessionStore:
             ).fetchone()
         return row is not None
 
+    def proactive_context_view(self, *, channel: str, target: str, now: str, limit: int = 32) -> dict[str, Any]:
+        from session.proactive_context import read_context
+        with self._lock:
+            self._conn.execute("BEGIN")
+            try:
+                result = read_context(self._conn, channel=channel, target=target, now=now, limit=limit)
+                self._conn.commit()
+                return result
+            except BaseException:
+                self._conn.rollback()
+                raise
+
+    def proactive_context_messages(self, *, session_ids: list[str], now: str, limit: int,
+                                   proactive_only: bool = False) -> list[dict[str, Any]]:
+        if not session_ids:
+            return []
+        if len(session_ids) > 512 or not 1 <= limit <= 64:
+            raise ValueError("Proactive history bounds exceeded")
+        extra = "AND json_extract(extra,'$.proactive')=1 AND role='assistant'" if proactive_only else ""
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT id,session_key,seq,role,content,tool_chain,extra,ts FROM messages WHERE session_key IN ({','.join('?' for _ in session_ids)}) "
+                f"AND julianday(ts)<=julianday(?) {extra} ORDER BY julianday(ts) DESC,session_key,seq DESC LIMIT ?",
+                (*session_ids, now, limit),
+            ).fetchall()
+        return [self._row_to_message(row) for row in reversed(rows)]
+
+    def proactive_recent_messages(self, *, channel: str, target: str, now: str, limit: int = 5) -> list[dict[str, Any]]:
+        if not 1 <= limit <= 64:
+            raise ValueError("Proactive history bounds exceeded")
+        scope, args = ("s.key LIKE ?", ("mobile:%",)) if channel == "mobile" else ("s.key=?", (target,))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT m.id,m.session_key,m.seq,m.role,m.content,m.tool_chain,m.extra,m.ts,s.metadata AS context_metadata FROM messages m JOIN sessions s ON s.key=m.session_key "
+                f"WHERE {scope} AND m.role='assistant' AND json_extract(m.extra,'$.proactive')=1 AND julianday(m.ts)<=julianday(?) "
+                "AND COALESCE(json_extract(s.metadata,'$.proactive_context'),1) != 0 "
+                "AND COALESCE(json_extract(s.metadata,'$.private'),0) != 1 AND COALESCE(json_extract(s.metadata,'$.archived'),0) != 1 "
+                "AND COALESCE(json_extract(s.metadata,'$.archived_at'),'')='' AND COALESCE(json_extract(s.metadata,'$.skip_post_memory'),0) != 1 "
+                "ORDER BY julianday(m.ts) DESC,m.session_key,m.seq DESC LIMIT ?", (*args, now, limit),
+            ).fetchall()
+        from session.proactive_context import context_allowed
+        return [self._row_to_message(row) for row in reversed(rows) if context_allowed(json.loads(row['context_metadata'] or '{}'))]
+
+    def proactive_send_guard(self, *, target: str, since: str, origin: str | None = None,
+                             references: list[dict[str, str]] | None = None, destination: str | None = None) -> str | None:
+        from session.proactive_context import content_digest, context_allowed
+        def allowed(key: str) -> bool:
+            meta = self.get_session_meta(key)
+            return bool(meta and context_allowed(meta['metadata']) and (key.startswith('mobile:') if target.startswith('mobile:') else key == target))
+        view = self.proactive_context_view(channel=target.split(':', 1)[0], target=target, now=datetime.now(UTC).isoformat())
+        if view['busy']:
+            return "user_busy"
+        if view['last_user_at'] and datetime.fromisoformat(view['last_user_at']) > datetime.fromisoformat(since):
+            return "user_context_changed"
+        if view['last_proactive_at'] and datetime.fromisoformat(view['last_proactive_at']) > datetime.fromisoformat(since):
+            return "recent_delivery_changed"
+        if destination is not None and not allowed(destination):
+            return "destination_unavailable"
+        if origin and not allowed(origin):
+            return "origin_unavailable"
+        for reference in references or []:
+            message = self.get_message(reference['message_id'])
+            prefix = int(reference.get('prefix_chars', '0'))
+            if prefix < 0 or prefix > 4000:
+                raise ValueError("Invalid context reference bound")
+            content = str(message['content']) if message else ''
+            if message is None or message['session_key'] != reference['session_id'] or content_digest(content[:prefix] if prefix else content) != reference['sha256']:
+                return "source_message_changed"
+            if 'turn_id' in reference:
+                latest = self.list_turns(message['session_key'], limit=1)
+                turn = latest[0] if latest else None
+                if (turn.id if turn else '') != reference['turn_id'] or (turn.status.value if turn else '') != reference['turn_status']:
+                    return "source_task_changed"
+            if not allowed(message['session_key']):
+                return "origin_unavailable"
+        return None
+
     def resolve_proactive_session(self, *, owner_session_key: str, route_key: str, title: str) -> str:
         """Atomically bind a mobile notification topic to a durable conversation."""
         if not owner_session_key.startswith("mobile:") or not route_key or len(route_key) > 256:

@@ -1680,7 +1680,7 @@ async def test_agent_tick_drift_emits_delivery_result(
             last_user_at_fn=lambda: None,
             passive_busy_fn=None,
             turn_orchestrator=orchestrator,
-            deduper=AsyncMock(),
+            deduper=SimpleNamespace(is_duplicate=AsyncMock(return_value=(False, ""))),
             tool_deps=ToolDeps(recent_chat_fn=AsyncMock(return_value=[])),
             gateway_deps=GatewayDeps(
                 alert_fn=AsyncMock(return_value=[]),
