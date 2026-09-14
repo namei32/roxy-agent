@@ -90,8 +90,9 @@ Chat；没有模型配置时，Chat 会保留完整界面并引导进入“模�
    └── 保存配置 → 同一页面自动恢复对话
 ```
 
-API Key 会直接写入本机 `config.toml`，文件权限为 `0600`；设置 API 和页面不会回显
-已经保存的密钥。切换 Provider 时，旧 runtime 会保留，切回来无需重新输入密钥。
+模型连接和凭据（包括 API Key）保存在所选 workspace 的 `model-registry.sqlite3` 中，
+数据库文件权限为 `0600`；设置 API 和页面不会回显已保存的密钥。切换 Provider 时，
+已保存的连接和凭据会保留，切回来无需重新输入密钥。
 
 OpenCode Go 会动态读取订阅当前提供的模型，隐藏已知走 Messages API 的型号，其余型号
 默认按 Chat Completions 验证。因此新增 Chat Completions 型号通常不需要更新 Roxy。
